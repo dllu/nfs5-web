@@ -41,6 +41,10 @@ Current implementation:
   Application registry keys retain the game's install-name fallback, typed
   values, access rights and browser-local persistence. Process environment
   snapshots support UTF-16 and CP437/OEM byte blocks.
+- A WebGPU backend batches geometry and effect uploads, preserving Thrash
+  screen-space projection, perspective UVs, vertex colors, depth, blending,
+  alpha tests, clipping, fog and texture-update ordering. It is tested with
+  synthetic geometry and **is not connected to the game driver yet**.
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
 routines, plus 68 Windows-service, 54 synchronization, 24 thread, 27 timer,
@@ -49,8 +53,10 @@ Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
 file/deletion and registry persistence across fresh pages and Wasm instances. A known PCM
 signal reaches the running browser audio graph with its expected amplitude.
+27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
+an OffscreenCanvas rendered in a dedicated Worker. These do not measure game FPS.
 
-Windows/message handling, rendering and gameplay remain unimplemented; the
+The Thrash driver bridge, window/message handling and gameplay remain unimplemented; the
 game's sound playback and save/load flows are untested. An abrupt close can lose
 changes since the last checkpoint.
 The 4K/120 Hz target is unmeasured. The current diagnostic
@@ -77,6 +83,9 @@ Open <http://127.0.0.1:8000> and select **Run original startup**. The page repor
 the next unsupported dependency and a trace of executed original functions.
 `npm run test:browser` tests installed Chrome against that server and writes
 its report and screenshot to `build/`.
+`npm run test:renderer` opens normal Chrome for GPU pixel checks and writes
+`build/webgpu-renderer.png` and its JSON report. Headless Vulkan adapter
+initialization is unreliable on this Chrome build; the normal browser works.
 
 Other static hosts must send `Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp`; `dist/_headers` provides this

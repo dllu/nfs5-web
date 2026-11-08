@@ -10,6 +10,9 @@ the game translation from the supplied executable instead of using upstream's
 generated USA 3.5 sources.
 PCM sample/gain conventions are adapted from pcrecomp's
 `runtime/win32hle/dsound.c`, copyright 2026 sp00nz, under its retained MIT license.
+The WebGPU backend's projection, fog, vertex layout and blend conventions derive
+from nfspu-recomp's `src/renderer/thrash.*.glsl` and `nfspu_gpu.c`, copyright 2026
+Sergei Biriukov, under the retained MIT license.
 
 Generated C, original binaries, game assets, and compiled WebAssembly stay in
 ignored local directories. Electronic Arts' game code and assets retain their
