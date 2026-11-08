@@ -5,7 +5,7 @@
   "scripts": {
     "build": "python3 tools/build.py",
     "serve": "python3 -m http.server 8000 --bind 127.0.0.1 --directory dist",
-    "test": "node tests/startup.mjs && node tests/differential.mjs && node tests/services.mjs",
+    "test": "node tests/startup.mjs && node tests/differential.mjs && node tests/services.mjs && node tests/synchronization.mjs",
     "test:browser": "node tests/browser.mjs"
   },
   "devDependencies": {

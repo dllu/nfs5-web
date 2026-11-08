@@ -22,7 +22,7 @@ try {
   const result = await page.evaluate(() => window.nfs5Result);
   assert.equal(result.status, 1);
   assert(result.count >= 2099);
-  assert(result.trace.includes(0x004b6710), 'Original WinMain must execute in Chrome');
+  assert(result.winMainEntered, 'Original WinMain must execute in Chrome');
   assert(result.error.length > 0);
   assert.deepEqual(errors, []);
   await page.screenshot({ path: 'build/chrome-startup.png', fullPage: true });

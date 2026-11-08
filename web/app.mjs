@@ -18,7 +18,7 @@ button.addEventListener('click', async () => {
     status.textContent = 'Executing original startup code…';
     // Let the loading state paint before a synchronous Wasm call.
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const result = runtime.run();
+    const result = { ...runtime.run(), winMainEntered: runtime.seen(0x004b6710) };
     window.nfs5Result = result;
     status.textContent = result.status ? 'Execution stopped at a porting dependency' : 'Startup function returned';
     write(result.error || 'Returned successfully');

@@ -5,11 +5,11 @@ import { loadRuntime } from '../dist/runtime.mjs';
 
 globalThis.crypto ??= webcrypto;
 const runtime = await loadRuntime({ read: async path => new Response(await readFile(new URL('../dist/' + path, import.meta.url))) });
-const result = runtime.run();
+const result = { ...runtime.run(), winMainEntered: runtime.seen(0x004b6710) };
 await writeFile(new URL('../build/startup.json', import.meta.url), JSON.stringify(result, null, 2) + '\n');
 assert(result.count >= 2099, 'Original startup must reach game initialization after the CRT constructors');
 assert.equal(result.first, runtime.manifest.entry);
-assert(result.trace.includes(0x004b6710), 'Original WinMain must execute');
+assert(result.winMainEntered, 'Original WinMain must execute');
 assert.equal(result.status, 1, 'Current startup must stop at an explicit missing dependency');
 assert(result.error.length > 0, 'Stopped execution must explain the missing dependency');
 console.log(`${result.count} original function entries; ${result.error}`);

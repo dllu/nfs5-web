@@ -33,6 +33,9 @@ static char error[512];
 static uint32_t last_pc, first_pc, calls, heap_next, last_error, next_tls, exception_filter;
 static double deadline;
 static uint32_t registers[8];
+static uint32_t import_info[10];
+static uint8_t *entered;
+static uint32_t entered_low, entered_span;
 typedef struct { uint32_t address, size, span, kind, live; } guest_block;
 static guest_block blocks[4096];
 static uint32_t block_count;
@@ -52,6 +55,8 @@ void web_unsupported(uint32_t pc, const char *instruction) {
 
 void recomp_trace_enter(uint32_t va) {
     if (!calls) first_pc = va;
+    if (va >= entered_low && va - entered_low < entered_span)
+        entered[(va - entered_low) >> 3] |= 1u << ((va - entered_low) & 7);
     g_enter_trace[g_enter_idx++ & (TRACE_SIZE - 1)] = va;
     if (++calls > 2000000 || emscripten_get_now() > deadline)
         fail(va, "Execution budget reached at %08X", va);
@@ -153,11 +158,17 @@ static uint32_t module_handle(const char *name) {
     return 0;
 }
 
+#include "win32_sync.h"
+
 void web_import(uint32_t index) {
+    import_info[0] = index; import_info[1] = g_cur_func;
+    for (unsigned i = 0; i < 8; i++) import_info[i + 2] =
+        g_esp < GUEST_SIZE - 4 * (i + 2) ? argument(i) : 0;
     const char *full = web_import_names[index];
     const char *name = strchr(full, '!') + 1;
     if (!strncmp(full, "NFS5.dll!", 9))
         fail(g_cur_func, "Unimplemented Windows import: %s (caller %08X)", full, g_cur_func);
+    if (sync_import(name)) return;
     if (!strcmp(name, "GetVersion")) { result(0x80000104u, 0); return; }
     if (!strcmp(name, "GetLastError")) { result(last_error, 0); return; }
     if (!strcmp(name, "SetLastError")) { last_error = argument(0); result(0, 1); return; }
@@ -190,6 +201,11 @@ void web_import(uint32_t index) {
         last_error = 127; result(0, 2); return;
     }
     if (!strcmp(name, "GetCurrentProcess")) { result(0xFFFFFFFF, 0); return; }
+    if (!strcmp(name, "GetDriveTypeA")) {
+        const char *path = argument(0) ? (const char *)ADDR(argument(0)) : "C:\\";
+        char drive = path[0] >= 'a' && path[0] <= 'z' ? path[0] - 32 : path[0];
+        result(drive == 'C' ? 3 : drive == 'D' ? 5 : 1, 1); return;
+    }
     if (!strcmp(name, "GetSystemInfo")) {
         uint32_t info = argument(0);
         memset((void *)ADDR(info), 0, 36);
@@ -202,6 +218,13 @@ void web_import(uint32_t index) {
     }
     if (!strcmp(name, "GetCurrentProcessId") || !strcmp(name, "GetCurrentThreadId")) { result(1, 0); return; }
     if (!strcmp(name, "GetTickCount") || !strcmp(name, "timeGetTime")) { result((uint32_t)emscripten_get_now(), 0); return; }
+    if (!strcmp(full, "WINMM.dll!timeGetDevCaps")) {
+        if (!argument(0) || argument(1) < 8) { result(97, 2); return; }
+        MEM32(argument(0)) = 1; MEM32(argument(0) + 4) = 1000; result(0, 2); return;
+    }
+    if (!strcmp(full, "WINMM.dll!timeBeginPeriod") || !strcmp(full, "WINMM.dll!timeEndPeriod")) {
+        result(argument(0) >= 1 && argument(0) <= 1000 ? 0 : 97, 1); return;
+    }
     if (!strcmp(name, "QueryPerformanceFrequency")) { MEM64(argument(0)) = 1000000; result(1, 1); return; }
     if (!strcmp(name, "QueryPerformanceCounter")) { MEM64(argument(0)) = (uint64_t)(emscripten_get_now() * 1000); result(1, 1); return; }
     if (!strcmp(name, "GetProcessHeap")) { result(1, 0); return; }
@@ -364,6 +387,11 @@ uint32_t web_init(void) {
     if (!g_mem_base) g_mem_base = (ptrdiff_t)calloc(1, GUEST_SIZE);
     else memset((void *)g_mem_base, 0, GUEST_SIZE);
     if (!g_mem_base) return 0;
+    entered_low = recomp_dispatch_table[0].address;
+    entered_span = recomp_dispatch_table[recomp_dispatch_count - 1].address - entered_low + 1;
+    if (!entered) entered = calloc(1, (entered_span + 7) / 8);
+    else memset(entered, 0, (entered_span + 7) / 8);
+    if (!entered) return 0;
     g_eax = g_ecx = g_edx = g_ebx = g_esi = g_edi = g_ebp = 0;
     g_esp = STACK_TOP;
     g_fs_base = 0x8000;
@@ -377,10 +405,13 @@ uint32_t web_init(void) {
     block_count = 0; memset(blocks, 0, sizeof blocks);
     g_enter_idx = calls = g_icall_count = g_icall_trace_idx = 0;
     next_tls = last_error = g_backedges = g_cur_func = exception_filter = 0;
+    memset(sync_objects, 0, sizeof sync_objects); memset(sync_handles, 0, sizeof sync_handles);
+    sync_thread_priority = 0;
     g_flag_k = g_flag_a = g_flag_b = g_flag_cf = 0;
     memset(g_st, 0, sizeof g_st);
     g_fp_top = 0; g_fpu_cw = 0x37F;
     error[0] = 0; last_pc = first_pc = 0;
+    memset(import_info, 0, sizeof import_info); import_info[0] = 0xFFFFFFFF;
     recomp_yield_hook = check_loop;
     return (uint32_t)g_mem_base;
 }
@@ -414,6 +445,11 @@ uint32_t web_trace_count(void) { return g_enter_idx; }
 const char *web_error(void) { return error; }
 uint32_t web_last_pc(void) { return last_pc; }
 uint32_t web_first_pc(void) { return first_pc; }
+int web_has_entered(uint32_t va) {
+    return va >= entered_low && va - entered_low < entered_span &&
+        (entered[(va - entered_low) >> 3] & (1u << ((va - entered_low) & 7))) != 0;
+}
+uint32_t *web_last_import(void) { return import_info; }
 uint32_t web_heap(void) { return heap_next; }
 uint32_t web_memory_size(void) { return GUEST_SIZE; }
 void web_set_register(uint32_t index, uint32_t value) {

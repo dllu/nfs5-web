@@ -13,12 +13,17 @@ Current implementation:
   services, dynamic API lookup, and a tracked heap in a 256 MiB guest arena.
   Recovery includes overlapping instruction ranges;
   these counts do not establish complete code coverage.
-- Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node after
-  2,099 function entries, stopping at `KERNEL32!CreateMutexA` in game initialization.
+- Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node,
+  recording 5,944 function entries before `KERNEL32!CreateThread` in timer setup.
+- Mutex/event/semaphore handles, recursive ownership, named references, and
+  nonblocking waits are implemented for the serialized guest CPU. Blocking
+  synchronization and guest worker execution remain to be implemented.
 - 68 independent original-x86/Unicorn versus Wasm comparisons pass across four
   routines: two range-copy loops, an object initializer, and an x87 dot product.
 - 31 Windows-service checks cover text conversion, buffer errors, dynamic
   imports, the game's 128 MiB allocation/release probe, and realloc preservation.
+- 54 synchronization checks cover ownership, event reset, atomic wait-all,
+  semaphore limits, duplicate handles and stale-handle rejection.
 
 Rendering, asset access, audio, keyboard gameplay, and persistent save games
 remain unimplemented. The 4K/120 Hz target is unmeasured. The current diagnostic
