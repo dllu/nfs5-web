@@ -41,6 +41,7 @@ typedef struct { uint32_t address, size, span, kind, live; } guest_block;
 static guest_block blocks[4096];
 static uint32_t block_count;
 static void thread_exit_code_import(void);
+static recomp_func_t dinput_lookup(uint32_t address);
 
 #include "win32_machine.h"
 
@@ -90,7 +91,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
 recomp_func_t recomp_lookup_manual(uint32_t va) {
     if (va == 0xF1000000) return thread_exit_code_import;
     if (va == 0xF1000010) return timer_dispatch;
-    return NULL;
+    return dinput_lookup(va);
 }
 recomp_func_t recomp_lookup_import(uint32_t va) {
     recomp_func_t fn = web_import_lookup(va);
@@ -174,6 +175,7 @@ static uint32_t module_handle(const char *name) {
 #include "win32_sync.h"
 #include "win32_threads.h"
 #include "win32_timers.h"
+#include "win32_dinput.h"
 
 static void thread_exit_code_import(void) {
     sync_object *object = sync_get(argument(0));
@@ -196,10 +198,34 @@ void web_import(uint32_t index) {
         fail(g_cur_func, "Unimplemented Windows import: %s (caller %08X)", full, g_cur_func);
     if (sync_import(name)) return;
     if (timer_import(full)) return;
+    if (dinput_import(full)) return;
     /* There is no network subsystem in this single-player host. The original
      * game handles this documented startup failure and omits its TCP provider. */
     if (!strcmp(full, "WSOCK32.dll!WSAStartup")) { result(10091, 2); return; }
     if (!strcmp(full, "USER32.dll!GetWindowLongA")) { last_error = 1400; result(0, 2); return; }
+    if (!strcmp(full, "USER32.dll!GetCursorPos")) {
+        uint32_t point = argument(0);
+        if (!point) { last_error = 87; result(0, 1); return; }
+        MEM32(point) = (uint32_t)di_cursor[0]; MEM32(point + 4) = (uint32_t)di_cursor[1]; result(1, 1); return;
+    }
+    if (!strcmp(full, "USER32.dll!SetCursorPos")) {
+        di_cursor[0] = (int32_t)argument(0); di_cursor[1] = (int32_t)argument(1); result(1, 2); return;
+    }
+    if (!strcmp(full, "USER32.dll!ScreenToClient") || !strcmp(full, "USER32.dll!ClientToScreen")) {
+        last_error = 1400; result(0, 2); return;
+    }
+    if (!strcmp(full, "USER32.dll!GetKeyboardType")) {
+        uint32_t type = argument(0); result(type == 0 ? 4 : type == 2 ? 12 : 0, 1); return;
+    }
+    if (!strcmp(full, "USER32.dll!GetKeyState") || !strcmp(full, "USER32.dll!GetAsyncKeyState")) {
+        result(di_key_state(argument(0), !strcmp(name, "GetAsyncKeyState")), 1); return;
+    }
+    if (!strcmp(full, "USER32.dll!CharUpperA")) {
+        uint32_t value = argument(0);
+        if (!(value >> 16)) { result(cp1252_case((uint8_t)value, 1), 1); return; }
+        for (uint32_t p = value; MEM8(p); p++) MEM8(p) = cp1252_case(MEM8(p), 1);
+        result(value, 1); return;
+    }
     if (!strcmp(name, "GetVersion")) { result(0x80000104u, 0); return; }
     if (!strcmp(name, "GetLastError")) { result(last_error, 0); return; }
     if (!strcmp(name, "SetLastError")) { last_error = argument(0); result(0, 1); return; }
@@ -261,6 +287,7 @@ void web_import(uint32_t index) {
         if (!argument(0) || argument(1) < 8) { result(97, 2); return; }
         MEM32(argument(0)) = 1; MEM32(argument(0) + 4) = 1000; result(0, 2); return;
     }
+    if (!strcmp(full, "WINMM.dll!joyGetNumDevs")) { result(0, 0); return; }
     if (!strcmp(full, "WINMM.dll!timeBeginPeriod") || !strcmp(full, "WINMM.dll!timeEndPeriod")) {
         result(argument(0) >= 1 && argument(0) <= 1000 ? 0 : 97, 1); return;
     }
@@ -448,6 +475,9 @@ uint32_t web_init(void) {
     memset(guest_threads, 0, sizeof guest_threads);
     memset(critical_sections, 0, sizeof critical_sections);
     memset(timers, 0, sizeof timers); timer_worker = 0; next_timer_id = 1;
+    memset(di_devices, 0, sizeof di_devices); di_root_table = di_device_table = di_sequence = 0;
+    memset(di_keys, 0, sizeof di_keys); memset(di_pressed, 0, sizeof di_pressed); memset(di_toggled, 0, sizeof di_toggled);
+    memset(di_mouse, 0, sizeof di_mouse); memset(di_cursor, 0, sizeof di_cursor); di_buttons = 0; di_focused = 1;
     timer_created = timer_fired = timer_callbacks = timer_killed = 0;
     guest_threads[0].used = 1; guest_threads[0].id = 1; guest_threads[0].object = 0xFFFFFFFF; current_thread = 0;
     next_thread_id = 2; cancel_workers = fatal_pending = 0; error_thread = 0;
@@ -547,6 +577,42 @@ void web_set_register(uint32_t index, uint32_t value) {
     if (index < 8) cpu.r[index] = value;
 }
 double web_float_result(void) { return cpu.st[0]; }
+void web_input_key(uint32_t scan, uint32_t down) {
+    if (scan >= 256) return;
+    machine_acquire();
+    di_key(scan, down);
+    machine_release();
+}
+void web_input_mouse(int32_t dx, int32_t dy, int32_t dz, uint32_t buttons) {
+    machine_acquire();
+    const int32_t movement[] = {dx, dy, dz};
+    for (unsigned axis = 0; axis < 3; axis++) di_mouse[axis] += movement[axis];
+    for (unsigned i = 0; i < 16; i++) if (di_devices[i].references && di_devices[i].kind == 2) {
+        for (unsigned axis = 0; axis < 3; axis++) if (movement[axis]) di_enqueue(&di_devices[i], axis * 4, (uint32_t)movement[axis]);
+        for (unsigned button = 0; button < 4; button++) if ((di_buttons ^ buttons) & (1u << button)) di_enqueue(&di_devices[i], 12 + button, buttons & (1u << button) ? 0x80 : 0);
+    }
+    di_buttons = buttons; machine_release();
+}
+void web_input_focus(uint32_t focused) {
+    machine_acquire(); di_focused = focused != 0;
+    if (!focused) {
+        for (unsigned i = 0; i < 256; i++) if (di_keys[i]) di_key(i, 0);
+        for (unsigned i = 0; i < 16; i++) if (di_devices[i].references && di_devices[i].kind == 2)
+            for (unsigned button = 0; button < 4; button++) if (di_buttons & (1u << button)) di_enqueue(&di_devices[i], 12 + button, 0);
+        di_buttons = 0;
+        for (unsigned i = 0; i < 16; i++) if (di_devices[i].references && (di_devices[i].cooperative & 4)) { di_devices[i].acquired = 0; di_devices[i].lost = 1; }
+    }
+    machine_release();
+}
+void web_input_cursor(int32_t x, int32_t y) {
+    machine_acquire(); di_cursor[0] = x; di_cursor[1] = y; machine_release();
+}
+uint32_t *web_input_stats(void) {
+    static uint32_t stats[4];
+    machine_acquire(); memset(stats, 0, sizeof stats);
+    for (unsigned i = 0; i < 16; i++) if (di_devices[i].references) { stats[di_devices[i].kind]++; if (di_devices[i].acquired) stats[3]++; }
+    machine_release(); return stats;
+}
 void web_shutdown(void) { stop_guest_workers(); }
 uint32_t *web_timer_stats(void) {
     static uint32_t stats[5];

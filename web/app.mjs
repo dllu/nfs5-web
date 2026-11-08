@@ -1,3 +1,5 @@
+import { attachInput } from './input.mjs';
+
 const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 
 const status = document.querySelector('#status');
@@ -11,6 +13,7 @@ button.addEventListener('click', async () => {
   status.textContent = 'Loading translated engine…';
   delete window.nfs5Result;
   let worker;
+  let detachInput;
   try {
     if (!crossOriginIsolated) throw new Error('This build requires cross-origin isolation. Use npm run serve or serve dist with its _headers configuration.');
     worker = new Worker(new URL('./runner.mjs', import.meta.url), { type: 'module' });
@@ -25,6 +28,7 @@ button.addEventListener('click', async () => {
           write(`${m.functions.toLocaleString()} translated functions · ${m.instructions.toLocaleString()} decoded instructions`);
           write(`${m.imports.length} Windows imports · entry 0x${hex(m.entry)}\n`);
           status.textContent = 'Executing original startup code…';
+          detachInput = attachInput(window, event => worker.postMessage(event));
         }
         if (data.type === 'result') resolve(data.result);
       };
@@ -41,6 +45,7 @@ button.addEventListener('click', async () => {
     status.textContent = 'Unable to start the runtime';
     write(error.stack || String(error));
   } finally {
+    detachInput?.();
     worker?.terminate();
     button.disabled = false;
   }

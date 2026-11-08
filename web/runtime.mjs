@@ -39,12 +39,19 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     const trace = Array.from({ length: Math.min(count, 1024) }, (_, i) => ring[(Math.max(0, count - 1024) + i) & 1023]);
     const lastImport = new Uint32Array(module.HEAPU8.buffer, module._web_last_import(), 10);
     const timers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_timer_stats(), 5));
+    const input = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_input_stats(), 4));
     return { status, error: module.UTF8ToString(module._web_error()),
-      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers,
+      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
   }
   return { module, manifest, base, memorySize,
+    input(event) {
+      if ('focus' in event) module._web_input_focus(event.focus ? 1 : 0);
+      if ('key' in event) module._web_input_key(event.key, event.down ? 1 : 0);
+      if ('dx' in event) module._web_input_mouse(event.dx | 0, event.dy | 0, event.dz | 0, event.buttons >>> 0);
+      if ('x' in event) module._web_input_cursor(event.x | 0, event.y | 0);
+    },
     seen: address => Boolean(module._web_has_entered(address)),
     async runAsync(milliseconds = 5000) {
       if (module._web_start(manifest.entry, milliseconds)) throw new Error('Unable to start the game worker');

@@ -1,7 +1,9 @@
 import { loadRuntime } from './runtime.mjs';
 
-self.onmessage = async () => {
-  let runtime;
+let runtime;
+self.onmessage = async ({ data }) => {
+  if (data.type === 'input') { runtime?.input(data); return; }
+  if (data.type !== 'start' || runtime) return;
   try {
     runtime = await loadRuntime({ log: text => self.postMessage({ type: 'log', text }) });
     self.postMessage({ type: 'loaded', manifest: runtime.manifest });

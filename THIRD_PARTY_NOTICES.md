@@ -3,9 +3,11 @@ The pinned `third_party/nfspu-recomp` submodule is
 `c7f0b7559a903b97b1ebbba4d9e339ed9b10ae4e`. We use its modified
 [pcrecomp](https://github.com/sp00nznet/pcrecomp) lifter and register/flag helpers.
 Their MIT licenses and additional notices are retained in the submodule.
-The upstream native host and generated USA 3.5 game translation are not used by
-the browser build: this project regenerates its translation from the supplied
-executable.
+The upstream native host is not compiled by the browser build. DirectInput
+descriptor layouts and ABI helpers are adapted from its MIT-licensed
+`src/host/dinput.c`, copyright 2026 Sergei Biriukov. The browser build regenerates
+the game translation from the supplied executable instead of using upstream's
+generated USA 3.5 sources.
 
 Generated C, original binaries, game assets, and compiled WebAssembly stay in
 ignored local directories. Electronic Arts' game code and assets retain their
