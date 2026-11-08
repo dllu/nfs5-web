@@ -16,9 +16,13 @@ button.addEventListener('click', async () => {
   let worker;
   let detachInput;
   let audio;
+  let canvas;
+  let screenSize;
   try {
     if (!crossOriginIsolated) throw new Error('This build requires cross-origin isolation. Use npm run serve or serve dist with its _headers configuration.');
     audio = await openAudio();
+    const previous=document.querySelector('#game');canvas=document.createElement('canvas');
+    canvas.id='game';canvas.width=640;canvas.height=480;canvas.hidden=true;canvas.setAttribute('aria-label','Game output');previous.replaceWith(canvas);
     worker = new Worker(new URL('./runner.mjs', import.meta.url), { type: 'module' });
     const result = await new Promise((resolve, reject) => {
       worker.onerror = event => reject(new Error(event.message));
@@ -31,11 +35,20 @@ button.addEventListener('click', async () => {
           write(`${m.functions.toLocaleString()} translated functions · ${m.instructions.toLocaleString()} decoded instructions`);
           write(`${m.imports.length} Windows imports · entry 0x${hex(m.entry)}\n`);
           status.textContent = 'Executing original startup code…';
-          detachInput = attachInput(window, event => worker.postMessage(event));
+          detachInput = attachInput(window, event => {
+            if(screenSize&&!canvas.hidden){
+              const rect=canvas.getBoundingClientRect();
+              if('x' in event){event.x=Math.round((event.x-rect.left)*screenSize.width/rect.width);event.y=Math.round((event.y-rect.top)*screenSize.height/rect.height);}
+              if('dx' in event){event.dx=Math.round(event.dx*screenSize.width/rect.width);event.dy=Math.round(event.dy*screenSize.height/rect.height);}
+            }
+            worker.postMessage(event);
+          });
         }
+        if(data.type==='screen'){screenSize=data;canvas.hidden=false;canvas.style.aspectRatio=`${data.width}/${data.height}`;}
         if (data.type === 'result') resolve(data.result);
       };
-      worker.postMessage({ type: 'start', audio: audio.configuration, display: { width: innerWidth, height: innerHeight } });
+      const offscreen=canvas.transferControlToOffscreen();
+      worker.postMessage({ type: 'start', audio: audio.configuration, display: { width: innerWidth, height: innerHeight },canvas:offscreen },[offscreen]);
     });
     window.nfs5Result = result;
     status.textContent = result.status ? 'Execution stopped at a porting dependency' : 'Startup function returned';

@@ -15,8 +15,8 @@ Current implementation:
   these counts do not establish complete code coverage.
 - Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node,
   then starts the original worker (`0x0055F4F0`). About 430,000 function entries
-  execute through input, file, audio and graphics-configuration setup before
-  loading `drivers\opengl3z`, the next rendering dependency.
+  execute through input, file, audio and graphics-driver setup before
+  stopping at window-class registration (`USER32!RegisterClassA`).
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
@@ -43,20 +43,26 @@ Current implementation:
   snapshots support UTF-16 and CP437/OEM byte blocks.
 - A WebGPU backend batches geometry and effect uploads, preserving Thrash
   screen-space projection, perspective UVs, vertex colors, depth, blending,
-  alpha tests, clipping, fog and texture-update ordering. It is tested with
-  synthetic geometry and **is not connected to the game driver yet**.
+  alpha tests, clipping, fog and texture-update ordering. A 41-export Thrash
+  replacement connects guest driver calls to an OffscreenCanvas through a
+  bounded shared-memory queue, with chunked texture uploads, framebuffer
+  reads/writes and mode changes. Original startup queries its descriptor;
+  game rendering has not been reached yet.
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
 routines, plus 68 Windows-service, 54 synchronization, 24 thread, 27 timer,
-45 DirectInput, 85 filesystem/path, 54 DirectSound, 31 registry and 31 desktop calls.
+45 DirectInput, 85 filesystem/path, 54 DirectSound, 31 registry, 31 desktop and
+78 Thrash loader/ABI calls.
 Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
 file/deletion and registry persistence across fresh pages and Wasm instances. A known PCM
 signal reaches the running browser audio graph with its expected amplitude.
 27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
-an OffscreenCanvas rendered in a dedicated Worker. These do not measure game FPS.
+an OffscreenCanvas rendered in a dedicated Worker. Another 33 checks exercise
+the native Thrash bridge, including a 4K framebuffer round trip and command-ring
+wrapping under texture-upload backpressure. These do not measure game FPS.
 
-The Thrash driver bridge, window/message handling and gameplay remain unimplemented; the
+Window/message handling and gameplay remain unimplemented; the
 game's sound playback and save/load flows are untested. An abrupt close can lose
 changes since the last checkpoint.
 The 4K/120 Hz target is unmeasured. The current diagnostic
@@ -84,7 +90,7 @@ the next unsupported dependency and a trace of executed original functions.
 `npm run test:browser` tests installed Chrome against that server and writes
 its report and screenshot to `build/`.
 `npm run test:renderer` opens normal Chrome for GPU pixel checks and writes
-`build/webgpu-renderer.png` and its JSON report. Headless Vulkan adapter
+`build/webgpu-renderer.png`, `build/thrash-driver.png` and a JSON report. Headless Vulkan adapter
 initialization is unreliable on this Chrome build; the normal browser works.
 
 Other static hosts must send `Cross-Origin-Opener-Policy: same-origin` and

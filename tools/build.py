@@ -60,6 +60,7 @@ def main():
     exports.extend(['_web_audio_mix', '_web_audio_stats'])
     exports.append('_web_registry_restore')
     exports.append('_web_display_size')
+    exports.extend(['_web_gpu_transport', '_web_gpu_attach', '_web_gpu_fail', '_web_gpu_stats'])
     subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=536870912',

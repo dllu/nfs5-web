@@ -9,7 +9,7 @@ await mkdir(process.env.TMPDIR, { recursive: true });
 const fixture = Uint8Array.from({ length: 131195 }, (_, i) => (i * 37 + (i >>> 8)) & 255);
 await writeFile('dist/fs-browser-fixture.bin', fixture);
 const browser = await chromium.launchPersistentContext(resolve('.cache/chrome-test'), {
-  executablePath: '/usr/bin/google-chrome', headless: true,
+  executablePath: '/usr/bin/google-chrome', headless: false,
   args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-breakpad',
     '--crash-dumps-dir=' + resolve('.cache/crashes')],
   viewport: { width: 1440, height: 1000 },

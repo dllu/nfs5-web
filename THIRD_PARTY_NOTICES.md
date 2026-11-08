@@ -13,6 +13,8 @@ PCM sample/gain conventions are adapted from pcrecomp's
 The WebGPU backend's projection, fog, vertex layout and blend conventions derive
 from nfspu-recomp's `src/renderer/thrash.*.glsl` and `nfspu_gpu.c`, copyright 2026
 Sergei Biriukov, under the retained MIT license.
+The browser Thrash ABI, geometry packing, state mapping and pixel conversion
+adapt `src/host/thrash.c` under the same license and copyright.
 
 Generated C, original binaries, game assets, and compiled WebAssembly stay in
 ignored local directories. Electronic Arts' game code and assets retain their

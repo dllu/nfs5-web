@@ -1,10 +1,11 @@
 import createEngine from './engine.js';
 import { openStorage } from './storage.mjs';
 import { attachAudio } from './audio.mjs';
+import { attachGraphics } from './graphics.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace } = {}) {
   const [module, manifest, response] = await Promise.all([
     createEngine({ print: log, printErr: log }),
     read('./manifest.json').then(checked).then(r => r.json()),
@@ -119,6 +120,9 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   }
   const storageTimer = storage ? setInterval(() => checkpoint().catch(error => log(`Local save failed: ${error.message}`)), 1000) : null;
   const detachAudio = audio ? attachAudio(module, audio) : null;
+  let graphics;
+  try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace}):null; }
+  catch(error) {clearInterval(storageTimer);detachAudio?.();storage?.close();module.PThread.terminateAllThreads();throw error;}
   function snapshot(status) {
     const registers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8));
     const count = module._web_trace_count();
@@ -129,12 +133,19 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     const input = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_input_stats(), 4));
     const files = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_fs_stats(), 4));
     const sound = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_audio_stats(), 4));
+    const rendering=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
     return { status, error: module.UTF8ToString(module._web_error()),
-      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, sound,
+      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, sound, rendering,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
   }
-  return { module, manifest, base, memorySize,
+  async function executeAsync(entry,milliseconds) {
+    if(module._web_start(entry,milliseconds))throw new Error('Unable to start the game worker');
+    while(module._web_async_status()===1)await new Promise(resolve=>setTimeout(resolve,5));
+    const status=module._web_async_finish();await graphics?.settle();const result=snapshot(status);
+    await checkpoint();return result;
+  }
+  return { module, manifest, base, memorySize, graphics,
     mount,
     checkpoint,
     input(event) {
@@ -145,12 +156,15 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     },
     seen: address => Boolean(module._web_has_entered(address)),
     async runAsync(milliseconds = 5000) {
-      if (module._web_start(manifest.entry, milliseconds)) throw new Error('Unable to start the game worker');
-      while (module._web_async_status() === 1) await new Promise(resolve => setTimeout(resolve, 5));
-      const result = snapshot(module._web_async_finish());
-      await checkpoint(); return result;
+      return executeAsync(manifest.entry,milliseconds);
     },
-    dispose: () => { clearInterval(storageTimer); detachAudio?.(); disposed = true; storage?.close(); module._web_shutdown(); module.PThread.terminateAllThreads(); },
+    async invokeAsync(entry,args=[],milliseconds=5000) {
+      if(module._web_async_status() || args.length>64)throw new Error('Invalid concurrent guest invocation');
+      const stack=memorySize-0x10000,view=new DataView(module.HEAPU8.buffer,base);
+      args.forEach((value,i)=>view.setUint32(stack+i*4,value>>>0,true));module._web_set_register(4,stack);
+      return executeAsync(entry,milliseconds);
+    },
+    dispose: () => { clearInterval(storageTimer); graphics?.close(); detachAudio?.(); disposed = true; storage?.close(); module._web_shutdown(); module.PThread.terminateAllThreads(); },
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),
     call: (entry, ...args) => snapshot(module._web_call(entry, ...Array.from({ length: 4 }, (_, i) => args[i] ?? 0))),
   };

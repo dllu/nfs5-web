@@ -43,6 +43,7 @@ static uint32_t block_count;
 static void thread_exit_code_import(void);
 static recomp_func_t dinput_lookup(uint32_t address);
 static recomp_func_t dsound_lookup(uint32_t address);
+static recomp_func_t thrash_lookup(uint32_t address);
 
 #include "win32_machine.h"
 
@@ -93,7 +94,8 @@ recomp_func_t recomp_lookup_manual(uint32_t va) {
     if (va == 0xF1000000) return thread_exit_code_import;
     if (va == 0xF1000010) return timer_dispatch;
     recomp_func_t fn = dinput_lookup(va);
-    return fn ? fn : dsound_lookup(va);
+    if (!fn) fn = dsound_lookup(va);
+    return fn ? fn : thrash_lookup(va);
 }
 recomp_func_t recomp_lookup_import(uint32_t va) {
     recomp_func_t fn = web_import_lookup(va);
@@ -185,6 +187,8 @@ static uint32_t module_handle(const char *name) {
 #include "win32_registry.h"
 #include "win32_environment.h"
 #include "win32_collation.h"
+#include "web_gpu.h"
+#include "thrash_driver.h"
 
 static void thread_exit_code_import(void) {
     sync_object *object = sync_get(argument(0));
@@ -248,6 +252,12 @@ void web_import(uint32_t index) {
         result(1, 1); return;
     }
     if (!strcmp(name, "GetLastError")) { result(last_error, 0); return; }
+    if (!strcmp(name, "DisableThreadLibraryCalls")) {
+        uint32_t module=argument(0);
+        int valid=module==THRASH_MODULE || (module>=0x70000000 && module<0x70010000 && !(module&15) && web_import_lookup(0xF0000000+module-0x70000000));
+        if(!valid)last_error=6;
+        result(valid,1);return;
+    }
     if (!strcmp(name, "SetLastError")) { last_error = argument(0); result(0, 1); return; }
     if (!strcmp(name, "SetUnhandledExceptionFilter")) {
         uint32_t previous = exception_filter; exception_filter = argument(0);
@@ -259,6 +269,7 @@ void web_import(uint32_t index) {
             last_error = 126; result(0, 1); return;
         }
         uint32_t handle = module_handle(library);
+        if (!handle) handle = thrash_module(library);
         if (!handle) {
             if (!strcmp(name, "LoadLibraryA")) fail(g_cur_func, "Dynamic library needs porting: %s", (const char *)ADDR(argument(0)));
             last_error = 126;
@@ -267,6 +278,10 @@ void web_import(uint32_t index) {
     }
     if (!strcmp(name, "GetProcAddress")) {
         uint32_t handle = argument(0), symbol = argument(1);
+        if (handle == THRASH_MODULE) {
+            uint32_t function = thrash_proc(symbol); if (!function) last_error = 127;
+            result(function, 2); return;
+        }
         if (handle >= 0x70000000u && handle < 0x70010000u && !(handle & 15) && symbol >= 0x10000 &&
             web_import_lookup(0xF0000000u + handle - 0x70000000u)) {
             const char *dll = web_import_names[(handle - 0x70000000u) / 16];
@@ -393,10 +408,10 @@ void web_import(uint32_t index) {
         result(1, 2); return;
     }
     if (!strcmp(name, "GetModuleFileNameA")) {
-        if (argument(0) && argument(0) != 0x400000)
+        if (argument(0) && argument(0) != 0x400000 && argument(0) != THRASH_MODULE)
             fail(g_cur_func, "Non-executable module filename needs implementation");
         uint32_t output = argument(1), size = argument(2);
-        const char *path = "C:\\nfs5\\nfs5.exe";
+        const char *path = argument(0) == THRASH_MODULE ? "C:\\nfs5\\Drivers\\opengl3\\opengl3z.dll" : "C:\\nfs5\\nfs5.exe";
         uint32_t length = (uint32_t)strlen(path);
         if (size <= length) { last_error = 122; result(0, 3); return; }
         memcpy((void *)ADDR(output), path, length + 1);
@@ -498,6 +513,7 @@ uint32_t web_init(void) {
     memset(ds_devices, 0, sizeof ds_devices); memset(ds_buffers, 0, sizeof ds_buffers); memset(ds_data, 0, sizeof ds_data);
     ds_device_table = ds_buffer_table = ds_mixed_frames = 0;
     win_reset();
+    thrash_reset(); gpu_reset();
     reg_reset();
     memset(process_environment, 0, sizeof process_environment);
     memset(di_devices, 0, sizeof di_devices); di_root_table = di_device_table = di_sequence = 0;
@@ -538,16 +554,18 @@ int web_run(uint32_t entry, uint32_t milliseconds) {
 static struct {
     guest_cpu initial, final;
     uint32_t entry, milliseconds;
+    uint32_t initial_error,final_error;
     pthread_t native;
     _Atomic int status;
 } asynchronous_run;
 
 static void *asynchronous_main(void *unused) {
     (void)unused;
-    current_thread = 0; cpu = asynchronous_run.initial; last_error = 0;
+    current_thread = 0; cpu = asynchronous_run.initial; last_error = asynchronous_run.initial_error;
     int status = web_run(asynchronous_run.entry, asynchronous_run.milliseconds);
     stop_guest_workers();
     asynchronous_run.final = cpu;
+    asynchronous_run.final_error=last_error;
     atomic_store(&asynchronous_run.status, status ? 3 : 2);
     return NULL;
 }
@@ -555,6 +573,7 @@ static void *asynchronous_main(void *unused) {
 int web_start(uint32_t entry, uint32_t milliseconds) {
     if (atomic_load(&asynchronous_run.status)) return 1;
     asynchronous_run.initial = cpu;
+    asynchronous_run.initial_error=last_error;
     asynchronous_run.entry = entry; asynchronous_run.milliseconds = milliseconds;
     atomic_store(&asynchronous_run.status, 1);
     if (pthread_create(&asynchronous_run.native, NULL, asynchronous_main, NULL)) {
@@ -570,6 +589,7 @@ int web_async_finish(void) {
     if (status < 2) return -1;
     pthread_join(asynchronous_run.native, NULL);
     cpu = asynchronous_run.final;
+    last_error=asynchronous_run.final_error;
     atomic_store(&asynchronous_run.status, 0);
     return status == 3;
 }
@@ -639,6 +659,17 @@ uint32_t *web_input_stats(void) {
     machine_release(); return stats;
 }
 void web_shutdown(void) { stop_guest_workers(); }
+void *web_gpu_transport(void) { return &gpu_transport; }
+void web_gpu_attach(void) { atomic_store(&gpu_transport.failed,0); atomic_store(&gpu_transport.attached,1); }
+void web_gpu_fail(const char *message) {
+    snprintf(gpu_error,sizeof gpu_error,"%s",message); atomic_store(&gpu_transport.failed,1);
+}
+uint32_t *web_gpu_stats(void) {
+    static uint32_t stats[5]; machine_acquire();
+    stats[0]=thrash_calls;stats[1]=draws;stats[2]=uploads;stats[3]=frames+software_frames;
+    stats[4]=atomic_load(&gpu_transport.write)-atomic_load(&gpu_transport.read);
+    machine_release(); return stats;
+}
 uint32_t web_registry_restore(void) { machine_acquire(); int ok = reg_restore(); machine_release(); return ok; }
 void web_display_size(uint32_t width, uint32_t height) {
     if (!width || !height || width > 16384 || height > 16384) return;

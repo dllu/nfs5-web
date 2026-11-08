@@ -171,17 +171,18 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     }
     vertexBytes += data.byteLength; stats.draws++; stats.vertices += count;
   }
-  function textureCreate(id, w, h, pixels) {
-    check(); if (textures.has(id) || !w || !h || pixels.length !== w*h*4) throw new Error('Invalid texture creation');
+  function textureCreate(id, w, h, pixels = null) {
+    check(); if (textures.has(id) || !w || !h || (pixels && pixels.length !== w*h*4)) throw new Error('Invalid texture creation');
     const texture = device.createTexture({ size: [w,h], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     textures.set(id,{ texture, width: w, height: h, groups: new Map() });
-    device.queue.writeTexture({ texture }, pixels, { bytesPerRow: w*4, rowsPerImage: h }, [w,h]);
+    if(pixels)device.queue.writeTexture({ texture }, pixels, { bytesPerRow: w*4, rowsPerImage: h }, [w,h]);
   }
   function textureUpdate(id, pixels) {
     check(); const entry = textures.get(id); if (!entry || pixels.length !== entry.width*entry.height*4) throw new Error('Invalid texture update');
     flush(); device.queue.writeTexture({ texture: entry.texture }, pixels, { bytesPerRow: entry.width*4, rowsPerImage: entry.height }, [entry.width,entry.height]);
   }
   function textureDestroy(id) { check(); if (!id) return; flush(); textures.get(id)?.texture.destroy(); textures.delete(id); }
+  function reset() { flush();for(const [id,entry] of textures)if(id){entry.texture.destroy();textures.delete(id);}clear(0xff000000); }
   function present() {
     const encoder = device.createCommandEncoder(); flush(encoder);
     const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0,0,0,1] }] });
@@ -201,7 +202,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   }
   textureCreate(0,1,1,Uint8Array.of(255,255,255,255)); resize(canvas.width || 640, canvas.height || 480);
   return {
-    resize, clear, draw, present, flush, textureCreate, textureUpdate, textureDestroy, readPixels, stats, errors,
+    resize, clear, draw, present, flush, textureCreate, textureUpdate, textureDestroy, readPixels, reset, stats, errors,
     info: { vendor: adapter.info.vendor, maxTextureSize: device.limits.maxTextureDimension2D },
     get width() { return width; }, get height() { return height; },
     async validate() { await device.queue.onSubmittedWorkDone(); check(); },

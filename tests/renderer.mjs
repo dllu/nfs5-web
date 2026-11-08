@@ -19,7 +19,7 @@ try {
   await page.goto(process.env.NFS5_TEST_URL ?? 'http://127.0.0.1:8000');
   const result = await page.evaluate(async () => {
     const { createRenderer } = await import('./renderer.mjs');
-    const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64; document.body.prepend(canvas);
+    const canvas = document.createElement('canvas');canvas.id='renderer-check'; canvas.width = 64; canvas.height = 64; document.body.prepend(canvas);
     const renderer = await createRenderer(canvas); window.testRenderer = renderer;
     let checks = 0;
     function pack(vertices) {
@@ -95,7 +95,7 @@ try {
     return { checks, info: renderer.info, stats: {...renderer.stats}, validationErrors: renderer.errors.slice(), resolution: [3840,2160] };
   });
   assert.deepEqual(errors, []); assert.deepEqual(result.validationErrors, []); assert(result.checks >= 25);
-  await page.locator('canvas').screenshot({ path:'build/webgpu-renderer.png' });
+  await page.locator('#renderer-check').screenshot({ path:'build/webgpu-renderer.png' });
   await page.evaluate(() => { window.testRenderer.close(); delete window.testRenderer; });
   result.worker = await page.evaluate(async () => {
     const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16; document.body.append(canvas);
@@ -125,7 +125,76 @@ try {
   });
   assert.equal(result.worker.error,undefined);assert.deepEqual(result.worker.errors,[]);
   assert.deepEqual(result.worker.inside,[255,0,0,255]);assert.deepEqual(result.worker.outside,[17,34,51,255]);
+  result.thrash=await page.evaluate(async()=>{
+    const {loadRuntime}=await import('./runtime.mjs');
+    const canvas=document.createElement('canvas');canvas.id='thrash-check';canvas.width=640;canvas.height=480;canvas.style.width='640px';document.body.prepend(canvas);
+    const runtime=await loadRuntime({canvas,pace:false,persist:false});window.thrashRuntime=runtime;
+    const {module,base,manifest}=runtime,view=new DataView(module.HEAPU8.buffer,base),data=0x800000,out=0x120000,image=0x900000;
+    const put=(p,v)=>view.setUint32(p,v>>>0,true),get=p=>view.getUint32(p,true);
+    const text=s=>{module.HEAPU8.set(new TextEncoder().encode(s+'\0'),base+data);return data;};
+    let calls=0,checks=0;
+    async function call(entry,args=[]) {
+      const result=await runtime.invokeAsync(entry,args);if(result.status)throw new Error(result.error);calls++;
+      if(result.registers[4]!==runtime.memorySize-0x10000+args.length*4)throw new Error('Native driver stack imbalance');
+      return result.registers[0];
+    }
+    const invoke=(name,...args)=>call(manifest.imports.find(item=>item.name===name).slot,args);
+    const library=await invoke('LoadLibraryA',text('.\\drivers\\opengl3z'));
+    const functions=new Map();
+    async function method(name,...args){if(!functions.has(name))functions.set(name,await invoke('GetProcAddress',library,text(name)));return call(functions.get(name),args);}
+    function expect(got,wanted,label){if(got!==wanted)throw new Error(`${label}: ${got.toString(16)} != ${wanted.toString(16)}`);checks++;}
+    const descriptor=await method('_THRASH_about@0'),count=get(descriptor+60),modes=get(descriptor+64);
+    function mode(w,h){for(let i=1;i<=count;i++)if(get(modes+i*40)===w&&get(modes+i*40+4)===h&&get(modes+i*40+8)===32)return i;throw new Error('Missing mode');}
+    expect(await method('_THRASH_setvideomode@12',mode(640,480),0,2),1,'video mode');
+    expect(await method('_THRASH_setstate@8',3,0xff112233),1,'clear state');await method('_THRASH_clearwindow@0');
+    async function pixel(x,y){expect(await method('_THRASH_readrect@20',x,y,1,1,out),1,'readrect');return get(out);}
+    expect(await pixel(100,100),0xff112233,'native clear/readback');
+    function vertex(p,x,y,color=0xffffffff,u=0,v=0,z=.2){[x,y,z,1].forEach((v,i)=>view.setFloat32(p+i*4,v,true));put(p+16,color);put(p+20,0xff000000);view.setFloat32(p+24,u,true);view.setFloat32(p+28,v,true);}
+    const vertices=data+4096;
+    vertex(vertices,0,0,0xffff0000);vertex(vertices+32,64,0,0xffff0000);vertex(vertices+64,0,64,0xffff0000);
+    await method('_THRASH_setstate@8',4,1);await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    expect(await pixel(8,8),0xffff0000,'native triangle');
+    const texture=await method('_THRASH_talloc@20',2,2,4,0,0),pixels=data+8192;
+    [0xf800,0x07e0,0x001f,0xffff].forEach((v,i)=>view.setUint16(pixels+i*2,v,true));
+    expect(await method('_THRASH_tupdate@12',texture,pixels,0),texture,'RGB565 upload');
+    await method('_THRASH_settexture@4',texture);await method('_THRASH_setstate@8',11,0);await method('_THRASH_setstate@8',7,0);
+    vertex(vertices,0,0);vertex(vertices+32,64,64,0xffffffff,1,1);
+    await method('_THRASH_drawsprite@8',vertices,vertices+32);
+    for(const [x,y,color] of [[8,8,0xffff0000],[48,8,0xff00ff00],[8,48,0xff0000ff],[48,48,0xffffffff]])expect(await pixel(x,y),color,'RGB565 texture orientation');
+    await method('_THRASH_tfree@4',texture);
+    const large=await method('_THRASH_talloc@20',1024,1024,6,0,0);
+    for(let i=0;i<5;i++){
+      new Uint32Array(module.HEAPU8.buffer,base+image,1024*1024).fill((0xff000000|(i*32)<<16|0x2233)>>>0);
+      expect(await method('_THRASH_tupdate@12',large,image,0),large,'large texture update');
+    }
+    const transport=module._web_gpu_transport(),header=new Uint32Array(module.HEAPU8.buffer,transport,8);
+    if(header[0]<=header[5])throw new Error('The native command ring did not wrap');checks++;
+    await method('_THRASH_settexture@4',large);vertex(vertices,0,0);vertex(vertices+32,640,480,0xffffffff,1,1);
+    await method('_THRASH_drawsprite@8',vertices,vertices+32);
+    expect(await pixel(200,200),0xff802233,'wrapped texture command bytes');await method('_THRASH_tfree@4',large);
+    await method('_THRASH_setvideomode@12',mode(3840,2160),0,2);await method('_THRASH_clip@16',0,0,3840,2160);
+    await method('_THRASH_setstate@8',3,0xff203040);await method('_THRASH_clearwindow@0');
+    vertex(vertices,3832,2152,0xffff0000);vertex(vertices+32,3840,2152,0xffff0000);vertex(vertices+64,3832,2160,0xffff0000);
+    await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    expect(await pixel(3834,2154),0xffff0000,'native 4K triangle');expect(await pixel(0,0),0xff203040,'native 4K clear');
+    const locked=await method('_THRASH_lockwindow@0');expect(get(locked+4),3840*4,'locked pitch');expect(get(locked+8),6,'locked pixel format');
+    put(get(locked),0xff12ab34);let heartbeat=0;const timer=setInterval(()=>heartbeat++,1);
+    try{expect(await method('_THRASH_unlockwindow@4',locked),1,'software framebuffer upload');}finally{clearInterval(timer);}
+    if(!heartbeat)throw new Error('The application thread did not run during framebuffer upload');checks++;
+    expect(await pixel(0,0),0xff12ab34,'4K locked framebuffer round trip');
+    await runtime.graphics.renderer.validate();
+    const stats=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
+    const nativeMode=[runtime.graphics.renderer.width,runtime.graphics.renderer.height];
+    await method('_THRASH_restore@0');await method('_THRASH_setvideomode@12',mode(640,480),0,2);
+    await method('_THRASH_clip@16',0,0,640,480);await method('_THRASH_setstate@8',3,0xff102030);await method('_THRASH_clearwindow@0');
+    vertex(vertices,40,40,0xffff0000);vertex(vertices+32,600,60,0xff00ff00);vertex(vertices+64,80,440,0xff0000ff);
+    await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);await method('_THRASH_pageflip@0');
+    return {calls,checks,stats,nativeMode,heartbeat,errors:runtime.graphics.renderer.errors.slice()};
+  });
+  assert.deepEqual(result.thrash.errors,[]);assert.deepEqual(result.thrash.nativeMode,[3840,2160]);assert(result.thrash.checks>=25);
+  await page.locator('#thrash-check').screenshot({path:'build/thrash-driver.png'});
+  await page.evaluate(()=>{window.thrashRuntime.dispose();delete window.thrashRuntime;});
   assert.deepEqual(errors,[]);
   await writeFile('build/webgpu-renderer.json', JSON.stringify({ browser:browser.browser().version(),...result },null,2)+'\n');
-  console.log(`WebGPU (${result.info.vendor}): ${result.checks} pixel/batching checks passed, including 3840x2160 output; OffscreenCanvas Worker rendering passed`);
+  console.log(`WebGPU (${result.info.vendor}): ${result.checks} backend checks; ${result.thrash.checks} native-driver checks and ${result.thrash.calls} ABI calls passed, including 4K framebuffer round trip and command-ring wrapping`);
 } finally { await browser.close(); }
