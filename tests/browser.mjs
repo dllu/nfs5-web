@@ -60,6 +60,19 @@ try {
     if (method(keyboard, 11, format) || method(keyboard, 13, 0, 6) || method(keyboard, 7)) throw new Error('Keyboard acquisition failed');
     const detach = attachInput(window, event => runtime.input(event));
     window.inputHarness = {
+      async writeSave() {
+        const name = data + 12000, payload = data + 14000;
+        const invoke = (name, args) => call(manifest.imports.find(item => item.name === name).slot, args);
+        module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\0'), base + name);
+        invoke('CreateDirectoryA', [name, 0]);
+        module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\\checkpoint.sav\0'), base + name);
+        const file = invoke('CreateFileA', [name, 0xc0000000, 3, 0, 2, 128, 0]);
+        if (file === 0xffffffff) throw new Error('Save fixture creation failed');
+        module.HEAPU8.set([0,1,2,3,10,13,127,128,255,42], base + payload);
+        if (!invoke('WriteFile', [file, payload, 10, payload + 256, 0])) throw new Error('Save fixture write failed');
+        invoke('CloseHandle', [file]);
+        await runtime.checkpoint();
+      },
       async readFixture() {
         runtime.mount('C:\\nfs5\\BrowserFixture.bin', { url: new URL('./fs-browser-fixture.bin', location.href).href, size: 131195 });
         const name = data + 9000, output = data + 10000, transferred = output + 1024;
@@ -103,11 +116,52 @@ try {
     assert.equal(read.ok, 1); assert.equal(read.count, 100);
     assert.deepEqual(read.bytes, Array.from(fixture.subarray(65530, 65630)));
     assert.equal(read.files[2], 2, 'A cross-chunk native read must fetch two HTTP ranges');
+    await page.evaluate(() => window.inputHarness.writeSave());
     assert.deepEqual(errors, []);
     console.log('Chrome keyboard events reached Wasm DirectInput; focus loss and native HTTP range reads verified');
   } finally {
     await page.evaluate(() => window.inputHarness.close());
   }
+  // A fresh page and fresh Wasm instance must restore the durable binary file.
+  await page.reload();
+  const restored = await page.evaluate(async () => {
+    const { loadRuntime } = await import('./runtime.mjs'), runtime = await loadRuntime();
+    const { module, base, manifest } = runtime, data = 0x800000, stack = runtime.memorySize - 0x10000;
+    const view = new DataView(module.HEAPU8.buffer, base);
+    function invoke(name, args) {
+      args.forEach((v, i) => view.setUint32(stack + i * 4, v >>> 0, true)); module._web_set_register(4, stack);
+      if (module._web_run(manifest.imports.find(item => item.name === name).slot, 2000)) throw new Error(module.UTF8ToString(module._web_error()));
+      return new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8)[0];
+    }
+    try {
+      module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\\checkpoint.sav\0'), base + data);
+      const file = invoke('CreateFileA', [data, 0x80000000, 3, 0, 3, 128, 0]);
+      if (file === 0xffffffff) throw new Error('Saved file was not restored');
+      const read = invoke('ReadFile', [file, data + 4096, 20, data + 8192, 0]);
+      const result = { read, count: view.getUint32(data + 8192, true), bytes: Array.from(module.HEAPU8.subarray(base + data + 4096, base + data + 4106)) };
+      invoke('CloseHandle', [file]);
+      if (!invoke('DeleteFileA', [data])) throw new Error('Save fixture deletion failed');
+      await runtime.checkpoint(); return result;
+    } finally { runtime.dispose(); }
+  });
+  assert.equal(restored.read, 1); assert.equal(restored.count, 10);
+  assert.deepEqual(restored.bytes, [0,1,2,3,10,13,127,128,255,42]);
+  await page.reload();
+  const deleted = await page.evaluate(async () => {
+    const { loadRuntime } = await import('./runtime.mjs'), runtime = await loadRuntime();
+    try {
+      const { module, base, manifest } = runtime, data = 0x800000, stack = runtime.memorySize - 0x10000;
+      const view = new DataView(module.HEAPU8.buffer, base);
+      module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\\checkpoint.sav\0'), base + data);
+      [data,0x80000000,3,0,3,128,0].forEach((v, i) => view.setUint32(stack + i * 4, v >>> 0, true));
+      module._web_set_register(4, stack);
+      if (module._web_run(manifest.imports.find(item => item.name === 'CreateFileA').slot, 2000)) throw new Error('Open after deletion failed');
+      return new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8)[0];
+    } finally { runtime.dispose(); }
+  });
+  assert.equal(deleted, 0xffffffff);
+  assert.deepEqual(errors, []);
+  console.log('Chrome restored exact binary save bytes across a reload and retained deletion across a second reload');
 } finally {
   await browser.close();
 }

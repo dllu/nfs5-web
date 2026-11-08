@@ -109,5 +109,20 @@ try {
   assert(get(output + 8) > 0); assert.equal(get(output) * get(output + 4), 4096);
   assert.equal(invoke('GetDiskFreeSpaceA', text('D:\\'), output, output + 4, output + 8, output + 12), 1);
   assert.equal(get(output + 8), 0);
+  // A pending database checkpoint must not clear a newer write or a deletion.
+  const pending = open('checkpoint.bin', 0xc0000000, 3, 2);
+  const firstSnapshot = module._web_fs_snapshot();
+  const revision = new DataView(module.HEAPU8.buffer).getUint32(firstSnapshot + 4, true);
+  text('newer'); assert.equal(invoke('WriteFile', pending, data, 5, output + 512, 0), 1);
+  module._web_fs_acknowledge(revision);
+  let checkpoint = module._web_fs_snapshot();
+  assert.equal(new DataView(module.HEAPU8.buffer).getUint32(checkpoint + 8, true), 1, 'Newer write remains dirty after earlier checkpoint');
+  close(pending); assert.equal(invoke('DeleteFileA', text('checkpoint.bin')), 1);
+  checkpoint = module._web_fs_snapshot();
+  assert.equal(new DataView(module.HEAPU8.buffer).getUint32(checkpoint + 12, true), 0, 'Deleted files remain as tombstones until acknowledged');
+  const deletedRevision = new DataView(module.HEAPU8.buffer).getUint32(checkpoint + 4, true);
+  module._web_fs_acknowledge(deletedRevision);
+  checkpoint = module._web_fs_snapshot();
+  assert.equal(new DataView(module.HEAPU8.buffer).getUint32(checkpoint + 8, true), 0);
   console.log(`${calls} filesystem/path calls passed (staged bytes, cross-chunk reads, EOF, seeks, sharing, duplicate offsets, write gaps, enumeration)`);
 } finally { runtime.dispose(); }

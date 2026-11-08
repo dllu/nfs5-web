@@ -1,8 +1,9 @@
 import createEngine from './engine.js';
+import { openStorage } from './storage.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 
-export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true } = {}) {
   const [module, manifest, response] = await Promise.all([
     createEngine({ print: log, printErr: log }),
     read('./manifest.json').then(checked).then(r => r.json()),
@@ -40,8 +41,8 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     })) : new TextEncoder().encode(text + '\0'), pointer = module._malloc(bytes.length);
     module.HEAPU8.set(bytes, pointer); return pointer;
   }
-  function mount(path, { url = '', size = 0, attributes = 32, modified = 0 } = {}) {
-    const name = nativeString(path, true), source = nativeString(url);
+  function mount(path, { url = null, size = 0, attributes = 32, modified = 0 } = {}) {
+    const name = nativeString(path, true), source = url === null ? 0 : nativeString(url);
     try {
       const id = module._web_fs_mount(name, source, size, attributes, modified);
       if (!id) throw new Error(`Unable to mount virtual file ${path}`);
@@ -59,6 +60,60 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     });
     log(`Mounted ${index.entries.length.toLocaleString()} game files and directories`);
   } else if (assets && assets.status !== 404) throw new Error(`Unable to load assets: HTTP ${assets.status}`);
+  function changes() {
+    const pointer = module._web_fs_snapshot();
+    if (!pointer) throw new Error('Unable to snapshot local file changes');
+    const view = new DataView(module.HEAPU8.buffer), revision = view.getUint32(pointer + 4, true), count = view.getUint32(pointer + 8, true);
+    const records = []; let cursor = pointer + 12;
+    for (let i = 0; i < count; i++) {
+      const fields = Array.from({ length: 7 }, (_, i) => view.getUint32(cursor + i * 4, true)); cursor += 28;
+      const path = new TextDecoder('windows-1252').decode(Uint8Array.from(module.HEAPU8.subarray(cursor, cursor + fields[5] - 1)));
+      cursor += (fields[5] + 3) & ~3;
+      const data = fields[6] === 0xffffffff ? null : Uint8Array.from(module.HEAPU8.subarray(cursor, cursor + fields[6]));
+      if (data) cursor += (data.length + 3) & ~3;
+      records.push({ path, live: Boolean(fields[0]), attributes: fields[1], size: fields[2], modifiedLow: fields[3], modifiedHigh: fields[4], data });
+    }
+    return { revision, records };
+  }
+  let storage;
+  try {
+    storage = persist ? await openStorage(sha256) : null;
+    if (storage) {
+      const records = await storage.load();
+      records.sort((a, b) => a.path.split('\\').length - b.path.split('\\').length);
+      for (const record of records) {
+        if (!record.live) {
+          const path = nativeString(record.path, true);
+          try { if (!module._web_fs_remove(path)) throw new Error(`Unable to restore deletion: ${record.path}`); }
+          finally { module._free(path); }
+          continue;
+        }
+        const id = mount(record.path, record);
+        if (record.data) {
+          const pointer = module._malloc(Math.max(1, record.data.length));
+          try {
+            module.HEAPU8.set(record.data, pointer);
+            if (!module._web_fs_store(id, pointer, record.data.length)) throw new Error(`Unable to restore local file: ${record.path}`);
+          } finally { module._free(pointer); }
+        }
+        module._web_fs_restore_metadata(id, record.modifiedLow, record.modifiedHigh);
+      }
+      module._web_fs_acknowledge(changes().revision);
+      if (records.length) log(`Restored ${records.length} browser-local file changes`);
+    }
+  } catch (error) { storage?.close(); module.PThread.terminateAllThreads(); throw error; }
+  let saving = Promise.resolve(), disposed = false;
+  function checkpoint() {
+    if (!storage || disposed) return Promise.resolve();
+    const operation = saving.catch(() => {}).then(async () => {
+      if (disposed) return;
+      const { revision, records } = changes();
+      await storage.save(records);
+      module._web_fs_acknowledge(revision);
+    });
+    saving = operation; return operation;
+  }
+  const storageTimer = storage ? setInterval(() => checkpoint().catch(error => log(`Local save failed: ${error.message}`)), 1000) : null;
   function snapshot(status) {
     const registers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8));
     const count = module._web_trace_count();
@@ -75,6 +130,7 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
   }
   return { module, manifest, base, memorySize,
     mount,
+    checkpoint,
     input(event) {
       if ('focus' in event) module._web_input_focus(event.focus ? 1 : 0);
       if ('key' in event) module._web_input_key(event.key, event.down ? 1 : 0);
@@ -85,9 +141,10 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     async runAsync(milliseconds = 5000) {
       if (module._web_start(manifest.entry, milliseconds)) throw new Error('Unable to start the game worker');
       while (module._web_async_status() === 1) await new Promise(resolve => setTimeout(resolve, 5));
-      return snapshot(module._web_async_finish());
+      const result = snapshot(module._web_async_finish());
+      await checkpoint(); return result;
     },
-    dispose: () => { module._web_shutdown(); module.PThread.terminateAllThreads(); },
+    dispose: () => { clearInterval(storageTimer); disposed = true; storage?.close(); module._web_shutdown(); module.PThread.terminateAllThreads(); },
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),
     call: (entry, ...args) => snapshot(module._web_call(entry, ...Array.from({ length: 4 }, (_, i) => args[i] ?? 0))),
   };

@@ -56,7 +56,7 @@ def main():
                '_web_trace_count', '_web_error', '_web_last_pc', '_web_first_pc', '_web_last_import', '_web_heap',
                '_web_set_register', '_web_float_result', '_web_memory_size', '_web_has_entered', '_web_error_thread',
                '_web_shutdown', '_web_timer_stats', '_web_input_key', '_web_input_mouse', '_web_input_focus', '_web_input_cursor', '_web_input_stats',
-               '_web_fs_mount', '_web_fs_store', '_web_fs_stats', '_malloc', '_free']
+               '_web_fs_mount', '_web_fs_store', '_web_fs_stats', '_web_fs_snapshot', '_web_fs_acknowledge', '_web_fs_remove', '_web_fs_restore_metadata', '_malloc', '_free']
     subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=536870912',

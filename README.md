@@ -31,15 +31,18 @@ Current implementation:
 - DOS paths, case-insensitive files/directories, file sharing, duplicate handles,
   reads/seeks, enumeration and a 64 MiB memory write overlay are implemented.
   Staged assets load on demand through a shared 512 KiB range cache; Chrome and
-  Node read the original startup data. Writes currently last only for a session.
+  Node read the original startup data. Browser file changes persist in IndexedDB
+  per origin/executable, checkpointing every second and when startup stops.
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
 routines, plus 31 Windows-service, 54 synchronization, 24 thread, 27 timer,
-45 DirectInput and 81 filesystem/path calls. Chrome verifies original startup,
-physical key events, focus loss, and native-worker HTTP range reads.
+45 DirectInput and 85 filesystem/path calls. Chrome verifies original startup,
+physical key events, focus loss, native-worker HTTP range reads, and exact binary
+file/deletion persistence across fresh pages and Wasm instances.
 
-Rendering, audio, gameplay, and persistent save games
-remain unimplemented. The 4K/120 Hz target is unmeasured. The current diagnostic
+Rendering, audio and gameplay remain unimplemented; the game's save/load flow
+is untested. An abrupt close can lose changes since the last checkpoint.
+The 4K/120 Hz target is unmeasured. The current diagnostic
 Wasm module is about 72 MiB and retains tracing and execution limits. The x87
 helpers use double precision; full floating-point and binary compatibility are
 unverified.

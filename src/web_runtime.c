@@ -642,10 +642,55 @@ uint32_t web_fs_store(uint32_t id, const uint8_t *data, uint32_t size) {
     if (size) memcpy(node->data, data, size);
     machine_release(); return 1;
 }
+void web_fs_restore_metadata(uint32_t id, uint32_t low, uint32_t high) {
+    machine_acquire();
+    if (id && id <= fs_count) { fs_nodes[id - 1].modified = (uint64_t)high << 32 | low; fs_nodes[id - 1].dirty = 0; }
+    machine_release();
+}
 uint32_t *web_fs_stats(void) {
     static uint32_t stats[4];
     machine_acquire(); stats[0] = fs_count; stats[1] = fs_reads; stats[2] = fs_fetches; stats[3] = fs_written;
     machine_release(); return stats;
+}
+uint32_t *web_fs_snapshot(void) {
+    machine_acquire();
+    uint32_t length = 12, count = 0;
+    for (unsigned i = 0; i < fs_count; i++) if (fs_nodes[i].dirty) {
+        fs_node *node = &fs_nodes[i];
+        length += 28 + (((uint32_t)strlen(node->path) + 1 + 3) & ~3u);
+        if (node->live && node->data) length += (node->size + 3) & ~3u;
+        count++;
+    }
+    free(fs_snapshot_buffer); fs_snapshot_buffer = malloc(length);
+    if (!fs_snapshot_buffer) { machine_release(); return NULL; }
+    uint32_t *header = fs_snapshot_buffer;
+    header[0] = length; header[1] = fs_revision; header[2] = count;
+    uint8_t *cursor = (uint8_t *)(header + 3);
+    for (unsigned i = 0; i < fs_count; i++) if (fs_nodes[i].dirty) {
+        fs_node *node = &fs_nodes[i]; uint32_t path_size = (uint32_t)strlen(node->path) + 1;
+        uint32_t *record = (uint32_t *)cursor;
+        record[0] = node->live; record[1] = node->attributes; record[2] = node->size;
+        record[3] = (uint32_t)node->modified; record[4] = (uint32_t)(node->modified >> 32);
+        record[5] = path_size; record[6] = node->live && node->data ? node->size : 0xFFFFFFFF;
+        cursor += 28; memcpy(cursor, node->path, path_size); cursor += (path_size + 3) & ~3u;
+        if (record[6] != 0xFFFFFFFF) { memcpy(cursor, node->data, node->size); cursor += (node->size + 3) & ~3u; }
+    }
+    machine_release(); return fs_snapshot_buffer;
+}
+void web_fs_acknowledge(uint32_t revision) {
+    machine_acquire();
+    for (unsigned i = 0; i < fs_count; i++) if (fs_nodes[i].dirty && fs_nodes[i].dirty <= revision) fs_nodes[i].dirty = 0;
+    machine_release();
+}
+uint32_t web_fs_remove(const char *source) {
+    char path[PATH_CAPACITY]; machine_acquire();
+    if (!path_full(source, path)) { machine_release(); return 0; }
+    fs_strip(path); fs_node *node = fs_find(path);
+    if (node) {
+        node->live = 0; fs_touch(node); fs_written -= node->capacity;
+        free(node->data); node->data = NULL; node->capacity = 0; fs_uncache(node);
+    }
+    machine_release(); return 1;
 }
 uint32_t *web_timer_stats(void) {
     static uint32_t stats[5];

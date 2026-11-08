@@ -20,7 +20,8 @@ static fs_object fs_objects[256];
 static fs_handle fs_handles[512];
 static fs_cache_entry fs_cache[8];
 static fs_search fs_searches[64];
-static uint32_t fs_count, fs_cache_stamp, fs_written, fs_reads, fs_fetches;
+static uint32_t fs_count, fs_cache_stamp, fs_written, fs_reads, fs_fetches, fs_revision;
+static uint32_t *fs_snapshot_buffer;
 
 /* Runs on the native worker performing ReadFile. HTTP Range keeps large VIV
  * archives out of startup memory; ordinary static hosts returning 200 also work.
@@ -51,7 +52,7 @@ EM_JS(int, fs_asset_read, (const char *address, uint32_t offset, uint32_t length
 });
 
 static uint64_t fs_filetime(double seconds) { return (uint64_t)((seconds + 11644473600.0) * 10000000.0); }
-static void fs_touch(fs_node *node) { node->modified = fs_filetime(emscripten_date_now() / 1000); node->dirty = 1; }
+static void fs_touch(fs_node *node) { node->modified = fs_filetime(emscripten_date_now() / 1000); node->dirty = ++fs_revision; }
 static int fs_equal(const char *a, const char *b) {
     for (; *a && *b; a++, b++) if (cp1252_case((uint8_t)*a, 1) != cp1252_case((uint8_t)*b, 1)) return 0;
     return *a == *b;
@@ -69,7 +70,7 @@ static void fs_uncache(fs_node *node) {
 }
 static fs_node *fs_new(const char *path, uint32_t attributes) {
     fs_node *node = NULL;
-    for (uint32_t i = 0; i < fs_count; i++) if (!fs_nodes[i].live) { node = &fs_nodes[i]; break; }
+    for (uint32_t i = 0; i < fs_count; i++) if (!fs_nodes[i].live && !fs_nodes[i].dirty) { node = &fs_nodes[i]; break; }
     if (!node && fs_count < FS_NODES) node = &fs_nodes[fs_count++];
     if (!node) { last_error = 8; return NULL; }
     fs_uncache(node);
@@ -96,7 +97,8 @@ static void fs_reset(void) {
     memset(fs_nodes, 0, sizeof fs_nodes); memset(fs_objects, 0, sizeof fs_objects);
     memset(fs_handles, 0, sizeof fs_handles); memset(fs_cache, 0, sizeof fs_cache);
     memset(fs_searches, 0, sizeof fs_searches);
-    fs_count = fs_written = fs_reads = fs_fetches = fs_cache_stamp = 0;
+    fs_count = fs_written = fs_reads = fs_fetches = fs_cache_stamp = fs_revision = 0;
+    free(fs_snapshot_buffer); fs_snapshot_buffer = NULL;
     fs_new("C:\\", 16); fs_new("D:\\", 16); fs_new("C:\\nfs5", 16);
     for (unsigned i = 0; i < fs_count; i++) fs_nodes[i].dirty = 0;
 }
@@ -154,6 +156,7 @@ static void fs_close(uint32_t handle) {
     fs_object *object = fs_get(handle); fs_handles[(handle & 0xFFF) / 4].object = 0;
     if (!--object->references && (object->flags & 0x04000000)) {
         fs_node *node = &fs_nodes[object->node - 1]; node->live = 0;
+        fs_touch(node);
         fs_written -= node->capacity; free(node->data); node->data = NULL; node->capacity = 0;
     }
 }
@@ -240,7 +243,7 @@ static int fs_import(const char *name) {
         if (node->attributes & 1) { last_error = 5; result(0, argc); return 1; }
         if ((node->attributes & 16) || !fs_shares(node, 4, 7)) { if (node->attributes & 16) last_error = 5; result(0, 1); return 1; }
         for (unsigned i = 0; i < 256; i++) if (fs_objects[i].references && fs_objects[i].node == (uint32_t)(node - fs_nodes) + 1) { last_error = 32; result(0, 1); return 1; }
-        node->live = 0; free(node->data); node->data = NULL; fs_written -= node->capacity; node->capacity = 0;
+        node->live = 0; fs_touch(node); free(node->data); node->data = NULL; fs_written -= node->capacity; node->capacity = 0;
         result(1, 1); return 1;
     }
     if (!strcmp(name, "CreateFileA")) {
