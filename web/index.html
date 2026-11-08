@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFS Porsche Unleashed · Web port</title>
+<link rel="stylesheet" href="./style.css">
+<main>
+  <p class="eyebrow">NFS5 / WEBASSEMBLY</p>
+  <h1>Porsche Unleashed</h1>
+  <p class="intro">Bringing the original PC game to the browser.</p>
+  <section aria-labelledby="runtime-title">
+    <h2 id="runtime-title">Runtime bring-up</h2>
+    <p>The original executable is translated to WebAssembly. Startup diagnostics are available below. Racing, rendering, audio, and save games are still being ported.</p>
+    <button id="boot" type="button">Run original startup</button>
+    <p id="status" role="status">Ready to load the local game build.</p>
+    <pre id="output" aria-label="Execution diagnostics" tabindex="0"></pre>
+  </section>
+</main>
+<script type="module" src="./app.mjs"></script>
+</html>

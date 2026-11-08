@@ -1,0 +1,7 @@
+.cache/
+build/
+dist/
+game/
+.venv/
+__pycache__/
+node_modules/

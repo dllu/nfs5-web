@@ -1,0 +1,3 @@
+[submodule "third_party/nfspu-recomp"]
+	path = third_party/nfspu-recomp
+	url = https://github.com/paintenzero/nfspu-recomp.git

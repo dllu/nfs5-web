@@ -1,0 +1,14 @@
+{
+  "name": "nfs5-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "python3 tools/build.py",
+    "serve": "python3 -m http.server 8000 --bind 127.0.0.1 --directory dist",
+    "test": "node tests/startup.mjs && node tests/differential.mjs",
+    "test:browser": "node tests/browser.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.58.2"
+  }
+}
