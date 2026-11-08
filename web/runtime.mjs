@@ -1,9 +1,10 @@
 import createEngine from './engine.js';
 import { openStorage } from './storage.mjs';
+import { attachAudio } from './audio.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio } = {}) {
   const [module, manifest, response] = await Promise.all([
     createEngine({ print: log, printErr: log }),
     read('./manifest.json').then(checked).then(r => r.json()),
@@ -114,6 +115,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     saving = operation; return operation;
   }
   const storageTimer = storage ? setInterval(() => checkpoint().catch(error => log(`Local save failed: ${error.message}`)), 1000) : null;
+  const detachAudio = audio ? attachAudio(module, audio) : null;
   function snapshot(status) {
     const registers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8));
     const count = module._web_trace_count();
@@ -123,8 +125,9 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     const timers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_timer_stats(), 5));
     const input = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_input_stats(), 4));
     const files = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_fs_stats(), 4));
+    const sound = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_audio_stats(), 4));
     return { status, error: module.UTF8ToString(module._web_error()),
-      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files,
+      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, sound,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
   }
@@ -144,7 +147,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       const result = snapshot(module._web_async_finish());
       await checkpoint(); return result;
     },
-    dispose: () => { clearInterval(storageTimer); disposed = true; storage?.close(); module._web_shutdown(); module.PThread.terminateAllThreads(); },
+    dispose: () => { clearInterval(storageTimer); detachAudio?.(); disposed = true; storage?.close(); module._web_shutdown(); module.PThread.terminateAllThreads(); },
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),
     call: (entry, ...args) => snapshot(module._web_call(entry, ...Array.from({ length: 4 }, (_, i) => args[i] ?? 0))),
   };

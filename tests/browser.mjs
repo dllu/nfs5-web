@@ -162,6 +162,45 @@ try {
   assert.equal(deleted, 0xffffffff);
   assert.deepEqual(errors, []);
   console.log('Chrome restored exact binary save bytes across a reload and retained deletion across a second reload');
+  await page.evaluate(() => {
+    const button = document.createElement('button'); button.textContent = 'Check PCM output'; document.body.append(button);
+    button.onclick = async () => {
+      let audio, runtime;
+      try {
+        const { openAudio } = await import('./audio.mjs'); audio = await openAudio();
+        const { loadRuntime } = await import('./runtime.mjs'); runtime = await loadRuntime({ audio: audio.configuration });
+        const { module, base, manifest } = runtime, data = 0x800000, stack = runtime.memorySize - 0x10000;
+        const view = new DataView(module.HEAPU8.buffer, base), put = (p, v) => view.setUint32(p, v >>> 0, true), get = p => view.getUint32(p, true);
+        function call(address, args) {
+          args.forEach((v, i) => put(stack + i * 4, v)); module._web_set_register(4, stack);
+          if (module._web_run(address, 3000)) throw new Error(module.UTF8ToString(module._web_error()));
+          return new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8)[0];
+        }
+        const method = (self, slot, ...args) => call(get(get(self) + slot * 4), [self, ...args]);
+        const create = manifest.imports.find(item => item.dll === 'DSOUND.dll' && item.name === 'ordinal_1').slot;
+        if (call(create, [0,data,0])) throw new Error('Audio device creation failed');
+        const device = get(data), desc = data + 256, wave = data + 512, result = data + 1024, rate = audio.configuration.rate;
+        view.setUint16(wave,1,true); view.setUint16(wave+2,1,true); put(wave+4,rate); put(wave+8,rate*2);
+        view.setUint16(wave+12,2,true); view.setUint16(wave+14,16,true); view.setUint16(wave+16,0,true);
+        [20,0xe8,rate/10*2,0,wave].forEach((v, i) => put(desc + i * 4, v));
+        if (method(device,3,desc,result,0)) throw new Error('PCM buffer creation failed');
+        const buffer = get(result);
+        if (method(buffer,11,0,0,result,result+4,result+8,result+12,2)) throw new Error('PCM lock failed');
+        const lock = [get(result),get(result+4),get(result+8),get(result+12)];
+        for (let i = 0; i < rate/10; i++) view.setInt16(lock[0] + i*2, Math.round(Math.sin(2*Math.PI*440*i/rate)*8192), true);
+        if (method(buffer,19,...lock) || method(buffer,12,0,0,1)) throw new Error('PCM playback failed');
+        window.audioHarness = { stats: audio.stats, async close() { method(buffer,18); runtime.dispose(); await audio.close(); delete window.audioHarness; } };
+      } catch (error) { runtime?.dispose(); await audio?.close(); window.audioFailure = String(error); }
+    };
+  });
+  await page.getByRole('button', { name: 'Check PCM output' }).click();
+  await page.waitForFunction(() => window.audioFailure || (window.audioHarness?.stats().rendered > 2048 && window.audioHarness.stats().peak > .2), null, { timeout: 15000 });
+  const audio = await page.evaluate(() => ({ error: window.audioFailure, stats: window.audioHarness?.stats() }));
+  assert.equal(audio.error, undefined); assert.equal(audio.stats.state, 'running');
+  assert(audio.stats.peak >= .249 && audio.stats.peak <= .251);
+  await page.evaluate(() => window.audioHarness.close());
+  assert.deepEqual(errors, []);
+  console.log(`Chrome AudioWorklet rendered ${audio.stats.rendered} PCM frames; expected quarter-scale peak verified`);
 } finally {
   await browser.close();
 }

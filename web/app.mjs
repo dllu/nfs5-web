@@ -1,4 +1,5 @@
 import { attachInput } from './input.mjs';
+import { openAudio } from './audio.mjs';
 
 const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 
@@ -14,8 +15,10 @@ button.addEventListener('click', async () => {
   delete window.nfs5Result;
   let worker;
   let detachInput;
+  let audio;
   try {
     if (!crossOriginIsolated) throw new Error('This build requires cross-origin isolation. Use npm run serve or serve dist with its _headers configuration.');
+    audio = await openAudio();
     worker = new Worker(new URL('./runner.mjs', import.meta.url), { type: 'module' });
     const result = await new Promise((resolve, reject) => {
       worker.onerror = event => reject(new Error(event.message));
@@ -32,7 +35,7 @@ button.addEventListener('click', async () => {
         }
         if (data.type === 'result') resolve(data.result);
       };
-      worker.postMessage({ type: 'start' });
+      worker.postMessage({ type: 'start', audio: audio.configuration });
     });
     window.nfs5Result = result;
     status.textContent = result.status ? 'Execution stopped at a porting dependency' : 'Startup function returned';
@@ -47,6 +50,7 @@ button.addEventListener('click', async () => {
   } finally {
     detachInput?.();
     worker?.terminate();
+    await audio?.close();
     button.disabled = false;
   }
 });

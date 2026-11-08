@@ -42,6 +42,7 @@ static guest_block blocks[4096];
 static uint32_t block_count;
 static void thread_exit_code_import(void);
 static recomp_func_t dinput_lookup(uint32_t address);
+static recomp_func_t dsound_lookup(uint32_t address);
 
 #include "win32_machine.h"
 
@@ -91,7 +92,8 @@ recomp_func_t recomp_lookup(uint32_t va) {
 recomp_func_t recomp_lookup_manual(uint32_t va) {
     if (va == 0xF1000000) return thread_exit_code_import;
     if (va == 0xF1000010) return timer_dispatch;
-    return dinput_lookup(va);
+    recomp_func_t fn = dinput_lookup(va);
+    return fn ? fn : dsound_lookup(va);
 }
 recomp_func_t recomp_lookup_import(uint32_t va) {
     recomp_func_t fn = web_import_lookup(va);
@@ -176,6 +178,7 @@ static uint32_t module_handle(const char *name) {
 #include "win32_threads.h"
 #include "win32_timers.h"
 #include "win32_dinput.h"
+#include "win32_dsound.h"
 #include "win32_paths.h"
 #include "win32_files.h"
 
@@ -202,6 +205,7 @@ void web_import(uint32_t index) {
     if (sync_import(name)) return;
     if (timer_import(full)) return;
     if (dinput_import(full)) return;
+    if (dsound_import(full)) return;
     if (path_import(name)) return;
     /* There is no network subsystem in this single-player host. The original
      * game handles this documented startup failure and omits its TCP provider. */
@@ -481,6 +485,8 @@ uint32_t web_init(void) {
     memset(timers, 0, sizeof timers); timer_worker = 0; next_timer_id = 1;
     path_reset();
     fs_reset();
+    memset(ds_devices, 0, sizeof ds_devices); memset(ds_buffers, 0, sizeof ds_buffers); memset(ds_data, 0, sizeof ds_data);
+    ds_device_table = ds_buffer_table = ds_mixed_frames = 0;
     memset(di_devices, 0, sizeof di_devices); di_root_table = di_device_table = di_sequence = 0;
     memset(di_keys, 0, sizeof di_keys); memset(di_pressed, 0, sizeof di_pressed); memset(di_toggled, 0, sizeof di_toggled);
     memset(di_mouse, 0, sizeof di_mouse); memset(di_cursor, 0, sizeof di_cursor); di_buttons = 0; di_focused = 1;
@@ -620,6 +626,16 @@ uint32_t *web_input_stats(void) {
     machine_release(); return stats;
 }
 void web_shutdown(void) { stop_guest_workers(); }
+uint32_t web_audio_mix(float *output, uint32_t frames, uint32_t rate) {
+    if (!frames || frames > 4096 || rate < 8000 || rate > 192000) return 0;
+    machine_acquire(); ds_mix(output, frames, rate); machine_release(); return frames;
+}
+uint32_t *web_audio_stats(void) {
+    static uint32_t stats[4]; machine_acquire(); memset(stats, 0, sizeof stats);
+    for (unsigned i = 0; i < 8; i++) stats[0] += ds_devices[i].references != 0;
+    for (unsigned i = 0; i < 64; i++) if (ds_buffers[i].references) { stats[1]++; stats[2] += ds_buffers[i].playing != 0; }
+    stats[3] = ds_mixed_frames; machine_release(); return stats;
+}
 uint32_t web_fs_mount(const char *source, const char *url, uint32_t size, uint32_t attributes, uint32_t modified) {
     char path[PATH_CAPACITY];
     machine_acquire();

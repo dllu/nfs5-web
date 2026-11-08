@@ -15,7 +15,8 @@ Current implementation:
   these counts do not establish complete code coverage.
 - Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node,
   then starts the original worker (`0x0055F4F0`). About 416,000 function entries
-  execute through input and file setup before `DSOUND!ordinal_1` (creation).
+  execute through input, file and audio-device setup before
+  `USER32!GetForegroundWindow`.
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
@@ -33,15 +34,20 @@ Current implementation:
   Staged assets load on demand through a shared 512 KiB range cache; Chrome and
   Node read the original startup data. Browser file changes persist in IndexedDB
   per origin/executable, checkpointing every second and when startup stops.
+- DirectSound PCM buffers support locking, looping, playback cursors, shared
+  duplicates, volume/pan, 8/16-bit mono/stereo and linear resampling. A shared
+  stereo ring feeds an AudioWorklet; its real-time callback never takes a VM lock.
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
 routines, plus 31 Windows-service, 54 synchronization, 24 thread, 27 timer,
-45 DirectInput and 85 filesystem/path calls. Chrome verifies original startup,
+45 DirectInput, 85 filesystem/path and 54 DirectSound calls. Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
-file/deletion persistence across fresh pages and Wasm instances.
+file/deletion persistence across fresh pages and Wasm instances. A known PCM
+signal reaches the running browser audio graph with its expected amplitude.
 
-Rendering, audio and gameplay remain unimplemented; the game's save/load flow
-is untested. An abrupt close can lose changes since the last checkpoint.
+Windows/message handling, rendering and gameplay remain unimplemented; the
+game's sound playback and save/load flows are untested. An abrupt close can lose
+changes since the last checkpoint.
 The 4K/120 Hz target is unmeasured. The current diagnostic
 Wasm module is about 72 MiB and retains tracing and execution limits. The x87
 helpers use double precision; full floating-point and binary compatibility are
