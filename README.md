@@ -4,7 +4,7 @@ Work in progress: the original PC executable is statically translated from x86
 to C with pcrecomp, then compiled to WebAssembly with Emscripten. The browser
 executes original startup code, plays the intro with game audio, and renders
 the 3D frontend, main menu, profile chooser, quick-race setup and a race scene.
-**The game is not playable yet.**
+**The port is incomplete.**
 
 Current implementation:
 
@@ -19,6 +19,7 @@ Current implementation:
   In Chrome 157 it creates the game window, selects a graphics mode, decodes
   the original intro video and streams its PCM through the browser audio graph.
   The launcher can run until Stop; startup checks use a wall-clock limit.
+  Unbounded play avoids per-function host clock reads while retaining Stop checks.
   Node startup has no GPU attached.
 - The opening-movie part of `nfs5.ini`'s `NoMovies` setting is honored through
   the supplied patch's original jump point in the static translation.
@@ -91,15 +92,18 @@ the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure. These do not measure game FPS.
 
 Manual Chrome navigation reaches quick-race setup and renders the Côte d'Azur
-track and Porsche 356 at 6144x3456. Menu clicks are inconsistent, and race input,
-HUD scaling, fidelity and performance need further verification.
+track and Porsche 356 at 6144x3456. Holding Up accelerates the car; the original
+HUD showed roughly 80 km/h and third gear. Pause and race restart work.
+Menu clicks can require retries. HUD scaling, broader input, fidelity and
+performance need further verification.
 The game's save/load flows remain untested. Custom portrait conversion
 is unavailable; the original caller uses its optional-converter failure path.
 Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
-The 4K/120 Hz target is unmeasured. The current diagnostic
+The 4K/120 Hz target is unmeasured; a short 6K race-scene sample delivered about
+23 presented frames per second. The current diagnostic
 Wasm module is about 72 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
 approximation of Windows NLS. Full floating-point and binary compatibility are

@@ -27,7 +27,7 @@ EM_JS(int, win_timezone, (uint8_t *out), {
     HEAPU8.fill(0,out,out+172);
     function name(at,position) {
         var parts=new Intl.DateTimeFormat(undefined,{timeZoneName:'long'}).formatToParts(new Date(at));
-        var label=parts.find(part=>part.type==='timeZoneName')?.value||zone||'';
+        var label=parts.find(part=>part.type==='timeZoneName')?.value||zone||"";
         for(var i=0;i<Math.min(label.length,31);i++)HEAPU16[(out+position)/2+i]=label.charCodeAt(i);
     }
     function transition(change,position) {

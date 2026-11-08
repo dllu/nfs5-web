@@ -94,13 +94,14 @@ void recomp_trace_enter(uint32_t va) {
         entered[(va - entered_low) >> 3] |= 1u << ((va - entered_low) & 7);
     g_enter_trace[g_enter_idx++ & (TRACE_SIZE - 1)] = va;
     calls++;
-    if (emscripten_get_now() > deadline)
+    /* Run-until-Stop needs no JS clock crossing on every lifted call. */
+    if (deadline != INFINITY && emscripten_get_now() > deadline)
         fail(va, "Execution budget reached at %08X", va);
 }
 
 static void check_loop(void) {
     machine_yield();
-    if (emscripten_get_now() > deadline)
+    if (deadline != INFINITY && emscripten_get_now() > deadline)
         fail(g_cur_func, "Loop budget reached at %08X", g_cur_func);
 }
 
