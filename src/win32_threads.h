@@ -55,6 +55,7 @@ static void *guest_thread_main(void *opaque) {
         MEM32(g_fs_base + 0x30) = 0xA000;
         while (thread->suspend) machine_pause(1000);
         recomp_func_t fn = recomp_lookup(thread->entry);
+        if (!fn) fn = recomp_lookup_manual(thread->entry);
         if (!fn) fn = web_import_lookup(thread->entry);
         if (!fn) fail(thread->entry, "Guest worker entry %08X was not translated", thread->entry);
         g_esp -= 4; MEM32(g_esp) = thread->parameter;
@@ -62,6 +63,8 @@ static void *guest_thread_main(void *opaque) {
         fn(); thread->exit_code = g_eax;
     }
     thread->done = 1;
+    sync_clear_waiters(thread->id);
+    sync_complete_waiters(&sync_objects[thread->object], 0);
     sync_objects[thread->object].references--; /* the running native thread's reference */
     machine_release();
     return NULL;
@@ -104,7 +107,7 @@ static uint32_t create_guest_thread(uint32_t entry, uint32_t parameter, uint32_t
 }
 
 static void stop_guest_workers(void) {
-    pthread_mutex_lock(&machine_mutex); cancel_workers = 1; pthread_mutex_unlock(&machine_mutex);
+    pthread_mutex_lock(&machine_mutex); cancel_workers = 1; wake_timers(); pthread_mutex_unlock(&machine_mutex);
     for (unsigned i = 1; i < 8; i++) {
         guest_thread *thread = &guest_threads[i];
         if (thread->started && !thread->joined) {

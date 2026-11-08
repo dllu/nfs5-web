@@ -1,5 +1,5 @@
-/* Kernel synchronization for the currently serialized guest CPU.
- * A blocking wait needs the guest scheduler; never fabricate a successful wait. */
+/* Kernel synchronization under the guest machine lock. Pending waits retain
+ * their completions so an event reset cannot revoke a delivered signal. */
 #ifndef NFS5_WIN32_SYNC_H
 #define NFS5_WIN32_SYNC_H
 
@@ -62,36 +62,84 @@ static uint32_t sync_create(uint32_t kind, uint32_t name_va, int opening,
     last_error = 8; return 0;
 }
 
-static int sync_ready(sync_object *object) {
+typedef struct {
+    uint32_t owner, count, all, completed, result;
+    sync_object *objects[64];
+} sync_waiter;
+static sync_waiter sync_waiters[64];
+
+static int sync_ready(sync_object *object, uint32_t owner) {
     if (object->kind == SYNC_THREAD) return object->thread && object->thread->done;
-    return object->kind == SYNC_MUTEX ? !object->owner || object->owner == guest_tid() : object->count > 0;
+    return object->kind == SYNC_MUTEX ? !object->owner || object->owner == owner : object->count > 0;
 }
 
-static void sync_take(sync_object *object) {
-    if (object->kind == SYNC_MUTEX) { object->owner = guest_tid(); object->count++; }
+static void sync_take(sync_object *object, uint32_t owner) {
+    if (object->kind == SYNC_MUTEX) { object->owner = owner; object->count++; }
     else if (object->kind == SYNC_SEMAPHORE || (object->kind == SYNC_EVENT && !object->manual)) object->count--;
+}
+
+static uint32_t sync_try_wait(sync_waiter *waiter, sync_object *pulse) {
+    if (waiter->all) {
+        for (uint32_t i = 0; i < waiter->count; i++)
+            if (waiter->objects[i] != pulse && !sync_ready(waiter->objects[i], waiter->owner)) return 0xFFFFFFFF;
+        for (uint32_t i = 0; i < waiter->count; i++)
+            if (waiter->objects[i] != pulse) sync_take(waiter->objects[i], waiter->owner);
+        return 0;
+    }
+    for (uint32_t i = 0; i < waiter->count; i++) {
+        sync_object *object = waiter->objects[i];
+        if (object == pulse || sync_ready(object, waiter->owner)) {
+            if (object != pulse) sync_take(object, waiter->owner);
+            return i;
+        }
+    }
+    return 0xFFFFFFFF;
+}
+
+static void sync_complete_waiters(sync_object *changed, int pulse) {
+    for (unsigned i = 0; i < 64; i++) {
+        sync_waiter *waiter = &sync_waiters[i];
+        if (!waiter->owner || waiter->completed) continue;
+        int contains = 0;
+        for (unsigned j = 0; j < waiter->count; j++) if (waiter->objects[j] == changed) contains = 1;
+        if (!contains) continue;
+        uint32_t result = sync_try_wait(waiter, pulse ? changed : NULL);
+        if (result == 0xFFFFFFFF) continue;
+        waiter->result = result; waiter->completed = 1;
+        if (pulse && !changed->manual) break;
+    }
+}
+
+static void sync_signal_event(sync_object *event, int pulse) {
+    event->count = pulse ? 0 : 1;
+    sync_complete_waiters(event, pulse);
+}
+
+static void sync_clear_waiters(uint32_t owner) {
+    for (unsigned i = 0; i < 64; i++) if (sync_waiters[i].owner == owner) sync_waiters[i].owner = 0;
 }
 
 static uint32_t sync_wait(uint32_t count, const uint32_t *handles, int all, uint32_t timeout) {
     if (!count || count > 64) { last_error = 87; return 0xFFFFFFFF; }
-    sync_object *objects[64];
+    sync_waiter pending = {.owner = guest_tid(), .count = count, .all = all != 0};
     for (uint32_t i = 0; i < count; i++) {
-        objects[i] = sync_get(handles[i]);
-        if (!objects[i]) { last_error = 6; return 0xFFFFFFFF; }
-        for (uint32_t j = 0; j < i; j++) if (handles[j] == handles[i]) {
+        pending.objects[i] = sync_get(handles[i]);
+        if (!pending.objects[i]) { last_error = 6; return 0xFFFFFFFF; }
+        for (uint32_t j = 0; j < i; j++) if (pending.objects[j] == pending.objects[i]) {
             last_error = 87; return 0xFFFFFFFF;
         }
     }
+    uint32_t ready = sync_try_wait(&pending, NULL);
+    if (ready != 0xFFFFFFFF) return ready;
+    if (!timeout) return 258;
+    sync_waiter *waiter = NULL;
+    for (unsigned i = 0; i < 64; i++) if (!sync_waiters[i].owner) { waiter = &sync_waiters[i]; break; }
+    if (!waiter) { last_error = 8; return 0xFFFFFFFF; }
+    *waiter = pending;
     double start = emscripten_get_now();
     for (;;) {
-        if (all) {
-            int ready = 1;
-            for (uint32_t i = 0; i < count; i++) if (!sync_ready(objects[i])) ready = 0;
-            if (ready) { for (uint32_t i = 0; i < count; i++) sync_take(objects[i]); return 0; }
-        } else {
-            for (uint32_t i = 0; i < count; i++) if (sync_ready(objects[i])) { sync_take(objects[i]); return i; }
-        }
-        if (timeout != 0xFFFFFFFF && emscripten_get_now() - start >= timeout) return 258;
+        if (waiter->completed) { ready = waiter->result; waiter->owner = 0; return ready; }
+        if (timeout != 0xFFFFFFFF && emscripten_get_now() - start >= timeout) { waiter->owner = 0; return 258; }
         machine_pause(1000);
     }
 }
@@ -117,8 +165,17 @@ static int sync_import(const char *name) {
             last_error = 6; result(0, 7); return 1;
         }
         if (handle == 0xFFFFFFFE) {
-            copy = sync_create(SYNC_THREAD, 0, 0, 0, 0, 0);
-            if (copy) sync_get(copy)->thread = &guest_threads[current_thread];
+            guest_thread *thread = &guest_threads[current_thread];
+            if (thread->object < 256 && sync_objects[thread->object].references &&
+                sync_objects[thread->object].kind == SYNC_THREAD && sync_objects[thread->object].thread == thread)
+                copy = sync_reference(thread->object);
+            else {
+                copy = sync_create(SYNC_THREAD, 0, 0, 0, 0, 0);
+                if (copy) {
+                    sync_object *created = sync_get(copy); created->thread = thread;
+                    thread->object = (uint32_t)(created - sync_objects);
+                }
+            }
         }
         else if (object) copy = sync_reference((uint32_t)(object - sync_objects));
         else { last_error = 6; result(0, 7); return 1; }
@@ -153,12 +210,14 @@ static int sync_import(const char *name) {
         if (!object || object->kind != SYNC_MUTEX) { last_error = 6; result(0, 1); return 1; }
         if (object->owner != guest_tid()) { last_error = 288; result(0, 1); return 1; }
         if (!--object->count) object->owner = 0;
+        sync_complete_waiters(object, 0);
         result(1, 1); return 1;
     }
     if (!strcmp(name, "SetEvent") || !strcmp(name, "ResetEvent") || !strcmp(name, "PulseEvent")) {
         sync_object *object = sync_get(argument(0));
         if (!object || object->kind != SYNC_EVENT) { last_error = 6; result(0, 1); return 1; }
-        object->count = !strcmp(name, "SetEvent");
+        if (!strcmp(name, "ResetEvent")) object->count = 0;
+        else sync_signal_event(object, !strcmp(name, "PulseEvent"));
         result(1, 1); return 1;
     }
     if (!strcmp(name, "ReleaseSemaphore")) {
@@ -168,7 +227,7 @@ static int sync_import(const char *name) {
         if (!count || count > 0x7FFFFFFF) { last_error = 87; result(0, 3); return 1; }
         if (count > object->maximum - object->count) { last_error = 298; result(0, 3); return 1; }
         if (argument(2)) MEM32(argument(2)) = object->count;
-        object->count += count; result(1, 3); return 1;
+        object->count += count; sync_complete_waiters(object, 0); result(1, 3); return 1;
     }
     if (!strcmp(name, "WaitForSingleObject")) {
         uint32_t handle = argument(0);

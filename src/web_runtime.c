@@ -88,7 +88,9 @@ recomp_func_t recomp_lookup(uint32_t va) {
 }
 
 recomp_func_t recomp_lookup_manual(uint32_t va) {
-    return va == 0xF1000000 ? thread_exit_code_import : NULL;
+    if (va == 0xF1000000) return thread_exit_code_import;
+    if (va == 0xF1000010) return timer_dispatch;
+    return NULL;
 }
 recomp_func_t recomp_lookup_import(uint32_t va) {
     recomp_func_t fn = web_import_lookup(va);
@@ -171,6 +173,7 @@ static uint32_t module_handle(const char *name) {
 
 #include "win32_sync.h"
 #include "win32_threads.h"
+#include "win32_timers.h"
 
 static void thread_exit_code_import(void) {
     sync_object *object = sync_get(argument(0));
@@ -192,6 +195,11 @@ void web_import(uint32_t index) {
     if (!strncmp(full, "NFS5.dll!", 9))
         fail(g_cur_func, "Unimplemented Windows import: %s (caller %08X)", full, g_cur_func);
     if (sync_import(name)) return;
+    if (timer_import(full)) return;
+    /* There is no network subsystem in this single-player host. The original
+     * game handles this documented startup failure and omits its TCP provider. */
+    if (!strcmp(full, "WSOCK32.dll!WSAStartup")) { result(10091, 2); return; }
+    if (!strcmp(full, "USER32.dll!GetWindowLongA")) { last_error = 1400; result(0, 2); return; }
     if (!strcmp(name, "GetVersion")) { result(0x80000104u, 0); return; }
     if (!strcmp(name, "GetLastError")) { result(last_error, 0); return; }
     if (!strcmp(name, "SetLastError")) { last_error = argument(0); result(0, 1); return; }
@@ -200,7 +208,11 @@ void web_import(uint32_t index) {
         result(previous, 1); return;
     }
     if (!strcmp(name, "GetModuleHandleA") || !strcmp(name, "LoadLibraryA")) {
-        uint32_t handle = module_handle(argument(0) ? (const char *)ADDR(argument(0)) : NULL);
+        const char *library = argument(0) ? (const char *)ADDR(argument(0)) : NULL;
+        if (library && (!strcasecmp(library, "TAPI32.dll") || !strcasecmp(library, "TAPI32"))) {
+            last_error = 126; result(0, 1); return;
+        }
+        uint32_t handle = module_handle(library);
         if (!handle) {
             if (!strcmp(name, "LoadLibraryA")) fail(g_cur_func, "Dynamic library needs porting: %s", (const char *)ADDR(argument(0)));
             last_error = 126;
@@ -432,9 +444,12 @@ uint32_t web_init(void) {
     g_enter_idx = calls = g_icall_count = g_icall_trace_idx = 0;
     next_tls = last_error = g_backedges = g_cur_func = exception_filter = 0;
     memset(sync_objects, 0, sizeof sync_objects); memset(sync_handles, 0, sizeof sync_handles);
+    memset(sync_waiters, 0, sizeof sync_waiters);
     memset(guest_threads, 0, sizeof guest_threads);
     memset(critical_sections, 0, sizeof critical_sections);
-    guest_threads[0].used = 1; guest_threads[0].id = 1; current_thread = 0;
+    memset(timers, 0, sizeof timers); timer_worker = 0; next_timer_id = 1;
+    timer_created = timer_fired = timer_callbacks = timer_killed = 0;
+    guest_threads[0].used = 1; guest_threads[0].id = 1; guest_threads[0].object = 0xFFFFFFFF; current_thread = 0;
     next_thread_id = 2; cancel_workers = fatal_pending = 0; error_thread = 0;
     g_flag_k = g_flag_a = g_flag_b = g_flag_cf = 0;
     memset(g_st, 0, sizeof g_st);
@@ -459,6 +474,7 @@ int web_run(uint32_t entry, uint32_t milliseconds) {
         g_esp -= 4; MEM32(g_esp) = RECOMP_RETADDR;
         fn();
     }
+    if (stopped) sync_clear_waiters(guest_tid());
     machine_release();
     if (stopped && !current_thread) stop_guest_workers();
     return stopped != 0;
@@ -531,3 +547,12 @@ void web_set_register(uint32_t index, uint32_t value) {
     if (index < 8) cpu.r[index] = value;
 }
 double web_float_result(void) { return cpu.st[0]; }
+void web_shutdown(void) { stop_guest_workers(); }
+uint32_t *web_timer_stats(void) {
+    static uint32_t stats[5];
+    machine_acquire();
+    stats[0] = timer_created; stats[1] = timer_fired; stats[2] = timer_callbacks; stats[3] = timer_killed;
+    stats[4] = 0; for (unsigned i = 0; i < 64; i++) if (timers[i].armed) stats[4]++;
+    machine_release();
+    return stats;
+}

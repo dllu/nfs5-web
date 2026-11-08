@@ -33,6 +33,8 @@ static uint32_t error_import[10], error_thread;
 static void stop_guest_workers(void);
 static uint32_t create_guest_thread(uint32_t entry, uint32_t parameter, uint32_t flags, uint32_t id_output, uint32_t stack_size);
 static int threads_import(const char *name);
+static void timer_dispatch(void);
+static void wake_timers(void);
 
 static uint32_t guest_tid(void) { return guest_threads[current_thread].id; }
 

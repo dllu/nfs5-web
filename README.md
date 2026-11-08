@@ -15,13 +15,16 @@ Current implementation:
   these counts do not establish complete code coverage.
 - Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node,
   then starts the original worker (`0x0055F4F0`). About 6,000 function entries
-  execute before `WINMM!timeSetEvent` in timer setup.
+  execute before `DINPUT!DirectInputCreateA` in input-device setup.
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
   register file. Up to seven guest workers can run alongside the primary thread.
 - Browser startup runs off the UI thread. The static server supplies the
   cross-origin isolation headers required for shared Wasm memory.
+- Multimedia timers share one sleeping dispatcher and execute the original
+  five-argument callback, including its one-shot rescheduling. Event timers,
+  periodic dispatch, synchronous cancellation and pulse waits are implemented.
 - 68 independent original-x86/Unicorn versus Wasm comparisons pass across four
   routines: two range-copy loops, an object initializer, and an x87 dot product.
 - 31 Windows-service checks cover text conversion, buffer errors, dynamic
@@ -30,6 +33,8 @@ Current implementation:
   semaphore limits, duplicate handles and stale-handle rejection.
 - 24 thread checks cover suspended startup, thread-local state, saved registers,
   completion, event signaling between workers and finite wait timeouts.
+- 27 timer checks cover deadlines, periodic events, cancellation and pulse
+  delivery, including wait-all behavior when another event is unavailable.
 
 Rendering, asset access, audio, keyboard gameplay, and persistent save games
 remain unimplemented. The 4K/120 Hz target is unmeasured. The current diagnostic
