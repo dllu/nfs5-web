@@ -55,6 +55,55 @@ assert.equal(invoke('LoadLibraryA',string('GIMME.DLL')),0);assert.equal(invoke('
 assert.equal(invoke('FreeLibrary',0),0);assert.equal(invoke('GetLastError'),6);
 const resident=invoke('LoadLibraryA',string('KERNEL32'));assert(resident);assert.equal(invoke('FreeLibrary',resident),1);
 
+// SYSTEMTIME has eight packed WORDs in local calendar time, including Sunday=0.
+// Bound by independent JS Date samples, so midnight/year changes are valid too.
+async function checkCalendarTime(name,native) {
+  module.HEAPU8.fill(0xa5,base+output-2,base+output+18);
+  invoke('SetLastError',1234);
+  const before=Date.now();
+  if(native) {
+    const call=await runtime.invokeAsync(manifest.imports.find(i=>i.name===name).slot,[output]);
+    assert.equal(call.status,0,call.error);checks++;
+  } else invoke(name,output);
+  const after=Date.now(),fields=Array.from({length:8},(_,i)=>memory().getUint16(output+i*2,true));
+  const [year,month,weekday,day,hour,minute,second,millis]=fields;
+  const utc=name==='GetSystemTime',date=new Date(utc?Date.UTC(year,month-1,day,hour,minute,second,millis):new Date(year,month-1,day,hour,minute,second,millis));
+  assert(date.getTime()>=before&&date.getTime()<=after,`${name} SYSTEMTIME ${fields} lies within host wall-clock samples ${before}..${after} (got ${date.getTime()})`);
+  assert.equal(utc?date.getUTCDay():date.getDay(),weekday);assert(millis<1000);
+  assert.equal(memory().getUint16(output-2,true),0xa5a5);assert.equal(memory().getUint16(output+16,true),0xa5a5);
+  if(!native)assert.equal(invoke('GetLastError'),1234);
+}
+for(const name of ['GetLocalTime','GetSystemTime'])for(const native of [false,true])await checkCalendarTime(name,native);
+module.HEAPU8.fill(0xa5,base+output-4,base+output+176);
+const zoneState=invoke('GetTimeZoneInformation',output);
+assert([0,1,2].includes(zoneState));
+const bias=memory().getInt32(output,true),adjustment=memory().getInt32(output+(zoneState===2?168:84),true);
+assert.equal(bias+adjustment,new Date().getTimezoneOffset(),'Windows bias is UTC minus local time');
+assert.equal(memory().getUint32(output-4,true),0xa5a5a5a5);assert.equal(memory().getUint32(output+172,true),0xa5a5a5a5);
+for(const nameOffset of [4,88])assert.equal(memory().getUint16(output+nameOffset+62,true),0,'Time-zone names terminate within 32 WCHARs');
+if(zoneState) {
+  for(const [position,before,after] of [[68,bias+memory().getInt32(output+168,true),bias],[152,bias,bias+memory().getInt32(output+168,true)]]) {
+    const [year,month,weekday,day,hour,minute,second,millis]=Array.from({length:8},(_,i)=>memory().getUint16(output+position+i*2,true));
+    assert.equal(year,new Date().getFullYear());
+    const instant=Date.UTC(year,month-1,day,hour,minute,second,millis)+before*60000;
+    assert.equal(new Date(instant-1).getTimezoneOffset(),before);assert.equal(new Date(instant).getTimezoneOffset(),after);
+    assert.equal(new Date(instant-before*60000).getUTCDay(),weekday);
+  }
+} else {
+  assert.equal(memory().getUint16(output+70,true),0);assert.equal(memory().getUint16(output+154,true),0);
+}
+const nativeZone=await runtime.invokeAsync(manifest.imports.find(i=>i.name==='GetTimeZoneInformation').slot,[input]);
+assert.equal(nativeZone.status,0,nativeZone.error);assert.equal(nativeZone.registers[0],zoneState);checks++;
+assert.deepEqual(module.HEAPU8.slice(base+input,base+input+172),module.HEAPU8.slice(base+output,base+output+172));
+assert.equal(invoke('GetTimeZoneInformation',0),0xffffffff);assert.equal(invoke('GetLastError'),87);
+// Exercise the actual CRT routine that blocked race startup, including its
+// local/UTC fields, DST query and seconds-since-1970 conversion.
+for(const address of [0x6afd18,0x6afd30])invoke('InitializeCriticalSection',address);
+const secondsBefore=Math.floor(Date.now()/1000),calendar=runtime.call(0x5a17eb,output),secondsAfter=Math.floor(Date.now()/1000);
+assert.equal(calendar.status,0,calendar.error);assert(calendar.registers[0]>=secondsBefore&&calendar.registers[0]<=secondsAfter);
+assert.equal(memory().getUint32(output,true),calendar.registers[0]);checks++;
+for(const address of [0x6afd18,0x6afd30])invoke('DeleteCriticalSection',address);
+
 const environment = pointer => {
   const entries = []; let p = pointer;
   while (memory().getUint16(p, true)) {
@@ -170,4 +219,4 @@ assert.equal(invoke('HeapSize', 1, 0, resized), 256);
 assert.equal(invoke('HeapFree', 1, 0, allocation), 0);
 assert.equal(invoke('HeapFree', 1, 0, guard), 1);
 assert.equal(invoke('HeapFree', 1, 0, resized), 1);
-console.log(`${checks} Windows service calls passed (version, memory status, shared clocks, environment, CP1252/OEM, collation, imports, allocation reuse/realloc)`);
+console.log(`${checks} Windows service calls passed (version, memory status, shared clocks, local calendar time, environment, CP1252/OEM, collation, imports, allocation reuse/realloc)`);

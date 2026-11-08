@@ -3,7 +3,7 @@
 Work in progress: the original PC executable is statically translated from x86
 to C with pcrecomp, then compiled to WebAssembly with Emscripten. The browser
 executes original startup code, plays the intro with game audio, and renders
-the 3D frontend, main menu and profile chooser. Menu interaction still needs work.
+the 3D frontend, main menu, profile chooser, quick-race setup and a race scene.
 **The game is not playable yet.**
 
 Current implementation:
@@ -34,6 +34,9 @@ Current implementation:
   periodic dispatch, synchronous cancellation and pulse waits are implemented.
   Guest tick counters, input/message timestamps and performance counters use
   one monotonic origin shared by native workers.
+  Local/UTC calendar APIs retain integer milliseconds; time-zone information
+  includes current-year daylight-saving dates. More complex time-zone changes
+  use a fixed current-offset snapshot.
 - DirectInput keyboard/mouse devices execute original enumeration callbacks and
   expose immediate/buffered input, event notifications, relative mouse movement,
   and focus loss. Browser key events reach the Wasm device through the runner.
@@ -70,7 +73,7 @@ Current implementation:
   Multitexture, mipmap and broader 3D scene fidelity remain unverified.
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
-routines, plus 85 Windows-service, 38 virtual-memory, 54 synchronization,
+routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 24 thread, 27 timer, 45 DirectInput, 85 filesystem/path, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
 12 lifecycle checks and 10 startup-configuration checks.
@@ -87,8 +90,10 @@ an OffscreenCanvas rendered in a dedicated Worker. Another 41 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure. These do not measure game FPS.
 
-The frontend and menu/profile controls render, but menu navigation and racing
-are not validated. The game's save/load flows remain untested. Custom portrait conversion
+Manual Chrome navigation reaches quick-race setup and renders the Côte d'Azur
+track and Porsche 356 at 6144x3456. Menu clicks are inconsistent, and race input,
+HUD scaling, fidelity and performance need further verification.
+The game's save/load flows remain untested. Custom portrait conversion
 is unavailable; the original caller uses its optional-converter failure path.
 Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are

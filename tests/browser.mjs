@@ -56,6 +56,15 @@ try {
       return new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8)[0];
     }
     const method = (object, slot, ...args) => call(get(get(object) + slot * 4), [object, ...args]);
+    for(const name of ['GetLocalTime','GetSystemTime']) {
+      const before=Date.now(),result=await runtime.invokeAsync(manifest.imports.find(i=>i.name===name).slot,[data]);
+      if(result.status)throw new Error(result.error);
+      const after=Date.now(),[year,month,weekday,day,hour,minute,second,millis]=Array.from({length:8},(_,i)=>view.getUint16(data+i*2,true));
+      const date=name==='GetSystemTime'?new Date(Date.UTC(year,month-1,day,hour,minute,second,millis)):new Date(year,month-1,day,hour,minute,second,millis);
+      if(date.getTime()<before||date.getTime()>after||(name==='GetSystemTime'?date.getUTCDay():date.getDay())!==weekday)throw new Error('Browser calendar fields differ from the host clock');
+    }
+    const zone=await runtime.invokeAsync(manifest.imports.find(i=>i.name==='GetTimeZoneInformation').slot,[data]);
+    if(zone.status||![0,1,2].includes(zone.registers[0])||view.getInt32(data,true)+view.getInt32(data+(zone.registers[0]===2?168:84),true)!==new Date().getTimezoneOffset())throw new Error('Native browser time-zone bias differs from Date');
     const create = manifest.imports.find(item => item.name === 'DirectInputCreateA').slot;
     if (call(create, [0x400000, 0x500, data, 0])) throw new Error('DirectInput creation failed');
     const root = get(data);
@@ -153,7 +162,7 @@ try {
     assert.deepEqual(mapping.shared,[0,128,255,17]);assert.deepEqual(mapping.stats,[0,0,0,0,0,0]);
     await page.evaluate(() => window.inputHarness.writeSave());
     assert.deepEqual(errors, []);
-    console.log('Chrome keyboard events reached Wasm DirectInput; focus loss and native HTTP range reads verified');
+    console.log('Chrome native calendar/time-zone APIs, physical keyboard input, focus loss and HTTP range reads verified');
   } finally {
     await page.evaluate(() => window.inputHarness.close());
   }

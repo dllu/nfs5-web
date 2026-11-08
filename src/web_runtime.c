@@ -1,6 +1,7 @@
 /* Browser host for the original program's statically translated functions. */
 #include "web_runtime.h"
 #include <emscripten.h>
+#include <emscripten/html5.h>
 #include <stdarg.h>
 #include <strings.h>
 #include <time.h>
@@ -217,6 +218,7 @@ static uint32_t module_handle(const char *name) {
 #include "win32_registry.h"
 #include "win32_environment.h"
 #include "win32_collation.h"
+#include "win32_time.h"
 #include "web_gpu.h"
 #include "thrash_driver.h"
 
@@ -254,6 +256,7 @@ void web_import(uint32_t index) {
     if (!strncmp(full, "ADVAPI32.dll!", 13) && reg_import(name)) return;
     if (environment_import(name)) return;
     if (collation_import(name)) return;
+    if (time_import(full)) return;
     /* There is no network subsystem in this single-player host. The original
      * game handles this documented startup failure and omits its TCP provider. */
     if (!strcmp(full, "WSOCK32.dll!WSAStartup")) { result(10091, 2); return; }
