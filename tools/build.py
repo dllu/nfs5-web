@@ -25,7 +25,7 @@ def main():
     objects = ROOT / "build/obj"
     objects.mkdir(parents=True, exist_ok=True)
     runtime = ROOT / "third_party/nfspu-recomp/third_party/pcrecomp/runtime/recomp32"
-    flags = ['-O1', '-fno-strict-aliasing', '-fwrapv', '-Wno-unused-label',
+    flags = ['-O1', '-pthread', '-fno-strict-aliasing', '-fwrapv', '-Wno-unused-label',
              '-Wno-unused-variable', '-Wno-tautological-compare', '-Wno-parentheses-equality',
              '-Werror=implicit-function-declaration',
              '-DRECOMP_TRACE', '-DRECOMP_YIELD_EVERY=1024',
@@ -52,14 +52,14 @@ def main():
     first = compile(sources[0])
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         compiled = [first, *pool.map(compile, sources[1:])]
-    exports = ['_web_init', '_web_run', '_web_call', '_web_registers', '_web_trace',
+    exports = ['_web_init', '_web_run', '_web_start', '_web_async_status', '_web_async_finish', '_web_call', '_web_registers', '_web_trace',
                '_web_trace_count', '_web_error', '_web_last_pc', '_web_first_pc', '_web_last_import', '_web_heap',
-               '_web_set_register', '_web_float_result', '_web_memory_size', '_web_has_entered', '_malloc', '_free']
-    subprocess.run([str(compiler), *map(str, compiled), '-O1', '-o', str(ROOT / 'dist/engine.js'),
-                    '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,node',
-                    '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=134217728',
+               '_web_set_register', '_web_float_result', '_web_memory_size', '_web_has_entered', '_web_error_thread', '_malloc', '_free']
+    subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', '-o', str(ROOT / 'dist/engine.js'),
+                    '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
+                    '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=536870912',
                     '-sSTACK_SIZE=8388608', '-sEXPORTED_FUNCTIONS=' + json.dumps(exports),
-                    '-sEXPORTED_RUNTIME_METHODS=["UTF8ToString","HEAPU8"]', '-sASSERTIONS=1',
+                    '-sEXPORTED_RUNTIME_METHODS=["UTF8ToString","HEAPU8","PThread"]', '-sASSERTIONS=1',
                     '-lm'], env=env, check=True)
     for source in (ROOT / 'web').iterdir():
         if source.is_file():

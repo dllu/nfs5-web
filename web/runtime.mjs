@@ -39,12 +39,18 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     const trace = Array.from({ length: Math.min(count, 1024) }, (_, i) => ring[(Math.max(0, count - 1024) + i) & 1023]);
     const lastImport = new Uint32Array(module.HEAPU8.buffer, module._web_last_import(), 10);
     return { status, error: module.UTF8ToString(module._web_error()),
-      pc: module._web_last_pc(), first: module._web_first_pc(), count, registers, trace,
+      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
   }
   return { module, manifest, base, memorySize,
     seen: address => Boolean(module._web_has_entered(address)),
+    async runAsync(milliseconds = 5000) {
+      if (module._web_start(manifest.entry, milliseconds)) throw new Error('Unable to start the game worker');
+      while (module._web_async_status() === 1) await new Promise(resolve => setTimeout(resolve, 5));
+      return snapshot(module._web_async_finish());
+    },
+    dispose: () => module.PThread.terminateAllThreads(),
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),
     call: (entry, ...args) => snapshot(module._web_call(entry, ...Array.from({ length: 4 }, (_, i) => args[i] ?? 0))),
   };

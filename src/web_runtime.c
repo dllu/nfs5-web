@@ -28,9 +28,10 @@ uint32_t g_enter_trace[RECOMP_ENTER_SIZE], g_enter_idx;
 void (*recomp_projection_hook)(uint32_t camera);
 void (*recomp_mode_hook)(uint32_t caller, uint32_t entry_esp);
 
-static jmp_buf stop;
+static __thread jmp_buf stop;
 static char error[512];
-static uint32_t last_pc, first_pc, calls, heap_next, last_error, next_tls, exception_filter;
+static uint32_t last_pc, first_pc, calls, heap_next, next_tls, exception_filter;
+static __thread uint32_t last_error;
 static double deadline;
 static uint32_t registers[8];
 static uint32_t import_info[10];
@@ -39,13 +40,20 @@ static uint32_t entered_low, entered_span;
 typedef struct { uint32_t address, size, span, kind, live; } guest_block;
 static guest_block blocks[4096];
 static uint32_t block_count;
+static void thread_exit_code_import(void);
+
+#include "win32_machine.h"
 
 static void fail(uint32_t pc, const char *format, ...) {
-    last_pc = pc;
-    va_list ap;
-    va_start(ap, format);
-    vsnprintf(error, sizeof error, format, ap);
-    va_end(ap);
+    if (!fatal_pending) {
+        last_pc = pc; error_thread = guest_tid();
+        memcpy(error_import, import_info, sizeof import_info);
+        va_list ap;
+        va_start(ap, format);
+        vsnprintf(error, sizeof error, format, ap);
+        va_end(ap);
+        fatal_pending = 1;
+    }
     longjmp(stop, 1);
 }
 
@@ -63,6 +71,7 @@ void recomp_trace_enter(uint32_t va) {
 }
 
 static void check_loop(void) {
+    machine_yield();
     if (emscripten_get_now() > deadline)
         fail(g_cur_func, "Loop budget reached at %08X", g_cur_func);
 }
@@ -78,7 +87,9 @@ recomp_func_t recomp_lookup(uint32_t va) {
         ? recomp_dispatch_table[lo].func : NULL;
 }
 
-recomp_func_t recomp_lookup_manual(uint32_t va) { (void)va; return NULL; }
+recomp_func_t recomp_lookup_manual(uint32_t va) {
+    return va == 0xF1000000 ? thread_exit_code_import : NULL;
+}
 recomp_func_t recomp_lookup_import(uint32_t va) {
     recomp_func_t fn = web_import_lookup(va);
     if (!fn) fail(g_cur_func, "Untranslated call to %08X from %08X", va, g_cur_func);
@@ -159,8 +170,20 @@ static uint32_t module_handle(const char *name) {
 }
 
 #include "win32_sync.h"
+#include "win32_threads.h"
+
+static void thread_exit_code_import(void) {
+    sync_object *object = sync_get(argument(0));
+    guest_thread *thread = argument(0) == 0xFFFFFFFE ? &guest_threads[current_thread] :
+        object && object->kind == SYNC_THREAD ? object->thread : NULL;
+    if (!thread) { last_error = 6; result(0, 2); return; }
+    if (!argument(1)) { last_error = 87; result(0, 2); return; }
+    MEM32(argument(1)) = thread->done ? thread->exit_code : 259;
+    result(1, 2);
+}
 
 void web_import(uint32_t index) {
+    machine_yield();
     import_info[0] = index; import_info[1] = g_cur_func;
     for (unsigned i = 0; i < 8; i++) import_info[i + 2] =
         g_esp < GUEST_SIZE - 4 * (i + 2) ? argument(i) : 0;
@@ -190,6 +213,9 @@ void web_import(uint32_t index) {
             web_import_lookup(0xF0000000u + handle - 0x70000000u)) {
             const char *dll = web_import_names[(handle - 0x70000000u) / 16];
             size_t dll_length = (size_t)(strchr(dll, '!') - dll);
+            if (dll_equal(dll, dll_length, "KERNEL32", 8) && !strcmp((const char *)ADDR(symbol), "GetExitCodeThread")) {
+                result(0xF1000000, 2); return;
+            }
             for (uint32_t i = 0; web_import_lookup(0xF0000000u + i * 16); i++) {
                 const char *full = web_import_names[i], *separator = strchr(full, '!');
                 if (dll_equal(dll, dll_length, full, (size_t)(separator - full)) &&
@@ -216,7 +242,8 @@ void web_import(uint32_t index) {
         MEM16(info + 32) = 6;
         result(0, 1); return;
     }
-    if (!strcmp(name, "GetCurrentProcessId") || !strcmp(name, "GetCurrentThreadId")) { result(1, 0); return; }
+    if (!strcmp(name, "GetCurrentProcessId")) { result(1, 0); return; }
+    if (!strcmp(name, "GetCurrentThreadId")) { result(guest_tid(), 0); return; }
     if (!strcmp(name, "GetTickCount") || !strcmp(name, "timeGetTime")) { result((uint32_t)emscripten_get_now(), 0); return; }
     if (!strcmp(full, "WINMM.dll!timeGetDevCaps")) {
         if (!argument(0) || argument(1) < 8) { result(97, 2); return; }
@@ -277,19 +304,17 @@ void web_import(uint32_t index) {
         }
         last_error = 87; result(0, 3); return;
     }
-    if (!strcmp(name, "InitializeCriticalSection") || !strcmp(name, "EnterCriticalSection") ||
-        !strcmp(name, "LeaveCriticalSection") || !strcmp(name, "DeleteCriticalSection")) { result(0, 1); return; }
     if (!strcmp(name, "TlsAlloc")) {
         if (next_tls == 256) { last_error = 8; result(0xFFFFFFFF, 0); return; }
         result(next_tls++, 0); return;
     }
     if (!strcmp(name, "TlsSetValue")) {
         if (argument(0) >= next_tls) { last_error = 87; result(0, 2); return; }
-        MEM32(0x9000 + argument(0) * 4) = argument(1); result(1, 2); return;
+        MEM32(g_fs_base + 0x1000 + argument(0) * 4) = argument(1); result(1, 2); return;
     }
     if (!strcmp(name, "TlsGetValue")) {
         if (argument(0) >= next_tls) { last_error = 87; result(0, 1); return; }
-        last_error = 0; result(MEM32(0x9000 + argument(0) * 4), 1); return;
+        last_error = 0; result(MEM32(g_fs_base + 0x1000 + argument(0) * 4), 1); return;
     }
     if (!strcmp(name, "GetStartupInfoA")) {
         uint32_t info = argument(0);
@@ -384,6 +409,7 @@ void recomp_eh_resume(recomp_ehframe_t *f, uint32_t resume) { (void)f; (void)res
 void recomp_dump_trace(const char *why) { (void)why; }
 
 uint32_t web_init(void) {
+    stop_guest_workers();
     if (!g_mem_base) g_mem_base = (ptrdiff_t)calloc(1, GUEST_SIZE);
     else memset((void *)g_mem_base, 0, GUEST_SIZE);
     if (!g_mem_base) return 0;
@@ -406,38 +432,86 @@ uint32_t web_init(void) {
     g_enter_idx = calls = g_icall_count = g_icall_trace_idx = 0;
     next_tls = last_error = g_backedges = g_cur_func = exception_filter = 0;
     memset(sync_objects, 0, sizeof sync_objects); memset(sync_handles, 0, sizeof sync_handles);
-    sync_thread_priority = 0;
+    memset(guest_threads, 0, sizeof guest_threads);
+    memset(critical_sections, 0, sizeof critical_sections);
+    guest_threads[0].used = 1; guest_threads[0].id = 1; current_thread = 0;
+    next_thread_id = 2; cancel_workers = fatal_pending = 0; error_thread = 0;
     g_flag_k = g_flag_a = g_flag_b = g_flag_cf = 0;
     memset(g_st, 0, sizeof g_st);
     g_fp_top = 0; g_fpu_cw = 0x37F;
     error[0] = 0; last_pc = first_pc = 0;
     memset(import_info, 0, sizeof import_info); import_info[0] = 0xFFFFFFFF;
     recomp_yield_hook = check_loop;
+    cpu_save();
     return (uint32_t)g_mem_base;
 }
 
 int web_run(uint32_t entry, uint32_t milliseconds) {
-    error[0] = 0;
+    machine_acquire();
+    if (!current_thread) { error[0] = 0; fatal_pending = 0; cancel_workers = 0; }
     deadline = emscripten_get_now() + milliseconds;
-    if (setjmp(stop)) return 1;
-    recomp_func_t fn = recomp_lookup(entry);
-    if (!fn) fn = web_import_lookup(entry);
-    if (!fn) fail(entry, "Entry %08X was not translated", entry);
-    g_esp -= 4; MEM32(g_esp) = RECOMP_RETADDR;
-    fn();
+    int stopped = setjmp(stop);
+    if (!stopped) {
+        recomp_func_t fn = recomp_lookup(entry);
+        if (!fn) fn = recomp_lookup_manual(entry);
+        if (!fn) fn = web_import_lookup(entry);
+        if (!fn) fail(entry, "Entry %08X was not translated", entry);
+        g_esp -= 4; MEM32(g_esp) = RECOMP_RETADDR;
+        fn();
+    }
+    machine_release();
+    if (stopped && !current_thread) stop_guest_workers();
+    return stopped != 0;
+}
+
+static struct {
+    guest_cpu initial, final;
+    uint32_t entry, milliseconds;
+    pthread_t native;
+    _Atomic int status;
+} asynchronous_run;
+
+static void *asynchronous_main(void *unused) {
+    (void)unused;
+    current_thread = 0; cpu = asynchronous_run.initial; last_error = 0;
+    int status = web_run(asynchronous_run.entry, asynchronous_run.milliseconds);
+    stop_guest_workers();
+    asynchronous_run.final = cpu;
+    atomic_store(&asynchronous_run.status, status ? 3 : 2);
+    return NULL;
+}
+
+int web_start(uint32_t entry, uint32_t milliseconds) {
+    if (atomic_load(&asynchronous_run.status)) return 1;
+    asynchronous_run.initial = cpu;
+    asynchronous_run.entry = entry; asynchronous_run.milliseconds = milliseconds;
+    atomic_store(&asynchronous_run.status, 1);
+    if (pthread_create(&asynchronous_run.native, NULL, asynchronous_main, NULL)) {
+        atomic_store(&asynchronous_run.status, 0); return 2;
+    }
     return 0;
 }
 
+int web_async_status(void) { return atomic_load(&asynchronous_run.status); }
+
+int web_async_finish(void) {
+    int status = atomic_load(&asynchronous_run.status);
+    if (status < 2) return -1;
+    pthread_join(asynchronous_run.native, NULL);
+    cpu = asynchronous_run.final;
+    atomic_store(&asynchronous_run.status, 0);
+    return status == 3;
+}
+
 int web_call(uint32_t entry, uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
-    g_esp = STACK_TOP - 16;
-    MEM32(g_esp) = a; MEM32(g_esp + 4) = b;
-    MEM32(g_esp + 8) = c; MEM32(g_esp + 12) = d;
+    cpu.r[4] = STACK_TOP - 16;
+    MEM32(cpu.r[4]) = a; MEM32(cpu.r[4] + 4) = b;
+    MEM32(cpu.r[4] + 8) = c; MEM32(cpu.r[4] + 12) = d;
     return web_run(entry, 2000);
 }
 
 uint32_t *web_registers(void) {
-    registers[0] = g_eax; registers[1] = g_ecx; registers[2] = g_edx; registers[3] = g_ebx;
-    registers[4] = g_esp; registers[5] = g_ebp; registers[6] = g_esi; registers[7] = g_edi;
+    memcpy(registers, cpu.r, sizeof registers);
     return registers;
 }
 uint32_t *web_trace(void) { return g_enter_trace; }
@@ -445,15 +519,15 @@ uint32_t web_trace_count(void) { return g_enter_idx; }
 const char *web_error(void) { return error; }
 uint32_t web_last_pc(void) { return last_pc; }
 uint32_t web_first_pc(void) { return first_pc; }
+uint32_t web_error_thread(void) { return error_thread; }
 int web_has_entered(uint32_t va) {
     return va >= entered_low && va - entered_low < entered_span &&
         (entered[(va - entered_low) >> 3] & (1u << ((va - entered_low) & 7))) != 0;
 }
-uint32_t *web_last_import(void) { return import_info; }
+uint32_t *web_last_import(void) { return fatal_pending ? error_import : cpu.import; }
 uint32_t web_heap(void) { return heap_next; }
 uint32_t web_memory_size(void) { return GUEST_SIZE; }
 void web_set_register(uint32_t index, uint32_t value) {
-    uint32_t *r[] = { &g_eax, &g_ecx, &g_edx, &g_ebx, &g_esp, &g_ebp, &g_esi, &g_edi };
-    if (index < 8) *r[index] = value;
+    if (index < 8) cpu.r[index] = value;
 }
-double web_float_result(void) { return g_st[0]; }
+double web_float_result(void) { return cpu.st[0]; }

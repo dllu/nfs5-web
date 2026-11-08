@@ -23,6 +23,7 @@ try {
   assert.equal(result.status, 1);
   assert(result.count >= 2099);
   assert(result.winMainEntered, 'Original WinMain must execute in Chrome');
+  assert(result.workerEntered, 'Original worker must execute in Chrome');
   assert(result.error.length > 0);
   assert.deepEqual(errors, []);
   await page.screenshot({ path: 'build/chrome-startup.png', fullPage: true });

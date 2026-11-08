@@ -14,16 +14,22 @@ Current implementation:
   Recovery includes overlapping instruction ranges;
   these counts do not establish complete code coverage.
 - Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node,
-  recording 5,944 function entries before `KERNEL32!CreateThread` in timer setup.
+  then starts the original worker (`0x0055F4F0`). About 6,000 function entries
+  execute before `WINMM!timeSetEvent` in timer setup.
 - Mutex/event/semaphore handles, recursive ownership, named references, and
-  nonblocking waits are implemented for the serialized guest CPU. Blocking
-  synchronization and guest worker execution remain to be implemented.
+  blocking waits are implemented. Native Wasm workers have separate CPU/FPU
+  state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
+  register file. Up to seven guest workers can run alongside the primary thread.
+- Browser startup runs off the UI thread. The static server supplies the
+  cross-origin isolation headers required for shared Wasm memory.
 - 68 independent original-x86/Unicorn versus Wasm comparisons pass across four
   routines: two range-copy loops, an object initializer, and an x87 dot product.
 - 31 Windows-service checks cover text conversion, buffer errors, dynamic
   imports, the game's 128 MiB allocation/release probe, and realloc preservation.
 - 54 synchronization checks cover ownership, event reset, atomic wait-all,
   semaphore limits, duplicate handles and stale-handle rejection.
+- 24 thread checks cover suspended startup, thread-local state, saved registers,
+  completion, event signaling between workers and finite wait timeouts.
 
 Rendering, asset access, audio, keyboard gameplay, and persistent save games
 remain unimplemented. The 4K/120 Hz target is unmeasured. The current diagnostic
@@ -48,6 +54,12 @@ Open <http://127.0.0.1:8000> and select **Run original startup**. The page repor
 the next unsupported dependency and a trace of executed original functions.
 `npm run test:browser` tests installed Chrome against that server and writes
 its report and screenshot to `build/`.
+
+Other static hosts must send `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`; `dist/_headers` provides this
+configuration for hosts that support that format. The build uses a 512 MiB
+shared Wasm memory initially, including the 256 MiB guest arena, and an
+eight-worker native thread pool.
 
 On this machine the read-only input is:
 

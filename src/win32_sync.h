@@ -7,11 +7,11 @@ enum { SYNC_MUTEX = 1, SYNC_EVENT, SYNC_SEMAPHORE, SYNC_THREAD };
 typedef struct {
     uint32_t kind, references, owner, count, maximum, manual;
     char name[260];
+    guest_thread *thread;
 } sync_object;
 typedef struct { uint32_t generation, object; } sync_handle;
 static sync_object sync_objects[256];
 static sync_handle sync_handles[512];
-static int32_t sync_thread_priority;
 
 static sync_object *sync_get(uint32_t handle) {
     uint32_t slot = (handle & 0xFFF) / 4, generation = (handle >> 12) & 0xFFF;
@@ -53,7 +53,7 @@ static uint32_t sync_create(uint32_t kind, uint32_t name_va, int opening,
         sync_object *object = &sync_objects[i];
         memset(object, 0, sizeof *object);
         object->kind = kind; object->count = initial; object->maximum = maximum;
-        object->manual = manual; object->owner = kind == SYNC_MUTEX && initial ? 1 : 0;
+        object->manual = manual; object->owner = kind == SYNC_MUTEX && initial ? guest_tid() : 0;
         if (name) strcpy(object->name, name);
         uint32_t handle = sync_reference(i);
         if (handle) last_error = 0;
@@ -63,11 +63,12 @@ static uint32_t sync_create(uint32_t kind, uint32_t name_va, int opening,
 }
 
 static int sync_ready(sync_object *object) {
-    return object->kind == SYNC_MUTEX ? !object->owner || object->owner == 1 : object->count > 0;
+    if (object->kind == SYNC_THREAD) return object->thread && object->thread->done;
+    return object->kind == SYNC_MUTEX ? !object->owner || object->owner == guest_tid() : object->count > 0;
 }
 
 static void sync_take(sync_object *object) {
-    if (object->kind == SYNC_MUTEX) { object->owner = 1; object->count++; }
+    if (object->kind == SYNC_MUTEX) { object->owner = guest_tid(); object->count++; }
     else if (object->kind == SYNC_SEMAPHORE || (object->kind == SYNC_EVENT && !object->manual)) object->count--;
 }
 
@@ -81,19 +82,22 @@ static uint32_t sync_wait(uint32_t count, const uint32_t *handles, int all, uint
             last_error = 87; return 0xFFFFFFFF;
         }
     }
-    if (all) {
-        int ready = 1;
-        for (uint32_t i = 0; i < count; i++) if (!sync_ready(objects[i])) ready = 0;
-        if (ready) { for (uint32_t i = 0; i < count; i++) sync_take(objects[i]); return 0; }
-    } else {
-        for (uint32_t i = 0; i < count; i++) if (sync_ready(objects[i])) { sync_take(objects[i]); return i; }
+    double start = emscripten_get_now();
+    for (;;) {
+        if (all) {
+            int ready = 1;
+            for (uint32_t i = 0; i < count; i++) if (!sync_ready(objects[i])) ready = 0;
+            if (ready) { for (uint32_t i = 0; i < count; i++) sync_take(objects[i]); return 0; }
+        } else {
+            for (uint32_t i = 0; i < count; i++) if (sync_ready(objects[i])) { sync_take(objects[i]); return i; }
+        }
+        if (timeout != 0xFFFFFFFF && emscripten_get_now() - start >= timeout) return 258;
+        machine_pause(1000);
     }
-    if (!timeout) return 258;
-    fail(g_cur_func, "Blocking synchronization wait needs guest scheduling (%u objects, timeout %u)", count, timeout);
-    return 0xFFFFFFFF;
 }
 
 static int sync_import(const char *name) {
+    if (threads_import(name)) return 1;
     if (!strcmp(name, "GetCurrentThread")) { result(0xFFFFFFFE, 0); return 1; }
     if (!strcmp(name, "GetThreadPriority") || !strcmp(name, "SetThreadPriority")) {
         sync_object *object = sync_get(argument(0));
@@ -101,8 +105,10 @@ static int sync_import(const char *name) {
         if (argument(0) != 0xFFFFFFFE && (!object || object->kind != SYNC_THREAD)) {
             last_error = 6; result(setting ? 0 : 0x7FFFFFFF, setting ? 2 : 1); return 1;
         }
-        if (setting) sync_thread_priority = (int32_t)argument(1);
-        result(setting ? 1 : (uint32_t)sync_thread_priority, setting ? 2 : 1); return 1;
+        guest_thread *thread = argument(0) == 0xFFFFFFFE ? &guest_threads[current_thread] : object->thread;
+        if (!thread) { last_error = 6; result(setting ? 0 : 0x7FFFFFFF, setting ? 2 : 1); return 1; }
+        if (setting) thread->priority = (int32_t)argument(1);
+        result(setting ? 1 : (uint32_t)thread->priority, setting ? 2 : 1); return 1;
     }
     if (!strcmp(name, "DuplicateHandle")) {
         uint32_t handle = argument(1), copy = 0;
@@ -110,7 +116,10 @@ static int sync_import(const char *name) {
         if (argument(0) != 0xFFFFFFFF || argument(2) != 0xFFFFFFFF || !argument(3)) {
             last_error = 6; result(0, 7); return 1;
         }
-        if (handle == 0xFFFFFFFE) copy = sync_create(SYNC_THREAD, 0, 0, 0, 0, 0);
+        if (handle == 0xFFFFFFFE) {
+            copy = sync_create(SYNC_THREAD, 0, 0, 0, 0, 0);
+            if (copy) sync_get(copy)->thread = &guest_threads[current_thread];
+        }
         else if (object) copy = sync_reference((uint32_t)(object - sync_objects));
         else { last_error = 6; result(0, 7); return 1; }
         if (!copy) { result(0, 7); return 1; }
@@ -142,7 +151,7 @@ static int sync_import(const char *name) {
     if (!strcmp(name, "ReleaseMutex")) {
         sync_object *object = sync_get(argument(0));
         if (!object || object->kind != SYNC_MUTEX) { last_error = 6; result(0, 1); return 1; }
-        if (object->owner != 1) { last_error = 288; result(0, 1); return 1; }
+        if (object->owner != guest_tid()) { last_error = 288; result(0, 1); return 1; }
         if (!--object->count) object->owner = 0;
         result(1, 1); return 1;
     }
