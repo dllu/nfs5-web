@@ -128,6 +128,7 @@ static int fs_read_node(fs_node *node, uint32_t offset, uint32_t count, uint8_t 
     return 1;
 }
 static int fs_resize(fs_node *node, uint32_t size, int preserve) {
+    if(size<node->size&&mapping_node_active((uint32_t)(node-fs_nodes)+1)){last_error=1224;return 0;}
     uint32_t wanted = size > node->size && preserve ? size : preserve ? node->size : size;
     if (wanted > FS_WRITE_LIMIT || wanted > FS_WRITE_LIMIT - fs_written + node->capacity) { last_error = 112; return 0; }
     if (!node->data || wanted > node->capacity) {
@@ -307,7 +308,7 @@ static int fs_import(const char *name) {
         uint32_t buffer = argument(1), size = argument(2), transferred = argument(3), overlapped = argument(4);
         if (transferred) MEM32(transferred) = 0;
         if (overlapped) { last_error = 50; result(0, 5); return 1; }
-        if (!transferred || (size && (!buffer || buffer >= GUEST_SIZE || size > GUEST_SIZE - buffer))) { last_error = 87; result(0, 5); return 1; }
+        if (!transferred || (size && (!buffer || !web_guest_range(buffer,size)))) { last_error = 87; result(0, 5); return 1; }
         uint32_t n = size, offset = (uint32_t)object->position;
         if (write) {
             if (size > UINT32_MAX - offset) { last_error = 112; result(0, 5); return 1; }

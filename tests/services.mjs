@@ -49,6 +49,11 @@ assert(nativeTick.registers[0]>=tickBefore+20&&nativeTick.registers[0]<tickBefor
 const tickAfter=invoke('GetTickCount');assert(tickAfter>=nativeTick.registers[0]&&tickAfter<tickBefore+2000);
 invoke('QueryPerformanceCounter',output);const elapsedMicros=Number(memory().getBigUint64(output,true)-counterBefore);
 assert(elapsedMicros>=20000&&Math.abs(elapsedMicros/1000-(tickAfter-tickBefore))<100);
+const patchVersion=await runtime.invokeAsync(manifest.imports.find(i=>i.dll==='NFS5.dll'&&i.name==='GetVersion').slot,[]);
+assert.equal(patchVersion.status,0,patchVersion.error);assert.equal(patchVersion.registers[0],0x60001);checks++;
+assert.equal(invoke('LoadLibraryA',string('GIMME.DLL')),0);assert.equal(invoke('GetLastError'),193);
+assert.equal(invoke('FreeLibrary',0),0);assert.equal(invoke('GetLastError'),6);
+const resident=invoke('LoadLibraryA',string('KERNEL32'));assert(resident);assert.equal(invoke('FreeLibrary',resident),1);
 
 const environment = pointer => {
   const entries = []; let p = pointer;

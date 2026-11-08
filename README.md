@@ -2,7 +2,8 @@
 
 Work in progress: the original PC executable is statically translated from x86
 to C with pcrecomp, then compiled to WebAssembly with Emscripten. The browser
-executes original startup code and plays the intro cinematic with game audio.
+executes original startup code, plays the intro with game audio, and renders
+the 3D frontend scene. Frontend layout and interaction still need work.
 **The game is not playable yet.**
 
 Current implementation:
@@ -19,6 +20,9 @@ Current implementation:
   the original intro video and streams its PCM through the browser audio graph.
   The launcher can run until Stop; startup checks use a wall-clock limit.
   Node startup has no GPU attached.
+- The opening-movie part of `nfs5.ini`'s `NoMovies` setting is honored through
+  the supplied patch's original jump point in the static translation.
+  Development runs can force playback with `loadRuntime({intro:true})`.
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
@@ -38,6 +42,12 @@ Current implementation:
   Staged assets load on demand through a shared 512 KiB range cache; Chrome and
   Node read the original startup data. Browser file changes persist in IndexedDB
   per origin/executable, checkpointing every second and when startup stops.
+- File mappings use distinct guest addresses and shared backing, with named
+  handles, overlapping views, eager private copies and writable-view checkpoints.
+  A 512 MiB view address range has a 128 MiB backing limit. Lifted scalar, x87,
+  SSE and bulk-copy helpers translate mapped addresses; aliasing copies retain
+  x86 element order. Reservation, commitment and protection metadata are tracked.
+  Forbidden page accesses are not trapped by the flat Wasm arena.
 - DirectSound PCM buffers support locking, looping, playback cursors, shared
   duplicates, volume/pan, 8/16-bit mono/stereo and linear resampling. A shared
   stereo ring feeds an AudioWorklet; its real-time callback never takes a VM lock.
@@ -54,15 +64,18 @@ Current implementation:
   replacement connects guest driver calls to an OffscreenCanvas through a
   bounded shared-memory queue, with chunked texture uploads, framebuffer
   reads/writes and mode changes. The original video decoder presents through
-  framebuffer lock/unlock. Full 3D scene compatibility is unverified.
+  framebuffer lock/unlock. The frontend submits original geometry and textures.
+  Multitexture, mipmap and broader 3D scene fidelity remain unverified.
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
-routines, plus 78 Windows-service, 54 synchronization, 24 thread, 27 timer,
-45 DirectInput, 85 filesystem/path, 54 DirectSound, 31 registry, 98 window/desktop and
-78 Thrash loader/ABI calls and 12 lifecycle checks.
+routines, plus 85 Windows-service, 38 virtual-memory, 54 synchronization,
+24 thread, 27 timer, 45 DirectInput, 85 filesystem/path, 86 mapping,
+54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
+12 lifecycle checks and 10 startup-configuration checks.
 Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
-file/deletion and registry persistence across fresh pages and Wasm instances. A known PCM
+file/deletion, mapped-file writeback and registry persistence across fresh pages
+and Wasm instances. A known PCM
 signal reaches the running browser audio graph with its expected amplitude.
 An additional 15-second original-code run verifies advancing video, visible
 pixels, timer callbacks and nonzero game PCM.
@@ -72,7 +85,10 @@ an OffscreenCanvas rendered in a dedicated Worker. Another 33 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure. These do not measure game FPS.
 
-Menus, racing and the game's save/load flows remain untested. Window APIs and
+The frontend scene renders, but its menu layout/interaction and racing are not
+validated. The game's save/load flows remain untested. Custom portrait conversion
+is unavailable; the original caller uses its optional-converter failure path.
+Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.

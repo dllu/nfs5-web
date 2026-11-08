@@ -37,6 +37,7 @@ static uint32_t sync_create(uint32_t kind, uint32_t name_va, int opening,
     const char *name = name_va ? (const char *)ADDR(name_va) : NULL;
     if (name && !*name) name = NULL;
     if (name && strlen(name) >= sizeof sync_objects[0].name) { last_error = 206; return 0; }
+    if(name&&mapping_name_exists(name)){last_error=6;return 0;}
     for (uint32_t i = 0; name && i < 256; i++) {
         sync_object *object = &sync_objects[i];
         if (!object->references || !object->name[0] || strcmp(object->name, name)) continue;

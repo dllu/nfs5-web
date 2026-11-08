@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 import { resolve } from 'node:path';
+import {openingMovies} from '../web/config.mjs';
 
 // Keep Chromium's profiles, caches, and Playwright's temporary files local.
 process.env.TMPDIR = resolve('.cache/tmp');
@@ -10,6 +11,8 @@ process.env.__GL_SHADER_DISK_CACHE_PATH = resolve('.cache/nvidia');
 await mkdir(process.env.TMPDIR, { recursive: true });
 const fixture = Uint8Array.from({ length: 131195 }, (_, i) => (i * 37 + (i >>> 8)) & 255);
 await writeFile('dist/fs-browser-fixture.bin', fixture);
+const index=JSON.parse(await readFile('dist/assets.json','utf8')),ini=index.entries.find(item=>item.path.toLowerCase()==='nfs5.ini');
+const expectedIntro=openingMovies(ini?.url?new Uint8Array(await readFile(new URL('../dist/'+ini.url,import.meta.url))):null);
 const browser = await chromium.launchPersistentContext(resolve('.cache/chrome-test'), {
   executablePath: '/usr/bin/google-chrome', headless: false,
   args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-breakpad',
@@ -29,6 +32,8 @@ try {
   assert(result.winMainEntered, 'Original WinMain must execute in Chrome');
   assert(result.workerEntered, 'Original worker must execute in Chrome');
   assert(result.error.length > 0);
+  assert.equal(result.intro,expectedIntro,'Opening movies follow the supplied nfs5.ini');
+  if(!expectedIntro)assert(result.introSkipped>0,'Original helper must take the native patch movie-skip branch');
   assert.deepEqual(errors, []);
   await page.screenshot({ path: 'build/chrome-startup.png', fullPage: true });
   await writeFile('build/chrome-startup.json', JSON.stringify({ browser: browser.browser().version(), ...result }, null, 2) + '\n');
@@ -99,6 +104,25 @@ try {
         invoke('CloseHandle', [file]);
         return { ok, count: get(transferred), bytes, files: Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_fs_stats(), 4)) };
       },
+      async mappingFixture() {
+        const name=data+15000,path='C:\\nfs5\\BrowserMappingChecks.bin';
+        runtime.mount(path,{url:new URL('./fs-browser-fixture.bin',location.href).href,size:131195});
+        module.HEAPU8.set(new TextEncoder().encode(path+'\0'),base+name);
+        const invoke=(name,args)=>call(manifest.imports.find(i=>i.name===name).slot,args);
+        const file=invoke('CreateFileA',[name,0xC0000000,3,0,3,128,0]);
+        const mapped=await runtime.invokeAsync(manifest.imports.find(i=>i.name==='CreateFileMappingA').slot,[file,0,0x08000004,0,0,0]);
+        if(mapped.status||!mapped.registers[0])throw new Error(mapped.error||'Native mapping creation failed');
+        const handle=mapped.registers[0],a=invoke('MapViewOfFile',[handle,6,0,0,0]),b=invoke('MapViewOfFile',[handle,4,0,65536,1000]);
+        if(!a||!b||a+65536===b)throw new Error('Mapping views need distinct guest addresses');
+        const pa=module._web_pointer(a+65536,1000),pb=module._web_pointer(b,1000);
+        if(pa!==pb)throw new Error('Overlapping file views must share backing');
+        const original=Array.from(module.HEAPU8.subarray(pa,pa+100));module.HEAPU8.set([0,128,255,17],pa+17);
+        invoke('CloseHandle',[file]);invoke('CloseHandle',[handle]);
+        await runtime.checkpoint();
+        const shared=Array.from(module.HEAPU8.subarray(pb+17,pb+21));
+        invoke('UnmapViewOfFile',[a]);invoke('UnmapViewOfFile',[b]);
+        return {original,shared,stats:Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_mapping_stats(),6))};
+      },
       state() {
         const status = method(keyboard, 9, 256, data + 8192);
         return { status, keys: Array.from(module.HEAPU8.subarray(base + data + 8192, base + data + 8448)) };
@@ -124,6 +148,9 @@ try {
     assert.equal(read.ok, 1); assert.equal(read.count, 100);
     assert.deepEqual(read.bytes, Array.from(fixture.subarray(65530, 65630)));
     assert.equal(read.files[2], 2, 'A cross-chunk native read must fetch two HTTP ranges');
+    const mapping=await page.evaluate(()=>window.inputHarness.mappingFixture());
+    assert.deepEqual(mapping.original,Array.from(fixture.subarray(65536,65636)));
+    assert.deepEqual(mapping.shared,[0,128,255,17]);assert.deepEqual(mapping.stats,[0,0,0,0,0,0]);
     await page.evaluate(() => window.inputHarness.writeSave());
     assert.deepEqual(errors, []);
     console.log('Chrome keyboard events reached Wasm DirectInput; focus loss and native HTTP range reads verified');
@@ -156,12 +183,18 @@ try {
       view.setUint32(data+1032,4,true);
       if (invoke('RegQueryValueExA', [key,data,0,data+1028,data+1040,data+1032])) throw new Error('Registry fixture query failed');
       result.registry = view.getUint32(data+1040,true); invoke('RegCloseKey', [key]);
+      module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserMappingChecks.bin\0'),base+data);
+      const mappedFile=invoke('CreateFileA',[data,0x80000000,3,0,3,128,0]);
+      invoke('SetFilePointer',[mappedFile,65536+17,0,0]);
+      if(!invoke('ReadFile',[mappedFile,data+4096,4,data+8192,0]))throw new Error('Mapped write did not persist');
+      result.mapped=Array.from(module.HEAPU8.subarray(base+data+4096,base+data+4100));invoke('CloseHandle',[mappedFile]);
       await runtime.checkpoint(); return result;
     } finally { runtime.dispose(); }
   });
   assert.equal(restored.read, 1); assert.equal(restored.count, 10);
   assert.deepEqual(restored.bytes, [0,1,2,3,10,13,127,128,255,42]);
   assert.equal(restored.registry, 120);
+  assert.deepEqual(restored.mapped,[0,128,255,17]);
   await page.reload();
   const deleted = await page.evaluate(async () => {
     const { loadRuntime } = await import('./runtime.mjs'), runtime = await loadRuntime();
@@ -226,7 +259,7 @@ try {
       try {
         const {openAudio}=await import('./audio.mjs');audio=await openAudio();
         const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;canvas.id='movie-check';document.body.prepend(canvas);
-        const {loadRuntime}=await import('./runtime.mjs');runtime=await loadRuntime({canvas,audio:audio.configuration,persist:false});
+        const {loadRuntime}=await import('./runtime.mjs');runtime=await loadRuntime({canvas,audio:audio.configuration,persist:false,intro:true});
         const result=await runtime.runAsync(15000),renderer=runtime.graphics.renderer,pixels=await renderer.readPixels();
         let lit=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]||pixels[i+1]||pixels[i+2])lit++;
         const still=document.createElement('canvas');still.width=renderer.width;still.height=renderer.height;still.id='movie-frame';
@@ -245,6 +278,7 @@ try {
   assert(movie.result.audio.peak>.01,'Original streaming PCM must reach the browser audio graph');
   assert(movie.result.timers[2]>100,'Original timer callbacks must keep advancing');
   assert.deepEqual(movie.result.gpuErrors,[]);assert.deepEqual(errors,[]);
+  assert.equal(movie.result.intro,true);assert.equal(movie.result.introSkipped,0);
   await page.locator('#movie-frame').screenshot({path:'build/original-startup.png'});
   await writeFile('build/original-startup.json',JSON.stringify(movie.result,null,2)+'\n');
   console.log(`Original intro: ${movie.result.rendering[3]} presented frames, ${movie.result.lit} visible pixels and game PCM peak ${movie.result.audio.peak.toFixed(3)}`);

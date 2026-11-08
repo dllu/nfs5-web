@@ -2,11 +2,12 @@ import createEngine from './engine.js';
 import { openStorage } from './storage.mjs';
 import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
+import {openingMovies,verokImage} from './config.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro } = {}) {
   const [module, manifest, response] = await Promise.all([
     createEngine({ print: log, printErr: log }),
     read('./manifest.json').then(checked).then(r => r.json()),
@@ -54,7 +55,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       return id;
     } finally { module._free(name); module._free(source); }
   }
-  let assets;
+  let assets,startupConfig;
   try { assets = await read('./assets.json'); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (assets?.ok) {
@@ -64,6 +65,8 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       ...item, url: item.url ? new URL(item.url, import.meta.url).href : '',
     });
     log(`Mounted ${index.entries.length.toLocaleString()} game files and directories`);
+    const ini=index.entries.find(item=>item.path.toLowerCase()==='nfs5.ini');
+    if(ini?.url){const response=await read(ini.url);if(response.ok)startupConfig=new Uint8Array(await response.arrayBuffer());}
   } else if (assets && assets.status !== 404) throw new Error(`Unable to load assets: HTTP ${assets.status}`);
   function changes() {
     const pointer = module._web_fs_snapshot();
@@ -87,6 +90,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       const records = await storage.load();
       records.sort((a, b) => a.path.split('\\').length - b.path.split('\\').length);
       for (const record of records) {
+        if(record.path.toLowerCase()==='c:\\nfs5\\nfs5.ini')startupConfig=record.live?(record.data??startupConfig):null;
         if (!record.live) {
           const path = nativeString(record.path, true);
           try { if (!module._web_fs_remove(path)) throw new Error(`Unable to restore deletion: ${record.path}`); }
@@ -107,6 +111,8 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       if (records.length) log(`Restored ${records.length} browser-local file changes`);
     }
     if (!module._web_registry_restore()) throw new Error('Invalid persisted application registry');
+    intro??=openingMovies(startupConfig);
+    if(sha256===verokImage)module._web_intro_config(intro?1:0);
   } catch (error) { storage?.close(); module.PThread.terminateAllThreads(); throw error; }
   let saving = Promise.resolve(), disposed = false;
   function checkpoint() {
@@ -140,9 +146,10 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       return Object.fromEntries(soundBufferFields.map((field,j)=>[field,values[j]]));
     });
     const rendering=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
+    const mappings=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_mapping_stats(),6));
     const error=module.UTF8ToString(module._web_error());
-    return { status, error, stopped:error==='Stopped by user',
-      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, sound, soundBuffers, rendering,
+    return { status, error, stopped:error==='Stopped by user',intro,introSkipped:module._web_intro_skipped(),
+      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, mappings, sound, soundBuffers, rendering,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
   }

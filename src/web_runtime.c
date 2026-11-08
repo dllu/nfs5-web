@@ -6,7 +6,7 @@
 #include <time.h>
 #include "win32_locale.h"
 
-#define GUEST_SIZE (256u * 1024u * 1024u)
+#define GUEST_SIZE WEB_GUEST_SIZE
 #define HEAP_LIMIT (224u * 1024u * 1024u)
 #define STACK_TOP (GUEST_SIZE - 16u)
 #define TRACE_SIZE 1024u
@@ -34,6 +34,11 @@ static uint32_t last_pc, first_pc, calls, heap_next, next_tls, exception_filter;
 static __thread uint32_t last_error;
 static double deadline;
 static double win_clock_origin;
+static uint32_t intro_enabled=1;
+static uint32_t intro_skipped;
+void web_intro_config(uint32_t enabled){intro_enabled=enabled!=0;}
+int web_skip_intro(void){if(!intro_enabled)intro_skipped++;return !intro_enabled;}
+uint32_t web_intro_skipped(void){return intro_skipped;}
 static uint32_t win_ticks(void) {
     /* Emscripten's monotonic clock includes performance.timeOrigin. Convert
      * elapsed time through uint64_t so the final 32-bit conversion wraps;
@@ -53,6 +58,10 @@ static recomp_func_t dinput_lookup(uint32_t address);
 static recomp_func_t dsound_lookup(uint32_t address);
 static recomp_func_t thrash_lookup(uint32_t address);
 static void fail(uint32_t pc,const char *format,...);
+static int mapping_name_exists(const char *name);
+static int mapping_node_active(uint32_t node);
+static void map_flush_import(void);
+static void memory_claim(uint32_t address,uint32_t size,uint32_t protection,uint32_t owner);
 
 #include "win32_machine.h"
 
@@ -71,6 +80,10 @@ static void fail(uint32_t pc, const char *format, ...) {
 
 void web_unsupported(uint32_t pc, const char *instruction) {
     fail(pc, "Unsupported instruction at %08X: %s", pc, instruction);
+}
+_Noreturn void web_invalid_address(uint32_t address) {
+    fail(g_cur_func,"Unmapped guest address %08X",address);
+    abort();
 }
 
 void recomp_trace_enter(uint32_t va) {
@@ -102,6 +115,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
 }
 
 recomp_func_t recomp_lookup_manual(uint32_t va) {
+    if(va==0xF6000000)return map_flush_import;
     if (va == 0xF1000000) return thread_exit_code_import;
     if (va == 0xF1000010) return timer_dispatch;
     recomp_func_t fn = dinput_lookup(va);
@@ -140,6 +154,7 @@ static uint32_t allocate_kind(uint32_t size, uint32_t alignment, uint32_t kind) 
             *remainder = (guest_block){block->address + span, 0, block->span - span, 0, 0};
         }
         *block = (guest_block){block->address, size, span, kind, 1};
+        memory_claim(block->address,span,4,kind==2?block->address:1);
         memset((void *)ADDR(block->address), 0, span);
         return block->address;
     }
@@ -147,12 +162,14 @@ static uint32_t allocate_kind(uint32_t size, uint32_t alignment, uint32_t kind) 
     if (address > HEAP_LIMIT - span) fail(g_cur_func, "Guest heap exhausted (%u bytes)", size);
     guest_block *block = block_slot();
     *block = (guest_block){address, size, span, kind, 1};
+    memory_claim(address,span,4,kind==2?address:1);
     heap_next = address + span;
     memset((void *)ADDR(address), 0, span);
     return address;
 }
 
 static void release_block(guest_block *block) {
+    if(block->kind==2)memory_claim(block->address,block->span,0,0);
     block->live = 0;
     /* Reclaim the tail, including previously freed adjacent blocks. */
     int changed;
@@ -194,6 +211,8 @@ static uint32_t module_handle(const char *name) {
 #include "win32_dsound.h"
 #include "win32_paths.h"
 #include "win32_files.h"
+#include "win32_mapping.h"
+#include "win32_memory.h"
 #include "win32_windows.h"
 #include "win32_registry.h"
 #include "win32_environment.h"
@@ -218,8 +237,12 @@ void web_import(uint32_t index) {
         g_esp < GUEST_SIZE - 4 * (i + 2) ? argument(i) : 0;
     const char *full = web_import_names[index];
     const char *name = strchr(full, '!') + 1;
+    /* This is Verok's patch version, not the Win32 operating-system version. */
+    if(!strcmp(full,"NFS5.dll!GetVersion")){result(0x60001,0);return;}
     if (!strncmp(full, "NFS5.dll!", 9))
         fail(g_cur_func, "Unimplemented Windows import: %s (caller %08X)", full, g_cur_func);
+    if (memory_import(name)) return;
+    if (mapping_import(name)) return;
     if (fs_import(name)) return;
     if (sync_import(name)) return;
     if (timer_import(full)) return;
@@ -266,6 +289,7 @@ void web_import(uint32_t index) {
     if (!strcmp(name, "GlobalMemoryStatus")) {
         uint32_t p=argument(0),available=HEAP_LIMIT-heap_next;
         for(unsigned i=0;i<block_count;i++)if(!blocks[i].live)available+=blocks[i].span;
+        available=available>map_allocated?available-map_allocated:0;
         /* Report the bounded guest machine, rather than the browser host's RAM. */
         if(p){uint32_t status[]={32,(uint32_t)((uint64_t)(GUEST_SIZE-available)*100u/GUEST_SIZE),GUEST_SIZE,available,GUEST_SIZE,available,GUEST_SIZE,available};
             memcpy((void*)ADDR(p),status,sizeof status);}
@@ -275,6 +299,13 @@ void web_import(uint32_t index) {
         uint32_t module=argument(0);
         int valid=module==THRASH_MODULE || (module>=0x70000000 && module<0x70010000 && !(module&15) && web_import_lookup(0xF0000000+module-0x70000000));
         if(!valid)last_error=6;
+        result(valid,1);return;
+    }
+    if(!strcmp(name,"FreeLibrary")) {
+        uint32_t handle=argument(0);
+        int valid=handle==THRASH_MODULE||(handle>=0x70000000&&handle<0x70010000&&!(handle&15)&&web_import_lookup(0xF0000000+handle-0x70000000));
+        if(!valid)last_error=6;
+        /* Static host service bindings remain resident for the process. */
         result(valid,1);return;
     }
     if (!strcmp(name, "SetLastError")) { last_error = argument(0); result(0, 1); return; }
@@ -289,6 +320,11 @@ void web_import(uint32_t index) {
         }
         uint32_t handle = module_handle(library);
         if (!handle) handle = thrash_module(library);
+        if(!handle&&!strcasecmp(library,"gimme.dll")) {
+            /* Optional FaceInRace photo import has a caller-owned fallback.
+             * A PE image converter is not an executable Wasm host module. */
+            last_error=193;result(0,1);return;
+        }
         if (!handle) {
             if (!strcmp(name, "LoadLibraryA")) fail(g_cur_func, "Dynamic library needs porting: %s", (const char *)ADDR(argument(0)));
             last_error = 126;
@@ -308,6 +344,7 @@ void web_import(uint32_t index) {
             if (dll_equal(dll, dll_length, "KERNEL32", 8) && !strcmp((const char *)ADDR(symbol), "GetExitCodeThread")) {
                 result(0xF1000000, 2); return;
             }
+            if(dll_equal(dll,dll_length,"KERNEL32",8)&&!strcmp((const char*)ADDR(symbol),"FlushViewOfFile")){result(0xF6000000,2);return;}
             for (uint32_t i = 0; web_import_lookup(0xF0000000u + i * 16); i++) {
                 const char *full = web_import_names[i], *separator = strchr(full, '!');
                 if (dll_equal(dll, dll_length, full, (size_t)(separator - full)) &&
@@ -328,7 +365,7 @@ void web_import(uint32_t index) {
         uint32_t info = argument(0);
         memset((void *)ADDR(info), 0, 36);
         MEM32(info + 4) = 4096; /* page size */
-        MEM32(info + 8) = 0x10000; MEM32(info + 12) = GUEST_SIZE - 1;
+        MEM32(info + 8) = 0x10000; MEM32(info + 12) = MAP_VM_BASE+MAP_VM_SIZE-1;
         MEM32(info + 16) = 1; MEM32(info + 20) = 1; /* serialized guest CPU */
         MEM32(info + 24) = 586; MEM32(info + 28) = 65536;
         MEM16(info + 32) = 6;
@@ -368,34 +405,6 @@ void web_import(uint32_t index) {
         uint32_t address = allocate(size);
         memcpy((void *)ADDR(address), (void *)ADDR(block->address), block->size);
         release_block(block); result(address, 4); return;
-    }
-    if (!strcmp(name, "VirtualAlloc")) {
-        uint32_t address = argument(0), size = argument(1);
-        if (!size) { last_error = 87; result(0, 4); return; }
-        if (address) {
-            address &= ~0xFFFu;
-            guest_block *reservation = NULL;
-            for (uint32_t i = 0; i < block_count; i++) if (blocks[i].live && blocks[i].kind == 2 &&
-                address >= blocks[i].address && address < blocks[i].address + blocks[i].span) reservation = &blocks[i];
-            if (!reservation || size > reservation->span - (address - reservation->address))
-                fail(g_cur_func, "VirtualAlloc commit outside reservation: %08X + %X", address, size);
-            result(address, 4); return;
-        }
-        result(allocate_kind(size, 65536, 2), 4); return;
-    }
-    if (!strcmp(name, "VirtualFree")) {
-        uint32_t address = argument(0), size = argument(1), flags = argument(2);
-        guest_block *block = find_block(address, 2);
-        if (flags == 0x8000 && block && !size) { release_block(block); result(1, 3); return; }
-        if (flags == 0x4000) {
-            address &= ~4095u;
-            for (uint32_t i = 0; i < block_count; i++) if (blocks[i].live && blocks[i].kind == 2 &&
-                address >= blocks[i].address && address < blocks[i].address + blocks[i].span &&
-                size <= blocks[i].span - (address - blocks[i].address)) {
-                memset((void *)ADDR(address), 0, size); result(1, 3); return;
-            }
-        }
-        last_error = 87; result(0, 3); return;
     }
     if (!strcmp(name, "TlsAlloc")) {
         if (next_tls == 256) { last_error = 8; result(0xFFFFFFFF, 0); return; }
@@ -522,6 +531,7 @@ uint32_t web_init(void) {
     block_count = 0; memset(blocks, 0, sizeof blocks);
     g_enter_idx = calls = g_icall_count = g_icall_trace_idx = 0;
     win_clock_origin=emscripten_get_now();
+    intro_enabled=1;intro_skipped=0;
     next_tls = last_error = g_backedges = g_cur_func = exception_filter = 0;
     memset(sync_objects, 0, sizeof sync_objects); memset(sync_handles, 0, sizeof sync_handles);
     memset(sync_waiters, 0, sizeof sync_waiters);
@@ -529,7 +539,7 @@ uint32_t web_init(void) {
     memset(critical_sections, 0, sizeof critical_sections);
     memset(timers, 0, sizeof timers); timer_worker = 0; next_timer_id = 1;
     path_reset();
-    fs_reset();
+    mapping_reset();memory_reset();fs_reset();
     memset(ds_devices, 0, sizeof ds_devices); memset(ds_buffers, 0, sizeof ds_buffers); memset(ds_data, 0, sizeof ds_data);
     ds_device_table = ds_buffer_table = ds_mixed_frames = 0;
     win_reset();
@@ -646,6 +656,16 @@ int web_has_entered(uint32_t va) {
 uint32_t *web_last_import(void) { return fatal_pending ? error_import : cpu.import; }
 uint32_t web_heap(void) { return heap_next; }
 uint32_t web_memory_size(void) { return GUEST_SIZE; }
+uint32_t web_pointer(uint32_t address,uint32_t size) {
+    machine_acquire();uint32_t pointer=web_guest_range(address,size)?(uint32_t)ADDR(address):0;machine_release();return pointer;
+}
+uint32_t *web_mapping_stats(void) {
+    static uint32_t stats[6];machine_acquire();memset(stats,0,sizeof stats);stats[0]=map_allocated;
+    for(unsigned i=0;i<64;i++)stats[1]+=map_stores[i].data!=NULL;
+    for(unsigned i=0;i<128;i++)stats[2]+=map_objects[i].refs!=0;
+    for(unsigned i=0;i<256;i++){stats[3]+=map_handles[i].object!=0;stats[4]+=map_views[i].base!=0;stats[5]+=map_views[i].copy!=NULL;}
+    machine_release();return stats;
+}
 void web_set_register(uint32_t index, uint32_t value) {
     if (index < 8) cpu.r[index] = value;
 }
@@ -750,6 +770,7 @@ uint32_t *web_fs_stats(void) {
 }
 uint32_t *web_fs_snapshot(void) {
     machine_acquire();
+    if(!mapping_flush_all()){machine_release();return NULL;}
     uint32_t length = 12, count = 0;
     for (unsigned i = 0; i < fs_count; i++) if (fs_nodes[i].dirty) {
         fs_node *node = &fs_nodes[i];

@@ -23,6 +23,8 @@ def main():
     args = parser.parse_args()
     image = args.executable.resolve()
     info, data, iat = load_pe(str(image))
+    image_sha=hashlib.sha256(data).hexdigest()
+    patches=[]
     if info.image_base != 0x400000:
         parser.error("Expected the NFS5 image at 0x400000")
     output = ROOT / "build/lift"
@@ -43,6 +45,16 @@ def main():
             function = functions[address]
             function.name = f"sub_{address:08X}"
             source = lifter.lift_function(function)
+            if address==0x004DD600 and image_sha=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906':
+                # The supplied nfs5.dll patches 004DD611 to jump to 004DD70B
+                # for NoMovies=1. Keep the same stack/register effects in the
+                # static translation instead of modifying executable bytes.
+                for pc in ('004DD611','004DD70B'):
+                    if source.count('/* 0x'+pc+':')!=1:parser.error('Opening-movie hook instructions changed')
+                source=re.sub(r'(?m)^(.*?/\* 0x004DD611:.*)$',r'    if (web_skip_intro()) goto WEB_INTRO_RESUME;\n\1',source,count=1)
+                source=re.sub(r'(?m)^(.*?/\* 0x004DD70B:.*)$',r'WEB_INTRO_RESUME:\n\1',source,count=1)
+                source='int web_skip_intro(void);\n'+source
+                patches.append('verok-no-movies')
             # A missing instruction must stop the guest at its exact address.
             def trap(match):
                 instruction, pc = match.groups()
@@ -73,7 +85,7 @@ def main():
     wrappers += [json.dumps(imp['dll'] + '!' + imp['name']) + ',' for imp in imports]
     wrappers += ['};']
     (output / "imports.c").write_text("\n".join(wrappers))
-    manifest = {"executable": image.name, "sha256": hashlib.sha256(data).hexdigest(),
+    manifest = {"executable": image.name, "sha256": image_sha,"patches":patches,
                 "imageBase": info.image_base, "entry": info.image_base + info.entry_point_rva,
                 "sections": [asdict(s) for s in info.sections], "imports": imports,
                 "functions": len(functions), "instructions": sum(r['instructions'] for r in records),

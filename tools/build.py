@@ -25,19 +25,39 @@ def main():
     objects = ROOT / "build/obj"
     objects.mkdir(parents=True, exist_ok=True)
     runtime = ROOT / "third_party/nfspu-recomp/third_party/pcrecomp/runtime/recomp32"
+    # Keep the pinned dependency untouched. The local copy adds an address
+    # hook before inline memory helpers, including rep-movs and SSE loads.
+    includes = ROOT / 'build/include'
+    includes.mkdir(exist_ok=True)
+    original = (runtime / 'recomp_types.h').read_text()
+    marker = '#ifdef RECOMP_FLAT_MEMORY\n'
+    if original.count(marker) != 1:
+        parser.error('Pinned memory header changed; review the address hook')
+    adapted = original.replace(marker, '#if defined(RECOMP_ADDRESS)\n#define ADDR(va) RECOMP_ADDRESS(va)\n#elif defined(RECOMP_FLAT_MEMORY)\n')
+    overlap = 'if (df > 0 ? edi - esi >= b : esi - edi >= b)'
+    if original.count(overlap) != 1:
+        parser.error('Pinned rep-movs helper changed; review mapped alias overlap')
+    adapted = adapted.replace('uint32_t b = n * esz;', 'if (!n) return;\n    uint32_t b = n * esz;')
+    adapted = adapted.replace(overlap, 'if (df > 0 ? ADDR(edi) - ADDR(esi) >= b : ADDR(esi) - ADDR(edi) >= b)')
+    memory_header = includes / 'recomp_types.h'
+    if not memory_header.exists() or memory_header.read_text() != adapted:
+        memory_header.write_text(adapted)
     flags = ['-O1', '-pthread', '-fno-strict-aliasing', '-fwrapv', '-Wno-unused-label',
              '-Wno-unused-variable', '-Wno-tautological-compare', '-Wno-parentheses-equality',
              '-Werror=implicit-function-declaration',
              '-DRECOMP_TRACE', '-DRECOMP_YIELD_EVERY=1024',
-             '-I' + str(ROOT / 'src'), '-I' + str(runtime), '-I' + str(lift)]
+             '-I' + str(ROOT / 'src'), '-I' + str(includes), '-I' + str(runtime), '-I' + str(lift)]
     sources = sorted(lift.glob('*.c')) + [ROOT / 'src/web_runtime.c']
     if not (lift / 'manifest.json').exists():
         parser.error('Run tools/prepare.py with your game executable first')
+    metadata=json.loads((lift/'manifest.json').read_text())
+    if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'verok-no-movies' not in metadata.get('patches',[]):
+        parser.error('Run tools/prepare.py again to generate the opening-movie configuration hook')
     configuration = hashlib.sha256(json.dumps([str(compiler), flags]).encode()).hexdigest()
     def compile(source):
         obj = objects / (source.stem + '.o')
         signature = obj.with_suffix('.flags')
-        dependencies = [source, ROOT / 'src/web_runtime.h', runtime / 'recomp_types.h',
+        dependencies = [source, ROOT / 'src/web_runtime.h', ROOT / 'src/web_memory.h', memory_header,
                         lift / 'functions.h']
         if source.parent == ROOT / 'src':
             dependencies.extend((ROOT / 'src').glob('*.h'))
@@ -61,6 +81,8 @@ def main():
     exports.append('_web_registry_restore')
     exports.append('_web_display_size')
     exports.extend(['_web_gpu_transport', '_web_gpu_attach', '_web_gpu_fail', '_web_gpu_stats'])
+    exports.extend(['_web_pointer','_web_mapping_stats'])
+    exports.extend(['_web_intro_config','_web_intro_skipped'])
     subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=536870912',
