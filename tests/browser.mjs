@@ -6,6 +6,8 @@ import { resolve } from 'node:path';
 // Keep Chromium's profiles, caches, and Playwright's temporary files local.
 process.env.TMPDIR = resolve('.cache/tmp');
 await mkdir(process.env.TMPDIR, { recursive: true });
+const fixture = Uint8Array.from({ length: 131195 }, (_, i) => (i * 37 + (i >>> 8)) & 255);
+await writeFile('dist/fs-browser-fixture.bin', fixture);
 const browser = await chromium.launchPersistentContext(resolve('.cache/chrome-test'), {
   executablePath: '/usr/bin/google-chrome', headless: true,
   args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-breakpad',
@@ -29,6 +31,10 @@ try {
   await page.screenshot({ path: 'build/chrome-startup.png', fullPage: true });
   await writeFile('build/chrome-startup.json', JSON.stringify({ browser: browser.browser().version(), ...result }, null, 2) + '\n');
   console.log(`Chrome ${browser.browser().version()}: ${result.count} original function entries; ${result.error}`);
+  const range = await page.request.get(new URL('./fs-browser-fixture.bin', page.url()).href, { headers: { Range: 'bytes=65530-65629' } });
+  assert.equal(range.status(), 206);
+  assert.equal(range.headers()['content-range'], 'bytes 65530-65629/131195');
+  assert.deepEqual(new Uint8Array(await range.body()), fixture.subarray(65530, 65630));
   // Exercise real DOM key events through the same adapter used by the runner,
   // then read them through the Wasm DirectInput vtable, including focus loss.
   await page.evaluate(async () => {
@@ -54,6 +60,24 @@ try {
     if (method(keyboard, 11, format) || method(keyboard, 13, 0, 6) || method(keyboard, 7)) throw new Error('Keyboard acquisition failed');
     const detach = attachInput(window, event => runtime.input(event));
     window.inputHarness = {
+      async readFixture() {
+        runtime.mount('C:\\nfs5\\BrowserFixture.bin', { url: new URL('./fs-browser-fixture.bin', location.href).href, size: 131195 });
+        const name = data + 9000, output = data + 10000, transferred = output + 1024;
+        module.HEAPU8.set(new TextEncoder().encode('browserfixture.bin\0'), base + name);
+        const invoke = (name, args) => call(manifest.imports.find(item => item.name === name).slot, args);
+        const file = invoke('CreateFileA', [name, 0x80000000, 3, 0, 3, 128, 0]);
+        if (file === 0xffffffff) throw new Error('Fixture open failed');
+        invoke('SetFilePointer', [file, 65530, 0, 0]);
+        [file, output, 100, transferred, 0].forEach((v, i) => put(stack + i * 4, v));
+        module._web_set_register(4, stack);
+        if (module._web_start(manifest.imports.find(item => item.name === 'ReadFile').slot, 5000)) throw new Error('Native file-read worker failed');
+        while (module._web_async_status() === 1) await new Promise(resolve => setTimeout(resolve, 5));
+        if (module._web_async_finish()) throw new Error(module.UTF8ToString(module._web_error()));
+        const ok = new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8)[0];
+        const bytes = Array.from(module.HEAPU8.subarray(base + output, base + output + 100));
+        invoke('CloseHandle', [file]);
+        return { ok, count: get(transferred), bytes, files: Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_fs_stats(), 4)) };
+      },
       state() {
         const status = method(keyboard, 9, 256, data + 8192);
         return { status, keys: Array.from(module.HEAPU8.subarray(base + data + 8192, base + data + 8448)) };
@@ -75,8 +99,12 @@ try {
     assert.equal(await page.evaluate(() => window.inputHarness.acquire()), 0);
     assert((await page.evaluate(() => window.inputHarness.state())).keys.every(value => value === 0));
     await page.keyboard.up('w');
+    const read = await page.evaluate(() => window.inputHarness.readFixture());
+    assert.equal(read.ok, 1); assert.equal(read.count, 100);
+    assert.deepEqual(read.bytes, Array.from(fixture.subarray(65530, 65630)));
+    assert.equal(read.files[2], 2, 'A cross-chunk native read must fetch two HTTP ranges');
     assert.deepEqual(errors, []);
-    console.log('Chrome keyboard events reached Wasm DirectInput; releases and focus loss verified');
+    console.log('Chrome keyboard events reached Wasm DirectInput; focus loss and native HTTP range reads verified');
   } finally {
     await page.evaluate(() => window.inputHarness.close());
   }

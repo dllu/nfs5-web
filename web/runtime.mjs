@@ -32,6 +32,33 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
   for (const [index, item] of manifest.imports.entries()) {
     new DataView(module.HEAPU8.buffer).setUint32(base + item.slot, 0xf0000000 + index * 16, true);
   }
+  const ansiCodes = new Map(Array.from({ length: 256 }, (_, i) => [new TextDecoder('windows-1252').decode(Uint8Array.of(i)), i]));
+  function nativeString(text, ansi = false) {
+    const bytes = ansi ? Uint8Array.from(Array.from(text + '\0', character => {
+      if (!ansiCodes.has(character)) throw new Error(`Filename cannot be represented in Windows-1252: ${text}`);
+      return ansiCodes.get(character);
+    })) : new TextEncoder().encode(text + '\0'), pointer = module._malloc(bytes.length);
+    module.HEAPU8.set(bytes, pointer); return pointer;
+  }
+  function mount(path, { url = '', size = 0, attributes = 32, modified = 0 } = {}) {
+    const name = nativeString(path, true), source = nativeString(url);
+    try {
+      const id = module._web_fs_mount(name, source, size, attributes, modified);
+      if (!id) throw new Error(`Unable to mount virtual file ${path}`);
+      return id;
+    } finally { module._free(name); module._free(source); }
+  }
+  let assets;
+  try { assets = await read('./assets.json'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (assets?.ok) {
+    const index = await assets.json();
+    if (index.executable !== sha256) throw new Error('Asset index does not match the translated executable');
+    for (const item of index.entries) mount('C:\\nfs5\\' + item.path.replaceAll('/', '\\'), {
+      ...item, url: item.url ? new URL(item.url, import.meta.url).href : '',
+    });
+    log(`Mounted ${index.entries.length.toLocaleString()} game files and directories`);
+  } else if (assets && assets.status !== 404) throw new Error(`Unable to load assets: HTTP ${assets.status}`);
   function snapshot(status) {
     const registers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8));
     const count = module._web_trace_count();
@@ -40,12 +67,14 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     const lastImport = new Uint32Array(module.HEAPU8.buffer, module._web_last_import(), 10);
     const timers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_timer_stats(), 5));
     const input = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_input_stats(), 4));
+    const files = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_fs_stats(), 4));
     return { status, error: module.UTF8ToString(module._web_error()),
-      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input,
+      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
   }
   return { module, manifest, base, memorySize,
+    mount,
     input(event) {
       if ('focus' in event) module._web_input_focus(event.focus ? 1 : 0);
       if ('key' in event) module._web_input_key(event.key, event.down ? 1 : 0);

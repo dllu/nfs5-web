@@ -176,6 +176,8 @@ static uint32_t module_handle(const char *name) {
 #include "win32_threads.h"
 #include "win32_timers.h"
 #include "win32_dinput.h"
+#include "win32_paths.h"
+#include "win32_files.h"
 
 static void thread_exit_code_import(void) {
     sync_object *object = sync_get(argument(0));
@@ -196,9 +198,11 @@ void web_import(uint32_t index) {
     const char *name = strchr(full, '!') + 1;
     if (!strncmp(full, "NFS5.dll!", 9))
         fail(g_cur_func, "Unimplemented Windows import: %s (caller %08X)", full, g_cur_func);
+    if (fs_import(name)) return;
     if (sync_import(name)) return;
     if (timer_import(full)) return;
     if (dinput_import(full)) return;
+    if (path_import(name)) return;
     /* There is no network subsystem in this single-player host. The original
      * game handles this documented startup failure and omits its TCP provider. */
     if (!strcmp(full, "WSOCK32.dll!WSAStartup")) { result(10091, 2); return; }
@@ -266,7 +270,7 @@ void web_import(uint32_t index) {
     }
     if (!strcmp(name, "GetCurrentProcess")) { result(0xFFFFFFFF, 0); return; }
     if (!strcmp(name, "GetDriveTypeA")) {
-        const char *path = argument(0) ? (const char *)ADDR(argument(0)) : "C:\\";
+        const char *path = argument(0) ? (const char *)ADDR(argument(0)) : path_cwd;
         char drive = path[0] >= 'a' && path[0] <= 'z' ? path[0] - 32 : path[0];
         result(drive == 'C' ? 3 : drive == 'D' ? 5 : 1, 1); return;
     }
@@ -475,6 +479,8 @@ uint32_t web_init(void) {
     memset(guest_threads, 0, sizeof guest_threads);
     memset(critical_sections, 0, sizeof critical_sections);
     memset(timers, 0, sizeof timers); timer_worker = 0; next_timer_id = 1;
+    path_reset();
+    fs_reset();
     memset(di_devices, 0, sizeof di_devices); di_root_table = di_device_table = di_sequence = 0;
     memset(di_keys, 0, sizeof di_keys); memset(di_pressed, 0, sizeof di_pressed); memset(di_toggled, 0, sizeof di_toggled);
     memset(di_mouse, 0, sizeof di_mouse); memset(di_cursor, 0, sizeof di_cursor); di_buttons = 0; di_focused = 1;
@@ -614,6 +620,33 @@ uint32_t *web_input_stats(void) {
     machine_release(); return stats;
 }
 void web_shutdown(void) { stop_guest_workers(); }
+uint32_t web_fs_mount(const char *source, const char *url, uint32_t size, uint32_t attributes, uint32_t modified) {
+    char path[PATH_CAPACITY];
+    machine_acquire();
+    if (!path_full(source, path) || (url && strlen(url) >= PATH_CAPACITY)) { machine_release(); return 0; }
+    fs_strip(path);
+    fs_node *node = fs_find(path);
+    if (!node && (!fs_parent(path) || !(node = fs_new(path, attributes)))) { machine_release(); return 0; }
+    fs_uncache(node);
+    fs_written -= node->capacity; free(node->data); node->data = NULL; node->capacity = 0;
+    node->attributes = attributes; node->size = size; node->modified = fs_filetime(modified); node->dirty = 0;
+    if (url) strcpy(node->url, url);
+    uint32_t id = (uint32_t)(node - fs_nodes) + 1;
+    machine_release(); return id;
+}
+uint32_t web_fs_store(uint32_t id, const uint8_t *data, uint32_t size) {
+    machine_acquire();
+    if (!id || id > fs_count || !fs_nodes[id - 1].live || (fs_nodes[id - 1].attributes & 16)) { machine_release(); return 0; }
+    fs_node *node = &fs_nodes[id - 1];
+    if (!fs_resize(node, size, 0)) { machine_release(); return 0; }
+    if (size) memcpy(node->data, data, size);
+    machine_release(); return 1;
+}
+uint32_t *web_fs_stats(void) {
+    static uint32_t stats[4];
+    machine_acquire(); stats[0] = fs_count; stats[1] = fs_reads; stats[2] = fs_fetches; stats[3] = fs_written;
+    machine_release(); return stats;
+}
 uint32_t *web_timer_stats(void) {
     static uint32_t stats[5];
     machine_acquire();

@@ -14,8 +14,8 @@ Current implementation:
   Recovery includes overlapping instruction ranges;
   these counts do not establish complete code coverage.
 - Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node,
-  then starts the original worker (`0x0055F4F0`). About 6,100 function entries
-  execute through keyboard/mouse setup before `KERNEL32!GetFullPathNameA`.
+  then starts the original worker (`0x0055F4F0`). About 416,000 function entries
+  execute through input and file setup before `DSOUND!ordinal_1` (creation).
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
@@ -28,21 +28,17 @@ Current implementation:
 - DirectInput keyboard/mouse devices execute original enumeration callbacks and
   expose immediate/buffered input, event notifications, relative mouse movement,
   and focus loss. Browser key events reach the Wasm device through the runner.
-- 68 independent original-x86/Unicorn versus Wasm comparisons pass across four
-  routines: two range-copy loops, an object initializer, and an x87 dot product.
-- 31 Windows-service checks cover text conversion, buffer errors, dynamic
-  imports, the game's 128 MiB allocation/release probe, and realloc preservation.
-- 54 synchronization checks cover ownership, event reset, atomic wait-all,
-  semaphore limits, duplicate handles and stale-handle rejection.
-- 24 thread checks cover suspended startup, thread-local state, saved registers,
-  completion, event signaling between workers and finite wait timeouts.
-- 27 timer checks cover deadlines, periodic events, cancellation and pulse
-  delivery, including wait-all behavior when another event is unavailable.
-- 45 DirectInput checks cover COM calls, original callbacks, device state,
-  buffered events, mouse deltas and focus loss. Chrome additionally verifies
-  physical key events through the browser adapter.
+- DOS paths, case-insensitive files/directories, file sharing, duplicate handles,
+  reads/seeks, enumeration and a 64 MiB memory write overlay are implemented.
+  Staged assets load on demand through a shared 512 KiB range cache; Chrome and
+  Node read the original startup data. Writes currently last only for a session.
 
-Rendering, asset access, audio, gameplay, and persistent save games
+Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
+routines, plus 31 Windows-service, 54 synchronization, 24 thread, 27 timer,
+45 DirectInput and 81 filesystem/path calls. Chrome verifies original startup,
+physical key events, focus loss, and native-worker HTTP range reads.
+
+Rendering, audio, gameplay, and persistent save games
 remain unimplemented. The 4K/120 Hz target is unmeasured. The current diagnostic
 Wasm module is about 72 MiB and retains tracing and execution limits. The x87
 helpers use double precision; full floating-point and binary compatibility are
@@ -56,6 +52,7 @@ temporary files, build outputs, and browser profiles stay in this checkout.
 ```sh
 python3 tools/bootstrap.py
 .venv/bin/python tools/prepare.py "/path/to/your/installation/nfs5.exe"
+python3 tools/stage_assets.py "/path/to/your/installation"
 npm run build
 npm test
 npm run serve
@@ -71,6 +68,8 @@ Other static hosts must send `Cross-Origin-Opener-Policy: same-origin` and
 configuration for hosts that support that format. The build uses a 512 MiB
 shared Wasm memory initially, including the 256 MiB guest arena, and an
 eight-worker native thread pool.
+HTTP byte ranges improve asset loading; full-file responses also work. The
+local server supports ranges. Staging copies about 531 MiB for this installation.
 
 On this machine the read-only input is:
 
@@ -82,7 +81,7 @@ The tested executable's SHA-256 is
 `c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906`.
 The differential checks require this version. Original executables, generated
 game C, and compiled output are ignored by Git; users supply their own game.
-Serving `dist/` currently serves a local copy of the executable as well.
+Serving `dist/` exposes the supplied executable and staged game assets.
 
 `src/` contains the browser host, `web/` the diagnostic UI, `tools/` the
 generation/build pipeline, and `tests/` the execution checks. See
