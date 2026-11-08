@@ -14,6 +14,7 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
   if (sha256 !== manifest.sha256) throw new Error('Executable does not match this translation. Run prepare and build again.');
   const base = module._web_init();
   if (!base) throw new Error('Unable to allocate guest memory');
+  const memorySize = module._web_memory_size();
   const pe = new DataView(executable.buffer).getUint32(0x3c, true);
   const headerSize = new DataView(executable.buffer).getUint32(pe + 24 + 60, true);
   module.HEAPU8.set(executable.subarray(0, headerSize), base + manifest.imageBase);
@@ -23,7 +24,7 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     const end = start + section.raw_size;
     if (end > executable.length) throw new Error(`Truncated PE section ${section.name}`);
     const address = manifest.imageBase + section.virtual_address;
-    if (address + Math.max(section.virtual_size, section.raw_size) > 64 * 1024 * 1024) {
+    if (address + Math.max(section.virtual_size, section.raw_size) > memorySize) {
       throw new Error(`PE section ${section.name} exceeds guest memory`);
     }
     module.HEAPU8.set(executable.subarray(start, end), base + address);
@@ -37,9 +38,9 @@ export async function loadRuntime({ log = () => {}, read = fetch } = {}) {
     const ring = new Uint32Array(module.HEAPU8.buffer, module._web_trace(), 1024);
     const trace = Array.from({ length: Math.min(count, 1024) }, (_, i) => ring[(Math.max(0, count - 1024) + i) & 1023]);
     return { status, error: module.UTF8ToString(module._web_error()),
-      pc: module._web_last_pc(), count, registers, trace };
+      pc: module._web_last_pc(), first: module._web_first_pc(), count, registers, trace };
   }
-  return { module, manifest, base,
+  return { module, manifest, base, memorySize,
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),
     call: (entry, ...args) => snapshot(module._web_call(entry, ...Array.from({ length: 4 }, (_, i) => args[i] ?? 0))),
   };

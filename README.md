@@ -9,13 +9,16 @@ Current implementation:
 - A pinned lifter, checkout-local compiler/dependencies, reproducible generation,
   and a static browser diagnostic page.
 - 10,781 recovered function candidates from Verok 1.06 `nfs5.exe`, with original
-  data sections, import dispatch, x87 helpers, a guest stack/TIB, and initial
-  Windows startup services. Recovery includes overlapping instruction ranges;
+  data sections, import dispatch, x87 helpers, a guest stack/TIB, CP1252 locale
+  services, dynamic API lookup, and a tracked heap in a 256 MiB guest arena.
+  Recovery includes overlapping instruction ranges;
   these counts do not establish complete code coverage.
-- Startup verified in Chrome 157 and Node, stopping at
-  `KERNEL32!GetStringTypeW` during CRT initialization.
+- Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node after
+  2,099 function entries, stopping at `KERNEL32!CreateMutexA` in game initialization.
 - 68 independent original-x86/Unicorn versus Wasm comparisons pass across four
   routines: two range-copy loops, an object initializer, and an x87 dot product.
+- 31 Windows-service checks cover text conversion, buffer errors, dynamic
+  imports, the game's 128 MiB allocation/release probe, and realloc preservation.
 
 Rendering, asset access, audio, keyboard gameplay, and persistent save games
 remain unimplemented. The 4K/120 Hz target is unmeasured. The current diagnostic

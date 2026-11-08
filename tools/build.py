@@ -39,6 +39,8 @@ def main():
         signature = obj.with_suffix('.flags')
         dependencies = [source, ROOT / 'src/web_runtime.h', runtime / 'recomp_types.h',
                         lift / 'functions.h']
+        if source.parent == ROOT / 'src':
+            dependencies.extend((ROOT / 'src').glob('*.h'))
         if (obj.exists() and signature.exists() and signature.read_text() == configuration
                 and obj.stat().st_mtime > max(p.stat().st_mtime for p in dependencies)):
             return obj
@@ -51,8 +53,8 @@ def main():
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         compiled = [first, *pool.map(compile, sources[1:])]
     exports = ['_web_init', '_web_run', '_web_call', '_web_registers', '_web_trace',
-               '_web_trace_count', '_web_error', '_web_last_pc', '_web_heap',
-               '_web_set_register', '_web_float_result', '_malloc', '_free']
+               '_web_trace_count', '_web_error', '_web_last_pc', '_web_first_pc', '_web_heap',
+               '_web_set_register', '_web_float_result', '_web_memory_size', '_malloc', '_free']
     subprocess.run([str(compiler), *map(str, compiled), '-O1', '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,node',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=134217728',

@@ -38,7 +38,7 @@ for (let i = 0; i < 32; i++) {
 }
 const oracle = spawnSync(new URL('../.venv/bin/python', import.meta.url).pathname,
   [new URL('./x86_oracle.py', import.meta.url).pathname],
-  { input: JSON.stringify(cases), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  { input: JSON.stringify({ cases, memorySize: runtime.memorySize }), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 assert.equal(oracle.status, 0, oracle.stderr);
 const expected = JSON.parse(oracle.stdout);
 for (const [index, test] of cases.entries()) {

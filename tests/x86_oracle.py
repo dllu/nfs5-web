@@ -16,9 +16,11 @@ image = (ROOT / 'dist/game.exe').read_bytes()
 registers = [UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EBX,
              UC_X86_REG_ESP, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI]
 results = []
-for case in json.load(sys.stdin):
+request = json.load(sys.stdin)
+memory_size = request['memorySize']
+for case in request['cases']:
     cpu = Uc(UC_ARCH_X86, UC_MODE_32)
-    cpu.mem_map(0, 64 * 1024 * 1024)
+    cpu.mem_map(0, memory_size)
     for section in manifest['sections']:
         start = section['raw_offset']
         cpu.mem_write(manifest['imageBase'] + section['virtual_address'],
@@ -28,7 +30,7 @@ for case in json.load(sys.stdin):
     for reg, value in zip(registers, case.get('registers', [0] * 8)):
         cpu.reg_write(reg, value)
     # Match web_call's four-argument cdecl stack, with a real return target.
-    stack = 64 * 1024 * 1024 - 36
+    stack = memory_size - 36
     args = (case.get('args', []) + [0] * 4)[:4]
     sentinel = 0xF000
     cpu.mem_write(stack, struct.pack('<5I', sentinel, *args))
