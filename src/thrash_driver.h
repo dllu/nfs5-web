@@ -28,7 +28,7 @@ static void th_guest_free(void *p){guest_block *block=find_block(th_guest_va(p),
 static uint32_t th_guest_string(const char *text){uint32_t p=allocate((uint32_t)strlen(text)+1);strcpy((char*)ADDR(p),text);return p;}
 static void nfspu_thrash_pump(void){machine_yield();}
 static int open_gpu(void){if(!opened){if(!gpu->open(width,height))return 0;opened=1;}return 1;}
-static void hle_set_screen_size(uint32_t w,uint32_t h){win_windows[0].width=w;win_windows[0].height=h;}
+static void hle_set_screen_size(uint32_t w,uint32_t h){win_render_size(w,h);}
 static void nfspu_thrash_shutdown(void){if(opened){gpu->close();opened=0;for(unsigned i=0;i<MAX_TEXTURES;i++)textures[i].gpu_id=0;render_state.texture=0;}}
 #define RET(value,argc) do {result((uint32_t)(value),(argc));return;}while(0)
 #define A32(i) argument(i)

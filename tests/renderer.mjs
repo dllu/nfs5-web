@@ -139,6 +139,10 @@ try {
       return result.registers[0];
     }
     const invoke=(name,...args)=>call(manifest.imports.find(item=>item.name===name).slot,args);
+    const wc=data+64;
+    [0,manifest.imports.find(item=>item.name==='DefWindowProcA').slot,0,0,0x400000,0,0,0,0,text('ThrashWindowChecks')].forEach((v,i)=>put(wc+i*4,v));
+    const atom=await invoke('RegisterClassA',wc),hwnd=await invoke('CreateWindowExA',0,atom,0,0x90000000,0,0,1000,850,0,0,0x400000,0);
+    if(!hwnd)throw new Error('Native driver test window creation failed');
     const library=await invoke('LoadLibraryA',text('.\\drivers\\opengl3z'));
     const functions=new Map();
     async function method(name,...args){if(!functions.has(name))functions.set(name,await invoke('GetProcAddress',library,text(name)));return call(functions.get(name),args);}
@@ -146,6 +150,8 @@ try {
     const descriptor=await method('_THRASH_about@0'),count=get(descriptor+60),modes=get(descriptor+64);
     function mode(w,h){for(let i=1;i<=count;i++)if(get(modes+i*40)===w&&get(modes+i*40+4)===h&&get(modes+i*40+8)===32)return i;throw new Error('Missing mode');}
     expect(await method('_THRASH_setvideomode@12',mode(640,480),0,2),1,'video mode');
+    await invoke('GetClientRect',hwnd,out);expect(get(out+8),640,'window tracks render width');expect(get(out+12),480,'window tracks render height');
+    await invoke('GetMessageA',out,hwnd,5,5);expect(get(out+12),(480<<16)|640,'mode change queues WM_SIZE');
     expect(await method('_THRASH_setstate@8',3,0xff112233),1,'clear state');await method('_THRASH_clearwindow@0');
     async function pixel(x,y){expect(await method('_THRASH_readrect@20',x,y,1,1,out),1,'readrect');return get(out);}
     expect(await pixel(100,100),0xff112233,'native clear/readback');
@@ -173,6 +179,8 @@ try {
     await method('_THRASH_drawsprite@8',vertices,vertices+32);
     expect(await pixel(200,200),0xff802233,'wrapped texture command bytes');await method('_THRASH_tfree@4',large);
     await method('_THRASH_setvideomode@12',mode(3840,2160),0,2);await method('_THRASH_clip@16',0,0,3840,2160);
+    await invoke('GetClientRect',hwnd,out);expect(get(out+8),3840,'4K client width');expect(get(out+12),2160,'4K client height');
+    await invoke('GetMessageA',out,hwnd,5,5);expect(get(out+12),(2160<<16)|3840,'4K WM_SIZE');
     await method('_THRASH_setstate@8',3,0xff203040);await method('_THRASH_clearwindow@0');
     vertex(vertices,3832,2152,0xffff0000);vertex(vertices+32,3840,2152,0xffff0000);vertex(vertices+64,3832,2160,0xffff0000);
     await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
@@ -186,9 +194,11 @@ try {
     const stats=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
     const nativeMode=[runtime.graphics.renderer.width,runtime.graphics.renderer.height];
     await method('_THRASH_restore@0');await method('_THRASH_setvideomode@12',mode(640,480),0,2);
+    await invoke('GetClientRect',hwnd,out);expect(get(out+8),640,'restored client width');expect(get(out+12),480,'restored client height');
     await method('_THRASH_clip@16',0,0,640,480);await method('_THRASH_setstate@8',3,0xff102030);await method('_THRASH_clearwindow@0');
     vertex(vertices,40,40,0xffff0000);vertex(vertices+32,600,60,0xff00ff00);vertex(vertices+64,80,440,0xff0000ff);
     await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);await method('_THRASH_pageflip@0');
+    await invoke('DestroyWindow',hwnd);await invoke('UnregisterClassA',atom,0x400000);
     return {calls,checks,stats,nativeMode,heartbeat,errors:runtime.graphics.renderer.errors.slice()};
   });
   assert.deepEqual(result.thrash.errors,[]);assert.deepEqual(result.thrash.nativeMode,[3840,2160]);assert(result.thrash.checks>=25);

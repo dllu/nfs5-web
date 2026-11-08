@@ -3,7 +3,7 @@
 Work in progress: the original PC executable is statically translated from x86
 to C with pcrecomp, then compiled to WebAssembly with Emscripten. The browser
 executes original startup code, plays the intro with game audio, and renders
-the 3D frontend scene. Frontend layout and interaction still need work.
+the 3D frontend, main menu and profile chooser. Menu interaction still needs work.
 **The game is not playable yet.**
 
 Current implementation:
@@ -54,7 +54,9 @@ Current implementation:
 - Window classes, original creation/activation callbacks, client geometry,
   painting, thread-owned message queues, filtered blocking retrieval and
   keyboard/mouse messages are implemented. A virtual desktop exposes viewport
-  geometry, device contexts and color depth; memory status reports guest limits.
+  geometry, device contexts and color depth; renderer mode changes keep the game
+  window's client area and size messages aligned with the canvas. Memory status
+  reports guest limits.
   Application registry keys retain the game's install-name fallback, typed
   values, access rights and browser-local persistence. Process environment
   snapshots support UTF-16 and CP437/OEM byte blocks.
@@ -81,12 +83,12 @@ An additional 15-second original-code run verifies advancing video, visible
 pixels, timer callbacks and nonzero game PCM.
 Chrome also verifies unbounded Run game, cooperative Stop and a fresh restart.
 27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
-an OffscreenCanvas rendered in a dedicated Worker. Another 33 checks exercise
+an OffscreenCanvas rendered in a dedicated Worker. Another 41 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure. These do not measure game FPS.
 
-The frontend scene renders, but its menu layout/interaction and racing are not
-validated. The game's save/load flows remain untested. Custom portrait conversion
+The frontend and menu/profile controls render, but menu navigation and racing
+are not validated. The game's save/load flows remain untested. Custom portrait conversion
 is unavailable; the original caller uses its optional-converter failure path.
 Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are

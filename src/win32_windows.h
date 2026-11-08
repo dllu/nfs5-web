@@ -219,6 +219,15 @@ static void win_input_cursor(int32_t x,int32_t y) {
     di_cursor[0]=x+ox;di_cursor[1]=y+oy;
     if(w)win_post(w->handle,0x200,win_mouse_keys(di_buttons),((uint32_t)x&0xFFFF)|((uint32_t)y<<16),0);
 }
+static void win_render_size(uint32_t width,uint32_t height) {
+    win_windows[0].width=width;win_windows[0].height=height;
+    guest_window *w=win_get(win_foreground);
+    if(!w||w==win_windows)return;
+    int32_t outer_width=width+w->left+w->right,outer_height=height+w->top+w->bottom;
+    if(w->width==outer_width&&w->height==outer_height)return;
+    w->width=outer_width;w->height=outer_height;w->paint=1;
+    win_post(w->handle,5,w->iconic?1:0,(width&0xFFFF)|(height<<16),0);
+}
 static int win_import(const char *name) {
     if(!strcmp(name,"RegisterClassA")) {
         uint32_t p=argument(0);if(!p||!MEM32(p+4)||!MEM32(p+36)||MEM32(p+12)>4096||MEM32(p+8)>4096){last_error=87;result(0,1);return 1;}
