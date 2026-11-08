@@ -35,7 +35,7 @@ button.addEventListener('click', async () => {
         }
         if (data.type === 'result') resolve(data.result);
       };
-      worker.postMessage({ type: 'start', audio: audio.configuration });
+      worker.postMessage({ type: 'start', audio: audio.configuration, display: { width: innerWidth, height: innerHeight } });
     });
     window.nfs5Result = result;
     status.textContent = result.status ? 'Execution stopped at a porting dependency' : 'Startup function returned';

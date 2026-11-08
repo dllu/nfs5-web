@@ -181,6 +181,10 @@ static uint32_t module_handle(const char *name) {
 #include "win32_dsound.h"
 #include "win32_paths.h"
 #include "win32_files.h"
+#include "win32_windows.h"
+#include "win32_registry.h"
+#include "win32_environment.h"
+#include "win32_collation.h"
 
 static void thread_exit_code_import(void) {
     sync_object *object = sync_get(argument(0));
@@ -207,10 +211,14 @@ void web_import(uint32_t index) {
     if (dinput_import(full)) return;
     if (dsound_import(full)) return;
     if (path_import(name)) return;
+    if (!strncmp(full, "USER32.dll!", 11) && win_import(name)) return;
+    if (!strncmp(full, "GDI32.dll!", 10) && win_gdi_import(name)) return;
+    if (!strncmp(full, "ADVAPI32.dll!", 13) && reg_import(name)) return;
+    if (environment_import(name)) return;
+    if (collation_import(name)) return;
     /* There is no network subsystem in this single-player host. The original
      * game handles this documented startup failure and omits its TCP provider. */
     if (!strcmp(full, "WSOCK32.dll!WSAStartup")) { result(10091, 2); return; }
-    if (!strcmp(full, "USER32.dll!GetWindowLongA")) { last_error = 1400; result(0, 2); return; }
     if (!strcmp(full, "USER32.dll!GetCursorPos")) {
         uint32_t point = argument(0);
         if (!point) { last_error = 87; result(0, 1); return; }
@@ -218,9 +226,6 @@ void web_import(uint32_t index) {
     }
     if (!strcmp(full, "USER32.dll!SetCursorPos")) {
         di_cursor[0] = (int32_t)argument(0); di_cursor[1] = (int32_t)argument(1); result(1, 2); return;
-    }
-    if (!strcmp(full, "USER32.dll!ScreenToClient") || !strcmp(full, "USER32.dll!ClientToScreen")) {
-        last_error = 1400; result(0, 2); return;
     }
     if (!strcmp(full, "USER32.dll!GetKeyboardType")) {
         uint32_t type = argument(0); result(type == 0 ? 4 : type == 2 ? 12 : 0, 1); return;
@@ -235,6 +240,13 @@ void web_import(uint32_t index) {
         result(value, 1); return;
     }
     if (!strcmp(name, "GetVersion")) { result(0x80000104u, 0); return; }
+    if (!strcmp(name, "GetVersionExA")) {
+        uint32_t out = argument(0);
+        if (!out || MEM32(out) != 148) { last_error = 87; result(0, 1); return; }
+        memset((void *)ADDR(out + 4), 0, 144);
+        MEM32(out + 4) = 4; MEM32(out + 8) = 1; MEM32(out + 16) = 1;
+        result(1, 1); return;
+    }
     if (!strcmp(name, "GetLastError")) { result(last_error, 0); return; }
     if (!strcmp(name, "SetLastError")) { last_error = argument(0); result(0, 1); return; }
     if (!strcmp(name, "SetUnhandledExceptionFilter")) {
@@ -369,8 +381,6 @@ void web_import(uint32_t index) {
         result(0, 1); return;
     }
     if (!strcmp(name, "GetCommandLineA")) { result(0xB000, 0); return; }
-    if (!strcmp(name, "GetEnvironmentStringsW") || !strcmp(name, "GetEnvironmentStrings")) { result(0xB100, 0); return; }
-    if (!strcmp(name, "FreeEnvironmentStringsW") || !strcmp(name, "FreeEnvironmentStringsA")) { result(1, 1); return; }
     if (!strcmp(name, "GetStdHandle")) { result(0x100u + (0u - argument(0) - 10u), 1); return; }
     if (!strcmp(name, "GetFileType")) { result(argument(0) >= 0x100 && argument(0) <= 0x102 ? 2 : 0, 1); return; }
     if (!strcmp(name, "SetHandleCount")) { result(argument(0), 1); return; }
@@ -487,6 +497,9 @@ uint32_t web_init(void) {
     fs_reset();
     memset(ds_devices, 0, sizeof ds_devices); memset(ds_buffers, 0, sizeof ds_buffers); memset(ds_data, 0, sizeof ds_data);
     ds_device_table = ds_buffer_table = ds_mixed_frames = 0;
+    win_reset();
+    reg_reset();
+    memset(process_environment, 0, sizeof process_environment);
     memset(di_devices, 0, sizeof di_devices); di_root_table = di_device_table = di_sequence = 0;
     memset(di_keys, 0, sizeof di_keys); memset(di_pressed, 0, sizeof di_pressed); memset(di_toggled, 0, sizeof di_toggled);
     memset(di_mouse, 0, sizeof di_mouse); memset(di_cursor, 0, sizeof di_cursor); di_buttons = 0; di_focused = 1;
@@ -626,6 +639,11 @@ uint32_t *web_input_stats(void) {
     machine_release(); return stats;
 }
 void web_shutdown(void) { stop_guest_workers(); }
+uint32_t web_registry_restore(void) { machine_acquire(); int ok = reg_restore(); machine_release(); return ok; }
+void web_display_size(uint32_t width, uint32_t height) {
+    if (!width || !height || width > 16384 || height > 16384) return;
+    machine_acquire(); win_windows[0].width = width; win_windows[0].height = height; machine_release();
+}
 uint32_t web_audio_mix(float *output, uint32_t frames, uint32_t rate) {
     if (!frames || frames > 4096 || rate < 8000 || rate > 192000) return 0;
     machine_acquire(); ds_mix(output, frames, rate); machine_release(); return frames;

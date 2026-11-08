@@ -26,6 +26,66 @@ function string(text, address = input) {
 }
 
 // Compare every CP1252 code point against the independent ICU-backed decoder.
+memory().setUint32(output, 148, true);
+assert.equal(invoke('GetVersionExA', output), 1);
+assert.deepEqual(Array.from({ length: 5 }, (_, i) => memory().getUint32(output + i * 4, true)), [148,4,1,0,1]);
+memory().setUint32(output, 156, true); assert.equal(invoke('GetVersionExA', output), 0);
+assert.equal(invoke('GetLastError'), 87);
+
+const environment = pointer => {
+  const entries = []; let p = pointer;
+  while (memory().getUint16(p, true)) {
+    let text = '';
+    while (memory().getUint16(p, true)) { text += String.fromCharCode(memory().getUint16(p, true)); p += 2; }
+    entries.push(text); p += 2;
+  }
+  return entries;
+};
+const empty = invoke('GetEnvironmentStringsW');
+assert.deepEqual(environment(empty), []); assert.equal(memory().getUint32(empty, true), 0);
+assert.equal(invoke('FreeEnvironmentStringsW', empty), 1);
+assert.equal(invoke('FreeEnvironmentStringsW', empty), 0);
+assert.equal(invoke('SetEnvironmentVariableA', string('Z_TEST'), string('last', input + 256)), 1);
+assert.equal(invoke('SetEnvironmentVariableA', string('A_TEST'), string('caf\xe9', input + 256)), 1);
+const before = invoke('GetEnvironmentStringsW');
+assert.deepEqual(environment(before), ['A_TEST=caf\xe9','Z_TEST=last']);
+assert.equal(invoke('SetEnvironmentVariableA', string('a_test'), string('new', input + 256)), 1);
+assert.deepEqual(environment(before), ['A_TEST=caf\xe9','Z_TEST=last'], 'Environment blocks are immutable snapshots');
+const after = invoke('GetEnvironmentStringsW');
+assert.deepEqual(environment(after), ['a_test=new','Z_TEST=last']);
+assert.equal(invoke('FreeEnvironmentStringsA', after), 0, 'A/W frees must match the snapshot encoding');
+assert.equal(invoke('FreeEnvironmentStringsW', before), 1); assert.equal(invoke('FreeEnvironmentStringsW', after), 1);
+assert.equal(invoke('SetEnvironmentVariableA', string('A_TEST'), string('caf\xe9', input + 256)), 1);
+const oem = invoke('GetEnvironmentStrings');
+assert.deepEqual(Array.from(module.HEAPU8.subarray(base + oem, base + oem + 12)), [65,95,84,69,83,84,61,99,97,102,130,0]);
+assert.equal(invoke('FreeEnvironmentStringsA', oem), 1);
+assert.equal(invoke('SetEnvironmentVariableA', string('A_TEST'), 0), 1);
+assert.equal(invoke('SetEnvironmentVariableA', string('A_TEST'), 0), 0);
+assert.equal(invoke('GetLastError'), 203);
+assert.equal(invoke('SetEnvironmentVariableA', string('bad=name'), string('x', input + 256)), 0);
+assert.equal(invoke('GetLastError'), 87);
+const wideName = 'Unicode', wideValue = '\u20ac';
+for (const [p,s] of [[input,wideName],[input+256,wideValue]]) {
+  Array.from(s + '\0').forEach((c, i) => memory().setUint16(p + i * 2, c.charCodeAt(0), true));
+}
+assert.equal(invoke('SetEnvironmentVariableW', input, input + 256), 1);
+const unicode = invoke('GetEnvironmentStringsW');
+assert.deepEqual(environment(unicode), ['Unicode=\u20ac','Z_TEST=last']);
+assert.equal(invoke('FreeEnvironmentStringsW', unicode), 1);
+
+function compare(a, b, flags = 0, locale = 0x409) {
+  return invoke('CompareStringA', locale, flags, string(a), -1, string(b, input + 256), -1);
+}
+assert.equal(compare('alpha','bravo'), 1); assert.equal(compare('Bravo','alpha'), 3);
+assert.equal(compare('Porsche','porsche',1), 2);
+assert.equal(compare('caf\xe9','cafe',2), 2);
+assert.notEqual(compare('caf\xe9','cafe'), 2);
+assert.equal(compare('Porsche!','Porsche',4), 2);
+assert.equal(compare('Porsche\x80','Porsche',4), 2);
+assert.equal(compare('coop','co-op'), 3);
+assert.equal(compare('a','a',0x80000000), 0); assert.equal(invoke('GetLastError'), 1004);
+assert.equal(compare('a','a',0,0x411), 0); assert.equal(invoke('GetLastError'), 87);
+
 module.HEAPU8.set(Uint8Array.from({ length: 256 }, (_, i) => i), base + input);
 assert.equal(invoke('MultiByteToWideChar', 1252, 0, input, 256, 0, 0), 256);
 assert.equal(invoke('MultiByteToWideChar', 1252, 0, input, 256, output, 256), 256);
@@ -87,4 +147,4 @@ assert.equal(invoke('HeapSize', 1, 0, resized), 256);
 assert.equal(invoke('HeapFree', 1, 0, allocation), 0);
 assert.equal(invoke('HeapFree', 1, 0, guard), 1);
 assert.equal(invoke('HeapFree', 1, 0, resized), 1);
-console.log(`${checks} Windows service calls passed (CP1252, dynamic imports, buffer failures, allocation reuse/realloc)`);
+console.log(`${checks} Windows service calls passed (version, environment snapshots, CP1252/OEM, collation, dynamic imports, allocation reuse/realloc)`);

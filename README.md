@@ -14,9 +14,9 @@ Current implementation:
   Recovery includes overlapping instruction ranges;
   these counts do not establish complete code coverage.
 - Startup reaches original `WinMain` (`0x004B6710`) in Chrome 157 and Node,
-  then starts the original worker (`0x0055F4F0`). About 416,000 function entries
-  execute through input, file and audio-device setup before
-  `USER32!GetForegroundWindow`.
+  then starts the original worker (`0x0055F4F0`). About 430,000 function entries
+  execute through input, file, audio and graphics-configuration setup before
+  loading `drivers\opengl3z`, the next rendering dependency.
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
@@ -37,12 +37,17 @@ Current implementation:
 - DirectSound PCM buffers support locking, looping, playback cursors, shared
   duplicates, volume/pan, 8/16-bit mono/stereo and linear resampling. A shared
   stereo ring feeds an AudioWorklet; its real-time callback never takes a VM lock.
+- A virtual desktop exposes viewport geometry, device contexts and color depth.
+  Application registry keys retain the game's install-name fallback, typed
+  values, access rights and browser-local persistence. Process environment
+  snapshots support UTF-16 and CP437/OEM byte blocks.
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
-routines, plus 31 Windows-service, 54 synchronization, 24 thread, 27 timer,
-45 DirectInput, 85 filesystem/path and 54 DirectSound calls. Chrome verifies original startup,
+routines, plus 68 Windows-service, 54 synchronization, 24 thread, 27 timer,
+45 DirectInput, 85 filesystem/path, 54 DirectSound, 31 registry and 31 desktop calls.
+Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
-file/deletion persistence across fresh pages and Wasm instances. A known PCM
+file/deletion and registry persistence across fresh pages and Wasm instances. A known PCM
 signal reaches the running browser audio graph with its expected amplitude.
 
 Windows/message handling, rendering and gameplay remain unimplemented; the
@@ -50,7 +55,8 @@ game's sound playback and save/load flows are untested. An abrupt close can lose
 changes since the last checkpoint.
 The 4K/120 Hz target is unmeasured. The current diagnostic
 Wasm module is about 72 MiB and retains tracing and execution limits. The x87
-helpers use double precision; full floating-point and binary compatibility are
+helpers use double precision; English linguistic comparison uses an ICU
+approximation of Windows NLS. Full floating-point and binary compatibility are
 unverified.
 
 ## Build and inspect locally

@@ -71,6 +71,12 @@ try {
         module.HEAPU8.set([0,1,2,3,10,13,127,128,255,42], base + payload);
         if (!invoke('WriteFile', [file, payload, 10, payload + 256, 0])) throw new Error('Save fixture write failed');
         invoke('CloseHandle', [file]);
+        module.HEAPU8.set(new TextEncoder().encode('Software\\NFS5Web\\BrowserChecks\0'), base + name);
+        if (invoke('RegCreateKeyA', [0x80000001,name,payload+512])) throw new Error('Registry fixture creation failed');
+        const key = get(payload+512); put(payload, 120);
+        module.HEAPU8.set(new TextEncoder().encode('FrameLimit\0'), base + name);
+        if (invoke('RegSetValueExA', [key,name,0,4,payload,4])) throw new Error('Registry fixture write failed');
+        invoke('RegCloseKey', [key]);
         await runtime.checkpoint();
       },
       async readFixture() {
@@ -141,11 +147,19 @@ try {
       const result = { read, count: view.getUint32(data + 8192, true), bytes: Array.from(module.HEAPU8.subarray(base + data + 4096, base + data + 4106)) };
       invoke('CloseHandle', [file]);
       if (!invoke('DeleteFileA', [data])) throw new Error('Save fixture deletion failed');
+      module.HEAPU8.set(new TextEncoder().encode('Software\\NFS5Web\\BrowserChecks\0'), base + data);
+      if (invoke('RegOpenKeyA', [0x80000001,data,data+1024])) throw new Error('Registry fixture was not restored');
+      const key = view.getUint32(data+1024,true);
+      module.HEAPU8.set(new TextEncoder().encode('FrameLimit\0'), base + data);
+      view.setUint32(data+1032,4,true);
+      if (invoke('RegQueryValueExA', [key,data,0,data+1028,data+1040,data+1032])) throw new Error('Registry fixture query failed');
+      result.registry = view.getUint32(data+1040,true); invoke('RegCloseKey', [key]);
       await runtime.checkpoint(); return result;
     } finally { runtime.dispose(); }
   });
   assert.equal(restored.read, 1); assert.equal(restored.count, 10);
   assert.deepEqual(restored.bytes, [0,1,2,3,10,13,127,128,255,42]);
+  assert.equal(restored.registry, 120);
   await page.reload();
   const deleted = await page.evaluate(async () => {
     const { loadRuntime } = await import('./runtime.mjs'), runtime = await loadRuntime();
@@ -161,7 +175,7 @@ try {
   });
   assert.equal(deleted, 0xffffffff);
   assert.deepEqual(errors, []);
-  console.log('Chrome restored exact binary save bytes across a reload and retained deletion across a second reload');
+  console.log('Chrome restored binary save bytes and registry values across a reload; deletion survived a second reload');
   await page.evaluate(() => {
     const button = document.createElement('button'); button.textContent = 'Check PCM output'; document.body.append(button);
     button.onclick = async () => {

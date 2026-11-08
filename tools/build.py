@@ -58,6 +58,8 @@ def main():
                '_web_shutdown', '_web_timer_stats', '_web_input_key', '_web_input_mouse', '_web_input_focus', '_web_input_cursor', '_web_input_stats',
                '_web_fs_mount', '_web_fs_store', '_web_fs_stats', '_web_fs_snapshot', '_web_fs_acknowledge', '_web_fs_remove', '_web_fs_restore_metadata', '_malloc', '_free']
     exports.extend(['_web_audio_mix', '_web_audio_stats'])
+    exports.append('_web_registry_restore')
+    exports.append('_web_display_size')
     subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=536870912',

@@ -4,7 +4,7 @@ import { attachAudio } from './audio.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display } = {}) {
   const [module, manifest, response] = await Promise.all([
     createEngine({ print: log, printErr: log }),
     read('./manifest.json').then(checked).then(r => r.json()),
@@ -17,6 +17,8 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   const base = module._web_init();
   if (!base) throw new Error('Unable to allocate guest memory');
   const memorySize = module._web_memory_size();
+  display ??= typeof innerWidth === 'number' ? { width: innerWidth, height: innerHeight } : null;
+  if (display) module._web_display_size(display.width, display.height);
   const pe = new DataView(executable.buffer).getUint32(0x3c, true);
   const headerSize = new DataView(executable.buffer).getUint32(pe + 24 + 60, true);
   module.HEAPU8.set(executable.subarray(0, headerSize), base + manifest.imageBase);
@@ -102,6 +104,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       module._web_fs_acknowledge(changes().revision);
       if (records.length) log(`Restored ${records.length} browser-local file changes`);
     }
+    if (!module._web_registry_restore()) throw new Error('Invalid persisted application registry');
   } catch (error) { storage?.close(); module.PThread.terminateAllThreads(); throw error; }
   let saving = Promise.resolve(), disposed = false;
   function checkpoint() {
