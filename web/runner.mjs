@@ -9,7 +9,10 @@ self.onmessage = async ({ data }) => {
       canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
     self.postMessage({ type: 'loaded', manifest: runtime.manifest });
     const result = await runtime.runAsync();
-    self.postMessage({ type: 'result', result: { ...result, winMainEntered: runtime.seen(0x004b6710), workerEntered: runtime.seen(0x0055f4f0) } });
+    // Keep the diagnostic's final frame visible after releasing its GPU device.
+    let frame;
+    if(runtime.graphics){runtime.graphics.renderer.present();frame=data.canvas.transferToImageBitmap();}
+    self.postMessage({ type: 'result', frame, result: { ...result, winMainEntered: runtime.seen(0x004b6710), workerEntered: runtime.seen(0x0055f4f0) } },frame?[frame]:[]);
   } catch (error) {
     self.postMessage({ type: 'error', error: error.stack || String(error) });
   } finally {

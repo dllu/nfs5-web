@@ -45,13 +45,19 @@ button.addEventListener('click', async () => {
           });
         }
         if(data.type==='screen'){screenSize=data;canvas.hidden=false;canvas.style.aspectRatio=`${data.width}/${data.height}`;}
-        if (data.type === 'result') resolve(data.result);
+        if (data.type === 'result') {
+          if(data.frame){
+            const still=document.createElement('canvas');still.id='game';still.width=data.frame.width;still.height=data.frame.height;still.setAttribute('aria-label','Game output');
+            still.getContext('2d').drawImage(data.frame,0,0);data.frame.close();canvas.replaceWith(still);canvas=still;
+          }
+          resolve(data.result);
+        }
       };
       const offscreen=canvas.transferControlToOffscreen();
       worker.postMessage({ type: 'start', audio: audio.configuration, display: { width: innerWidth, height: innerHeight },canvas:offscreen },[offscreen]);
     });
     window.nfs5Result = result;
-    status.textContent = result.status ? 'Execution stopped at a porting dependency' : 'Startup function returned';
+    status.textContent = result.status ? (/budget reached/i.test(result.error)?'Diagnostic execution limit reached':'Execution stopped at a porting dependency') : 'Startup function returned';
     write(result.error || 'Returned successfully');
     write(`\n${result.count.toLocaleString()} function entries. Recent calls:`);
     write(result.trace.slice(-32).map(pc => '0x' + hex(pc)).join(' → '));

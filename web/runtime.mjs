@@ -4,6 +4,7 @@ import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
+const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
 export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace } = {}) {
   const [module, manifest, response] = await Promise.all([
@@ -132,10 +133,15 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     const timers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_timer_stats(), 5));
     const input = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_input_stats(), 4));
     const files = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_fs_stats(), 4));
-    const sound = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_audio_stats(), 4));
+    const soundPointer=module._web_audio_stats();
+    const sound = Array.from(new Uint32Array(module.HEAPU8.buffer, soundPointer, 4));
+    const soundBuffers=Array.from({length:sound[1]},(_,i)=>{
+      const values=new Uint32Array(module.HEAPU8.buffer,soundPointer+16+i*40,10);
+      return Object.fromEntries(soundBufferFields.map((field,j)=>[field,values[j]]));
+    });
     const rendering=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
     return { status, error: module.UTF8ToString(module._web_error()),
-      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, sound, rendering,
+      pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, sound, soundBuffers, rendering,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
   }
@@ -151,8 +157,8 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     input(event) {
       if ('focus' in event) module._web_input_focus(event.focus ? 1 : 0);
       if ('key' in event) module._web_input_key(event.key, event.down ? 1 : 0);
-      if ('dx' in event) module._web_input_mouse(event.dx | 0, event.dy | 0, event.dz | 0, event.buttons >>> 0);
       if ('x' in event) module._web_input_cursor(event.x | 0, event.y | 0);
+      if ('dx' in event) module._web_input_mouse(event.dx | 0, event.dy | 0, event.dz | 0, event.buttons >>> 0);
     },
     seen: address => Boolean(module._web_has_entered(address)),
     async runAsync(milliseconds = 5000) {

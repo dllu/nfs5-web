@@ -115,7 +115,7 @@ static void di_enqueue(di_device *device, uint32_t offset, uint32_t value) {
         device->head = (device->head + 1) % 256; device->count--; device->overflow = 1;
     }
     uint32_t *event = device->events[(device->head + device->count++) % 256];
-    event[0] = offset; event[1] = value; event[2] = (uint32_t)emscripten_get_now(); event[3] = ++di_sequence;
+    event[0] = offset; event[1] = value; event[2] = win_ticks(); event[3] = ++di_sequence;
 }
 
 static void di_key(uint32_t scan, uint32_t down) {

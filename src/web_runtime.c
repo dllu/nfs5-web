@@ -33,6 +33,14 @@ static char error[512];
 static uint32_t last_pc, first_pc, calls, heap_next, next_tls, exception_filter;
 static __thread uint32_t last_error;
 static double deadline;
+static double win_clock_origin;
+static uint32_t win_ticks(void) {
+    /* Emscripten's monotonic clock includes performance.timeOrigin. Convert
+     * elapsed time through uint64_t so the final 32-bit conversion wraps;
+     * converting an epoch-sized double directly saturates in WebAssembly. */
+    double elapsed=emscripten_get_now()-win_clock_origin;
+    return (uint32_t)(uint64_t)(elapsed>0?elapsed:0);
+}
 static uint32_t registers[8];
 static uint32_t import_info[10];
 static uint8_t *entered;
@@ -69,7 +77,8 @@ void recomp_trace_enter(uint32_t va) {
     if (va >= entered_low && va - entered_low < entered_span)
         entered[(va - entered_low) >> 3] |= 1u << ((va - entered_low) & 7);
     g_enter_trace[g_enter_idx++ & (TRACE_SIZE - 1)] = va;
-    if (++calls > 2000000 || emscripten_get_now() > deadline)
+    calls++;
+    if (emscripten_get_now() > deadline)
         fail(va, "Execution budget reached at %08X", va);
 }
 
@@ -252,6 +261,14 @@ void web_import(uint32_t index) {
         result(1, 1); return;
     }
     if (!strcmp(name, "GetLastError")) { result(last_error, 0); return; }
+    if (!strcmp(name, "GlobalMemoryStatus")) {
+        uint32_t p=argument(0),available=HEAP_LIMIT-heap_next;
+        for(unsigned i=0;i<block_count;i++)if(!blocks[i].live)available+=blocks[i].span;
+        /* Report the bounded guest machine, rather than the browser host's RAM. */
+        if(p){uint32_t status[]={32,(uint32_t)((uint64_t)(GUEST_SIZE-available)*100u/GUEST_SIZE),GUEST_SIZE,available,GUEST_SIZE,available,GUEST_SIZE,available};
+            memcpy((void*)ADDR(p),status,sizeof status);}
+        result(0,1);return;
+    }
     if (!strcmp(name, "DisableThreadLibraryCalls")) {
         uint32_t module=argument(0);
         int valid=module==THRASH_MODULE || (module>=0x70000000 && module<0x70010000 && !(module&15) && web_import_lookup(0xF0000000+module-0x70000000));
@@ -317,7 +334,7 @@ void web_import(uint32_t index) {
     }
     if (!strcmp(name, "GetCurrentProcessId")) { result(1, 0); return; }
     if (!strcmp(name, "GetCurrentThreadId")) { result(guest_tid(), 0); return; }
-    if (!strcmp(name, "GetTickCount") || !strcmp(name, "timeGetTime")) { result((uint32_t)emscripten_get_now(), 0); return; }
+    if (!strcmp(name, "GetTickCount") || !strcmp(name, "timeGetTime")) { result(win_ticks(), 0); return; }
     if (!strcmp(full, "WINMM.dll!timeGetDevCaps")) {
         if (!argument(0) || argument(1) < 8) { result(97, 2); return; }
         MEM32(argument(0)) = 1; MEM32(argument(0) + 4) = 1000; result(0, 2); return;
@@ -327,7 +344,7 @@ void web_import(uint32_t index) {
         result(argument(0) >= 1 && argument(0) <= 1000 ? 0 : 97, 1); return;
     }
     if (!strcmp(name, "QueryPerformanceFrequency")) { MEM64(argument(0)) = 1000000; result(1, 1); return; }
-    if (!strcmp(name, "QueryPerformanceCounter")) { MEM64(argument(0)) = (uint64_t)(emscripten_get_now() * 1000); result(1, 1); return; }
+    if (!strcmp(name, "QueryPerformanceCounter")) { MEM64(argument(0)) = (uint64_t)((emscripten_get_now()-win_clock_origin) * 1000); result(1, 1); return; }
     if (!strcmp(name, "GetProcessHeap")) { result(1, 0); return; }
     if (!strcmp(name, "HeapCreate")) { result(1, 3); return; }
     if (!strcmp(name, "HeapAlloc")) { result(allocate(argument(2)), 3); return; }
@@ -502,6 +519,7 @@ uint32_t web_init(void) {
     heap_next = 0x1000000;
     block_count = 0; memset(blocks, 0, sizeof blocks);
     g_enter_idx = calls = g_icall_count = g_icall_trace_idx = 0;
+    win_clock_origin=emscripten_get_now();
     next_tls = last_error = g_backedges = g_cur_func = exception_filter = 0;
     memset(sync_objects, 0, sizeof sync_objects); memset(sync_handles, 0, sizeof sync_handles);
     memset(sync_waiters, 0, sizeof sync_waiters);
@@ -625,7 +643,7 @@ double web_float_result(void) { return cpu.st[0]; }
 void web_input_key(uint32_t scan, uint32_t down) {
     if (scan >= 256) return;
     machine_acquire();
-    di_key(scan, down);
+    uint32_t previous=di_keys[scan]!=0;di_key(scan, down);win_input_key(scan,down,previous);
     machine_release();
 }
 void web_input_mouse(int32_t dx, int32_t dy, int32_t dz, uint32_t buttons) {
@@ -636,10 +654,10 @@ void web_input_mouse(int32_t dx, int32_t dy, int32_t dz, uint32_t buttons) {
         for (unsigned axis = 0; axis < 3; axis++) if (movement[axis]) di_enqueue(&di_devices[i], axis * 4, (uint32_t)movement[axis]);
         for (unsigned button = 0; button < 4; button++) if ((di_buttons ^ buttons) & (1u << button)) di_enqueue(&di_devices[i], 12 + button, buttons & (1u << button) ? 0x80 : 0);
     }
-    di_buttons = buttons; machine_release();
+    win_input_mouse(dz,di_buttons,buttons);di_buttons = buttons; machine_release();
 }
 void web_input_focus(uint32_t focused) {
-    machine_acquire(); di_focused = focused != 0;
+    machine_acquire(); if(di_focused!=(focused!=0))win_input_focus(focused!=0);di_focused = focused != 0;
     if (!focused) {
         for (unsigned i = 0; i < 256; i++) if (di_keys[i]) di_key(i, 0);
         for (unsigned i = 0; i < 16; i++) if (di_devices[i].references && di_devices[i].kind == 2)
@@ -650,7 +668,7 @@ void web_input_focus(uint32_t focused) {
     machine_release();
 }
 void web_input_cursor(int32_t x, int32_t y) {
-    machine_acquire(); di_cursor[0] = x; di_cursor[1] = y; machine_release();
+    machine_acquire();win_input_cursor(x,y);machine_release();
 }
 uint32_t *web_input_stats(void) {
     static uint32_t stats[4];
@@ -680,9 +698,12 @@ uint32_t web_audio_mix(float *output, uint32_t frames, uint32_t rate) {
     machine_acquire(); ds_mix(output, frames, rate); machine_release(); return frames;
 }
 uint32_t *web_audio_stats(void) {
-    static uint32_t stats[4]; machine_acquire(); memset(stats, 0, sizeof stats);
+    static uint32_t stats[4+64*10]; machine_acquire(); memset(stats, 0, sizeof stats);
     for (unsigned i = 0; i < 8; i++) stats[0] += ds_devices[i].references != 0;
-    for (unsigned i = 0; i < 64; i++) if (ds_buffers[i].references) { stats[1]++; stats[2] += ds_buffers[i].playing != 0; }
+    for (unsigned i = 0; i < 64; i++) if (ds_buffers[i].references) {
+        ds_buffer *b=ds_buffers+i;uint32_t values[]={b->address,b->flags,ds_data[b->samples-1].bytes,b->rate,b->channels,b->bits,b->playing,b->looping,ds_play_cursor(b),ds_write_cursor(b)};
+        memcpy(stats+4+stats[1]*10,values,sizeof values);stats[1]++;stats[2]+=b->playing!=0;
+    }
     stats[3] = ds_mixed_frames; machine_release(); return stats;
 }
 uint32_t web_fs_mount(const char *source, const char *url, uint32_t size, uint32_t attributes, uint32_t modified) {

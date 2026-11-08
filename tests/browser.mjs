@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 
 // Keep Chromium's profiles, caches, and Playwright's temporary files local.
 process.env.TMPDIR = resolve('.cache/tmp');
+process.env.XDG_CACHE_HOME = resolve('.cache/xdg');
+process.env.__GL_SHADER_DISK_CACHE_PATH = resolve('.cache/nvidia');
 await mkdir(process.env.TMPDIR, { recursive: true });
 const fixture = Uint8Array.from({ length: 131195 }, (_, i) => (i * 37 + (i >>> 8)) & 255);
 await writeFile('dist/fs-browser-fixture.bin', fixture);
@@ -215,6 +217,37 @@ try {
   await page.evaluate(() => window.audioHarness.close());
   assert.deepEqual(errors, []);
   console.log(`Chrome AudioWorklet rendered ${audio.stats.rendered} PCM frames; expected quarter-scale peak verified`);
+  // Run the original intro long enough to cover its initial wait, software
+  // video decoder, framebuffer uploads and streaming game audio together.
+  await page.evaluate(()=>{
+    const button=document.createElement('button');button.textContent='Check original movie';document.body.append(button);
+    button.onclick=async()=>{
+      let runtime,audio;
+      try {
+        const {openAudio}=await import('./audio.mjs');audio=await openAudio();
+        const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;canvas.id='movie-check';document.body.prepend(canvas);
+        const {loadRuntime}=await import('./runtime.mjs');runtime=await loadRuntime({canvas,audio:audio.configuration,persist:false});
+        const result=await runtime.runAsync(15000),renderer=runtime.graphics.renderer,pixels=await renderer.readPixels();
+        let lit=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]||pixels[i+1]||pixels[i+2])lit++;
+        const still=document.createElement('canvas');still.width=renderer.width;still.height=renderer.height;still.id='movie-frame';
+        still.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels),still.width,still.height),0,0);canvas.replaceWith(still);
+        window.movieResult={...result,lit,audio:audio.stats(),gpuErrors:renderer.errors};
+      }catch(error){window.movieFailure=error.stack||String(error);}
+      finally{runtime?.dispose();await audio?.close();}
+    };
+  });
+  await page.getByRole('button',{name:'Check original movie'}).click();
+  await page.waitForFunction(()=>window.movieResult||window.movieFailure,null,{timeout:60000});
+  const movie=await page.evaluate(()=>({error:window.movieFailure,result:window.movieResult}));
+  assert.equal(movie.error,undefined);assert.equal(movie.result.status,1);assert.match(movie.result.error,/budget reached/i);
+  assert(movie.result.rendering[3]>100,'Original video must advance beyond initialization');
+  assert(movie.result.lit>10000,'Original decoder must produce a visible picture');
+  assert(movie.result.audio.peak>.01,'Original streaming PCM must reach the browser audio graph');
+  assert(movie.result.timers[2]>100,'Original timer callbacks must keep advancing');
+  assert.deepEqual(movie.result.gpuErrors,[]);assert.deepEqual(errors,[]);
+  await page.locator('#movie-frame').screenshot({path:'build/original-startup.png'});
+  await writeFile('build/original-startup.json',JSON.stringify(movie.result,null,2)+'\n');
+  console.log(`Original intro: ${movie.result.rendering[3]} presented frames, ${movie.result.lit} visible pixels and game PCM peak ${movie.result.audio.peak.toFixed(3)}`);
 } finally {
   await browser.close();
 }
