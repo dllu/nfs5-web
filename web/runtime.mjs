@@ -140,7 +140,8 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       return Object.fromEntries(soundBufferFields.map((field,j)=>[field,values[j]]));
     });
     const rendering=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
-    return { status, error: module.UTF8ToString(module._web_error()),
+    const error=module.UTF8ToString(module._web_error());
+    return { status, error, stopped:error==='Stopped by user',
       pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, sound, soundBuffers, rendering,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
@@ -164,6 +165,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     async runAsync(milliseconds = 5000) {
       return executeAsync(manifest.entry,milliseconds);
     },
+    stop:()=>Boolean(module._web_stop()),
     async invokeAsync(entry,args=[],milliseconds=5000) {
       if(module._web_async_status() || args.length>64)throw new Error('Invalid concurrent guest invocation');
       const stack=memorySize-0x10000,view=new DataView(module.HEAPU8.buffer,base);

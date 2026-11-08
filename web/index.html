@@ -10,7 +10,9 @@
   <p class="intro">Bringing the original PC game to the browser.</p>
   <section aria-labelledby="runtime-title">
     <h2 id="runtime-title">Runtime bring-up</h2>
-    <p>The original executable is translated to WebAssembly. Startup diagnostics are available below. The game is not playable yet.</p>
+    <p>The original intro plays with sound. Menus and racing are still being ported.</p>
+    <button id="play" type="button">Run game</button>
+    <button id="stop" type="button" hidden>Stop</button>
     <button id="boot" type="button">Run original startup</button>
     <p id="status" role="status">Ready to load the local game build.</p>
     <canvas id="game" width="640" height="480" hidden aria-label="Game output"></canvas>

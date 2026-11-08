@@ -52,6 +52,7 @@ static void thread_exit_code_import(void);
 static recomp_func_t dinput_lookup(uint32_t address);
 static recomp_func_t dsound_lookup(uint32_t address);
 static recomp_func_t thrash_lookup(uint32_t address);
+static void fail(uint32_t pc,const char *format,...);
 
 #include "win32_machine.h"
 
@@ -73,6 +74,7 @@ void web_unsupported(uint32_t pc, const char *instruction) {
 }
 
 void recomp_trace_enter(uint32_t va) {
+    machine_abort_check();
     if (!calls) first_pc = va;
     if (va >= entered_low && va - entered_low < entered_span)
         entered[(va - entered_low) >> 3] |= 1u << ((va - entered_low) & 7);
@@ -539,7 +541,7 @@ uint32_t web_init(void) {
     memset(di_mouse, 0, sizeof di_mouse); memset(di_cursor, 0, sizeof di_cursor); di_buttons = 0; di_focused = 1;
     timer_created = timer_fired = timer_callbacks = timer_killed = 0;
     guest_threads[0].used = 1; guest_threads[0].id = 1; guest_threads[0].object = 0xFFFFFFFF; current_thread = 0;
-    next_thread_id = 2; cancel_workers = fatal_pending = 0; error_thread = 0;
+    next_thread_id = 2; cancel_workers = fatal_pending = 0; atomic_store(&stop_requested,0);error_thread = 0;
     g_flag_k = g_flag_a = g_flag_b = g_flag_cf = 0;
     memset(g_st, 0, sizeof g_st);
     g_fp_top = 0; g_fpu_cw = 0x37F;
@@ -550,10 +552,10 @@ uint32_t web_init(void) {
     return (uint32_t)g_mem_base;
 }
 
-int web_run(uint32_t entry, uint32_t milliseconds) {
+static int run_guest(uint32_t entry, uint32_t milliseconds) {
     machine_acquire();
     if (!current_thread) { error[0] = 0; fatal_pending = 0; cancel_workers = 0; }
-    deadline = emscripten_get_now() + milliseconds;
+    deadline = milliseconds?emscripten_get_now()+milliseconds:INFINITY;
     int stopped = setjmp(stop);
     if (!stopped) {
         recomp_func_t fn = recomp_lookup(entry);
@@ -568,6 +570,9 @@ int web_run(uint32_t entry, uint32_t milliseconds) {
     if (stopped && !current_thread) stop_guest_workers();
     return stopped != 0;
 }
+int web_run(uint32_t entry,uint32_t milliseconds) {
+    atomic_store(&stop_requested,0);return run_guest(entry,milliseconds);
+}
 
 static struct {
     guest_cpu initial, final;
@@ -580,7 +585,7 @@ static struct {
 static void *asynchronous_main(void *unused) {
     (void)unused;
     current_thread = 0; cpu = asynchronous_run.initial; last_error = asynchronous_run.initial_error;
-    int status = web_run(asynchronous_run.entry, asynchronous_run.milliseconds);
+    int status = run_guest(asynchronous_run.entry, asynchronous_run.milliseconds);
     stop_guest_workers();
     asynchronous_run.final = cpu;
     asynchronous_run.final_error=last_error;
@@ -590,6 +595,7 @@ static void *asynchronous_main(void *unused) {
 
 int web_start(uint32_t entry, uint32_t milliseconds) {
     if (atomic_load(&asynchronous_run.status)) return 1;
+    atomic_store(&stop_requested,0);
     asynchronous_run.initial = cpu;
     asynchronous_run.initial_error=last_error;
     asynchronous_run.entry = entry; asynchronous_run.milliseconds = milliseconds;
@@ -601,6 +607,10 @@ int web_start(uint32_t entry, uint32_t milliseconds) {
 }
 
 int web_async_status(void) { return atomic_load(&asynchronous_run.status); }
+int web_stop(void) {
+    if(atomic_load(&asynchronous_run.status)!=1)return 0;
+    atomic_store(&stop_requested,1);return 1;
+}
 
 int web_async_finish(void) {
     int status = atomic_load(&asynchronous_run.status);

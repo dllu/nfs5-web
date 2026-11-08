@@ -8,7 +8,7 @@ executes original startup code and plays the intro cinematic with game audio.
 Current implementation:
 
 - A pinned lifter, checkout-local compiler/dependencies, reproducible generation,
-  and a static browser diagnostic page.
+  and a static browser launcher with diagnostics.
 - 10,781 recovered function candidates from Verok 1.06 `nfs5.exe`, with original
   data sections, import dispatch, x87 helpers, a guest stack/TIB, CP1252 locale
   services, dynamic API lookup, and a tracked heap in a 256 MiB guest arena.
@@ -17,7 +17,8 @@ Current implementation:
 - Startup reaches original `WinMain` (`0x004B6710`) and worker (`0x0055F4F0`).
   In Chrome 157 it creates the game window, selects a graphics mode, decodes
   the original intro video and streams its PCM through the browser audio graph.
-  Diagnostic runs stop at a wall-clock limit; Node startup has no GPU attached.
+  The launcher can run until Stop; startup checks use a wall-clock limit.
+  Node startup has no GPU attached.
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
@@ -58,13 +59,14 @@ Current implementation:
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
 routines, plus 78 Windows-service, 54 synchronization, 24 thread, 27 timer,
 45 DirectInput, 85 filesystem/path, 54 DirectSound, 31 registry, 98 window/desktop and
-78 Thrash loader/ABI calls.
+78 Thrash loader/ABI calls and 12 lifecycle checks.
 Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
 file/deletion and registry persistence across fresh pages and Wasm instances. A known PCM
 signal reaches the running browser audio graph with its expected amplitude.
 An additional 15-second original-code run verifies advancing video, visible
 pixels, timer callbacks and nonzero game PCM.
+Chrome also verifies unbounded Run game, cooperative Stop and a fresh restart.
 27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
 an OffscreenCanvas rendered in a dedicated Worker. Another 33 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
@@ -75,7 +77,7 @@ text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
 The 4K/120 Hz target is unmeasured. The current diagnostic
-Wasm module is about 72 MiB and retains tracing and execution limits. The x87
+Wasm module is about 72 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
 approximation of Windows NLS. Full floating-point and binary compatibility are
 unverified.
@@ -94,7 +96,8 @@ npm test
 npm run serve
 ```
 
-Open <http://127.0.0.1:8000> and select **Run original startup**. The page reports
+Open <http://127.0.0.1:8000> and select **Run game** to run until **Stop**.
+**Run original startup** performs a five-second check. The page reports
 the next unsupported dependency or diagnostic time limit, retains its final
 frame and lists recent original functions.
 `npm run test:browser` tests installed Chrome against that server and writes

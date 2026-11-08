@@ -6,10 +6,13 @@ const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const status = document.querySelector('#status');
 const output = document.querySelector('#output');
 const button = document.querySelector('#boot');
+const playButton=document.querySelector('#play'),stopButton=document.querySelector('#stop');
 const write = text => { output.textContent += text + '\n'; };
+let activeWorker;
+stopButton.addEventListener('click',()=>{stopButton.disabled=true;status.textContent='Stopping…';activeWorker?.postMessage({type:'stop'});});
 
-button.addEventListener('click', async () => {
-  button.disabled = true;
+async function start(milliseconds) {
+  button.disabled=playButton.disabled=true;stopButton.hidden=false;stopButton.disabled=true;
   output.textContent = '';
   status.textContent = 'Loading translated engine…';
   delete window.nfs5Result;
@@ -24,6 +27,7 @@ button.addEventListener('click', async () => {
     const previous=document.querySelector('#game');canvas=document.createElement('canvas');
     canvas.id='game';canvas.width=640;canvas.height=480;canvas.hidden=true;canvas.setAttribute('aria-label','Game output');previous.replaceWith(canvas);
     worker = new Worker(new URL('./runner.mjs', import.meta.url), { type: 'module' });
+    activeWorker=worker;
     const result = await new Promise((resolve, reject) => {
       worker.onerror = event => reject(new Error(event.message));
       worker.onmessage = ({ data }) => {
@@ -34,7 +38,7 @@ button.addEventListener('click', async () => {
           write(`${m.executable} · SHA-256 ${m.sha256}`);
           write(`${m.functions.toLocaleString()} translated functions · ${m.instructions.toLocaleString()} decoded instructions`);
           write(`${m.imports.length} Windows imports · entry 0x${hex(m.entry)}\n`);
-          status.textContent = 'Executing original startup code…';
+          status.textContent = milliseconds?'Executing original startup code…':'Original game is running.';stopButton.disabled=false;
           detachInput = attachInput(window, event => {
             if(screenSize&&!canvas.hidden){
               const rect=canvas.getBoundingClientRect();
@@ -54,10 +58,10 @@ button.addEventListener('click', async () => {
         }
       };
       const offscreen=canvas.transferControlToOffscreen();
-      worker.postMessage({ type: 'start', audio: audio.configuration, display: { width: innerWidth, height: innerHeight },canvas:offscreen },[offscreen]);
+      worker.postMessage({ type: 'start', milliseconds, audio: audio.configuration, display: { width: innerWidth, height: innerHeight },canvas:offscreen },[offscreen]);
     });
     window.nfs5Result = result;
-    status.textContent = result.status ? (/budget reached/i.test(result.error)?'Diagnostic execution limit reached':'Execution stopped at a porting dependency') : 'Startup function returned';
+    status.textContent = result.stopped?'Stopped.':result.status ? (/budget reached/i.test(result.error)?'Diagnostic execution limit reached':'Execution stopped at a porting dependency') : 'Startup function returned';
     write(result.error || 'Returned successfully');
     write(`\n${result.count.toLocaleString()} function entries. Recent calls:`);
     write(result.trace.slice(-32).map(pc => '0x' + hex(pc)).join(' → '));
@@ -70,6 +74,8 @@ button.addEventListener('click', async () => {
     detachInput?.();
     worker?.terminate();
     await audio?.close();
-    button.disabled = false;
+    activeWorker=null;stopButton.hidden=true;button.disabled=playButton.disabled=false;
   }
-});
+}
+button.addEventListener('click',()=>start(5000));
+playButton.addEventListener('click',()=>start(0));

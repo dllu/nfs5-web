@@ -248,6 +248,21 @@ try {
   await page.locator('#movie-frame').screenshot({path:'build/original-startup.png'});
   await writeFile('build/original-startup.json',JSON.stringify(movie.result,null,2)+'\n');
   console.log(`Original intro: ${movie.result.rendering[3]} presented frames, ${movie.result.lit} visible pixels and game PCM peak ${movie.result.audio.peak.toFixed(3)}`);
+  await page.reload();
+  await page.getByRole('button',{name:'Run game',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#stop').disabled===false,null,{timeout:30000});
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await page.waitForFunction(()=>window.nfs5Result,null,{timeout:10000});
+  const stopped=await page.evaluate(()=>window.nfs5Result);
+  assert.equal(stopped.stopped,true);assert.equal(stopped.error,'Stopped by user');
+  assert.equal(await page.getByRole('button',{name:'Run game',exact:true}).isEnabled(),true);
+  assert.equal(await page.locator('#stop').isHidden(),true);
+  // A new instance must start after all native workers and GPU resources close.
+  await page.getByRole('button',{name:'Run original startup',exact:true}).click();
+  await page.waitForFunction(()=>window.nfs5Result,null,{timeout:30000});
+  assert.equal((await page.evaluate(()=>window.nfs5Result)).stopped,false);
+  assert.deepEqual(errors,[]);
+  console.log('Chrome unbounded Run game/Stop/restart lifecycle verified');
 } finally {
   await browser.close();
 }
