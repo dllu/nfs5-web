@@ -42,7 +42,9 @@ Current implementation:
   expose immediate/buffered input, event notifications, relative mouse movement,
   and focus loss. Browser key events reach the Wasm device through the runner.
 - DOS paths, case-insensitive files/directories, file sharing, duplicate handles,
-  reads/seeks, enumeration and a 64 MiB memory write overlay are implemented.
+  reads/seeks, enumeration, file copying and a 64 MiB memory write overlay are
+  implemented. Copies preserve attributes and modification times, observe sharing,
+  include pending mapped source writes and stage bytes before replacing a save.
   Staged assets load on demand through a shared 512 KiB range cache; Chrome and
   Node read the original startup data. Browser file changes persist in IndexedDB
   per origin/executable, checkpointing every second and when startup stops.
@@ -75,7 +77,7 @@ Current implementation:
 
 Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
-24 thread, 27 timer, 45 DirectInput, 85 filesystem/path, 86 mapping,
+24 thread, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
 12 lifecycle checks and 10 startup-configuration checks.
 Chrome verifies original startup,
@@ -96,7 +98,10 @@ track and Porsche 356 at 6144x3456. Holding Up accelerates the car; the original
 HUD showed roughly 80 km/h and third gear. Pause and race restart work.
 Menu clicks can require retries. HUD scaling, broader input, fidelity and
 performance need further verification.
-The game's save/load flows remain untested. Custom portrait conversion
+Creating a player writes its original save and HUD files to browser storage;
+the player reappears selected after a full browser restart, with identical save
+bytes. Campaign progress and explicit race-save/load flows remain untested.
+Custom portrait conversion
 is unavailable; the original caller uses its optional-converter failure path.
 Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are

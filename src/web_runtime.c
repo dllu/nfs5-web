@@ -61,6 +61,7 @@ static recomp_func_t thrash_lookup(uint32_t address);
 static void fail(uint32_t pc,const char *format,...);
 static int mapping_name_exists(const char *name);
 static int mapping_node_active(uint32_t node);
+static int mapping_flush_node(uint32_t node);
 static void map_flush_import(void);
 static void memory_claim(uint32_t address,uint32_t size,uint32_t protection,uint32_t owner);
 

@@ -83,6 +83,13 @@ static int mapping_flush_all(void) {
     for(unsigned i=0;i<256;i++)if(map_views[i].base&&!map_flush(map_views+i,0,map_views[i].size))return 0;
     return 1;
 }
+static int mapping_flush_node(uint32_t node) {
+    for(unsigned i=0;i<256;i++)if(map_views[i].base) {
+        map_view *v=map_views+i;map_object *o=map_objects+v->object-1;
+        if(map_stores[o->storage-1].node==node&&!map_flush(v,0,v->size))return 0;
+    }
+    return 1;
+}
 static uint32_t map_access(uint32_t access) {
     if(access==0xF001F)access=6;
     if(!access||(access&~7u)){last_error=87;return 0;}

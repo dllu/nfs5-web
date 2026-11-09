@@ -87,6 +87,9 @@ try {
         module.HEAPU8.set([0,1,2,3,10,13,127,128,255,42], base + payload);
         if (!invoke('WriteFile', [file, payload, 10, payload + 256, 0])) throw new Error('Save fixture write failed');
         invoke('CloseHandle', [file]);
+        module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\\checkpoint-copy.sav\0'),base+name+512);
+        const copied=await runtime.invokeAsync(manifest.imports.find(i=>i.name==='CopyFileA').slot,[name,name+512,0]);
+        if(copied.status||!copied.registers[0])throw new Error(copied.error||'Native save copy failed');
         module.HEAPU8.set(new TextEncoder().encode('Software\\NFS5Web\\BrowserChecks\0'), base + name);
         if (invoke('RegCreateKeyA', [0x80000001,name,payload+512])) throw new Error('Registry fixture creation failed');
         const key = get(payload+512); put(payload, 120);
@@ -185,6 +188,11 @@ try {
       const result = { read, count: view.getUint32(data + 8192, true), bytes: Array.from(module.HEAPU8.subarray(base + data + 4096, base + data + 4106)) };
       invoke('CloseHandle', [file]);
       if (!invoke('DeleteFileA', [data])) throw new Error('Save fixture deletion failed');
+      module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\\checkpoint-copy.sav\0'),base+data);
+      const copied=invoke('CreateFileA',[data,0x80000000,3,0,3,128,0]);
+      if(copied===0xffffffff||!invoke('ReadFile',[copied,data+4096,20,data+8192,0]))throw new Error('Copied save was not restored');
+      result.copyBytes=Array.from(module.HEAPU8.subarray(base+data+4096,base+data+4096+view.getUint32(data+8192,true)));
+      invoke('CloseHandle',[copied]);if(!invoke('DeleteFileA',[data]))throw new Error('Copied save deletion failed');
       module.HEAPU8.set(new TextEncoder().encode('Software\\NFS5Web\\BrowserChecks\0'), base + data);
       if (invoke('RegOpenKeyA', [0x80000001,data,data+1024])) throw new Error('Registry fixture was not restored');
       const key = view.getUint32(data+1024,true);
@@ -202,6 +210,7 @@ try {
   });
   assert.equal(restored.read, 1); assert.equal(restored.count, 10);
   assert.deepEqual(restored.bytes, [0,1,2,3,10,13,127,128,255,42]);
+  assert.deepEqual(restored.copyBytes,restored.bytes);
   assert.equal(restored.registry, 120);
   assert.deepEqual(restored.mapped,[0,128,255,17]);
   await page.reload();
@@ -210,14 +219,15 @@ try {
     try {
       const { module, base, manifest } = runtime, data = 0x800000, stack = runtime.memorySize - 0x10000;
       const view = new DataView(module.HEAPU8.buffer, base);
-      module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\\checkpoint.sav\0'), base + data);
-      [data,0x80000000,3,0,3,128,0].forEach((v, i) => view.setUint32(stack + i * 4, v >>> 0, true));
-      module._web_set_register(4, stack);
-      if (module._web_run(manifest.imports.find(item => item.name === 'CreateFileA').slot, 2000)) throw new Error('Open after deletion failed');
-      return new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8)[0];
+      return ['checkpoint.sav','checkpoint-copy.sav'].map(name=>{
+        module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\BrowserSaveChecks\\'+name+'\0'),base+data);
+        [data,0x80000000,3,0,3,128,0].forEach((v,i)=>view.setUint32(stack+i*4,v>>>0,true));module._web_set_register(4,stack);
+        if(module._web_run(manifest.imports.find(item=>item.name==='CreateFileA').slot,2000))throw new Error('Open after deletion failed');
+        return new Uint32Array(module.HEAPU8.buffer,module._web_registers(),8)[0];
+      });
     } finally { runtime.dispose(); }
   });
-  assert.equal(deleted, 0xffffffff);
+  assert.deepEqual(deleted,[0xffffffff,0xffffffff]);
   assert.deepEqual(errors, []);
   console.log('Chrome restored binary save bytes and registry values across a reload; deletion survived a second reload');
   await page.evaluate(() => {

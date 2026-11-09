@@ -200,6 +200,34 @@ static int fs_find_next(fs_search *search, uint32_t output) {
 }
 
 static int fs_import(const char *name) {
+    if(!strcmp(name,"CopyFileA")) {
+        char source_path[PATH_CAPACITY],destination_path[PATH_CAPACITY];
+        if(!argument(0)||!argument(1)){last_error=87;result(0,3);return 1;}
+        if(!fs_resolve(argument(0),source_path)||!fs_resolve(argument(1),destination_path)){result(0,3);return 1;}
+        fs_node *source=fs_find(source_path),*destination=fs_find(destination_path);
+        if(!source){last_error=fs_parent(source_path)?2:last_error;result(0,3);return 1;}
+        if(source->attributes&16){last_error=5;result(0,3);return 1;}
+        if(destination&&argument(2)){last_error=80;result(0,3);return 1;}
+        if(destination==source){last_error=32;result(0,3);return 1;}
+        if(destination_path[0]=='D'){last_error=19;result(0,3);return 1;}
+        if(destination&&(destination->attributes&19)){last_error=5;result(0,3);return 1;}
+        if(!destination&&!fs_parent(destination_path)){result(0,3);return 1;}
+        if(!fs_shares(source,1,7)||(destination&&!fs_shares(destination,2,3))){result(0,3);return 1;}
+        if(destination&&mapping_node_active((uint32_t)(destination-fs_nodes)+1)){last_error=1224;result(0,3);return 1;}
+        if(!mapping_flush_node((uint32_t)(source-fs_nodes)+1)){result(0,3);return 1;}
+        uint32_t size=source->size,old_capacity=destination?destination->capacity:0;
+        if(size>FS_WRITE_LIMIT||size>FS_WRITE_LIMIT-fs_written+old_capacity){last_error=112;result(0,3);return 1;}
+        uint8_t *copy=malloc(size?size:1);
+        if(!copy){last_error=8;result(0,3);return 1;}
+        /* Stage bytes before changing the destination, so an asset read or
+         * allocation failure cannot destroy an existing browser-local save. */
+        if(!fs_read_node(source,0,size,copy)){free(copy);result(0,3);return 1;}
+        if(!destination&&!(destination=fs_new(destination_path,source->attributes))){free(copy);result(0,3);return 1;}
+        fs_uncache(destination);free(destination->data);fs_written-=destination->capacity;
+        destination->data=copy;destination->size=destination->capacity=size;fs_written+=size;
+        destination->url[0]=0;destination->attributes=source->attributes;
+        fs_touch(destination);destination->modified=source->modified;result(1,3);return 1;
+    }
     if (!strcmp(name, "GetDiskFreeSpaceA")) {
         char path[PATH_CAPACITY];
         if (argument(0)) {
