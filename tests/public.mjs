@@ -73,15 +73,18 @@ try {
     await new Promise((resolve,reject)=>{const r=indexedDB.deleteDatabase('nfs5-web-files-'+sha256);r.onsuccess=resolve;r.onerror=()=>reject(r.error);r.onblocked=()=>reject(new Error('Test save database is blocked'));});
   });
   await ready();
+  assert.equal(await page.locator('#game-tools').evaluate(c=>getComputedStyle(c).position),'fixed','Controls load the matching release stylesheet');
   assert.equal(await page.locator('#retry').isVisible(),false);
   assert.equal(await page.locator('#game').evaluate(c=>getComputedStyle(c).cursor),'none');
   assert.equal(await page.evaluate(()=>crossOriginIsolated),true);
   for(const size of [{width:1920,height:1080},{width:900,height:1600}]) {
     await page.setViewportSize(size);
+    await page.waitForTimeout(350);
     const box=await page.locator('#game').boundingBox();
     const scale=Math.min(size.width/640,size.height/480);
     assert(Math.abs(box.width-640*scale)<.01&&Math.abs(box.height-480*scale)<.01,'Menu keeps its original 4:3 aspect');
     assert(Math.abs(box.x-(size.width-box.width)/2)<.01&&Math.abs(box.y-(size.height-box.height)/2)<.01,'Menu is centered inside its black bars');
+    assert.deepEqual(await page.locator('#game').evaluate(c=>[c.width,c.height]),[Math.round(box.width),Math.round(box.height)],'Frontend geometry renders at viewport density inside the 4:3 frame');
     await page.screenshot({path:`build/public-menu-${size.width}x${size.height}.png`});
   }
   // Create a profile with a horizontal letterbox offset, exercising the same
@@ -106,7 +109,12 @@ try {
   }
   assert(creating,'Create player must open the name field');
   await click(350,169);
-  await page.keyboard.type('webcheck',{delay:80});
+  await page.getByRole('button',{name:'Keyboard',exact:true}).click();
+  await page.setViewportSize({width:1920,height:1000});await page.waitForTimeout(400);
+  assert(await page.getByRole('textbox',{name:'Type player name'}).evaluate(field=>document.activeElement===field),'Opening the mobile keyboard retains focus across a renderer resize');
+  await page.getByRole('textbox',{name:'Type player name'}).fill('webcheck');
+  await page.waitForTimeout(1400);
+  await page.getByRole('button',{name:'Keyboard',exact:true}).click();
   await page.screenshot({path:'build/public-test-named.png'});
   await click(225,237);await click(320,400);
   let first;
@@ -116,6 +124,16 @@ try {
   assert.deepEqual(first.completion,[0,0,0]);
   assert.equal(first.resolution,26);assert.equal(first.carDetail,4);assert.equal(first.textureDetail,4);
   console.log('Fresh profile saved locally');
+  await page.getByRole('button',{name:'Info',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#game-info pre').textContent.includes('wasmBytes'));
+  const diagnostics=JSON.parse(await page.locator('#game-info pre').textContent());
+  assert.equal(diagnostics.wasmBytes,384*1024*1024);assert.equal(diagnostics.info.software,false);
+  await page.getByRole('button',{name:'Close',exact:true}).click();
+  const dialogPromise=page.waitForEvent('dialog');
+  const reloading=page.reload().then(()=>false,()=>true);
+  const dialog=await dialogPromise;assert.equal(dialog.type(),'beforeunload');await dialog.dismiss();
+  assert.equal(await reloading,true,'The browser allows cancelling a tab close/reload while playing');
+  assert(await page.locator('#loading').isHidden());
   await page.screenshot({path:'build/public-test-created.png'});
   await browser.close();browser=null;
   await open();await ready();

@@ -1,17 +1,21 @@
 import {attachInput} from './input.mjs';
 import {openAudio} from './audio.mjs';
+import {attachControls} from './controls.mjs';
 
 const loading=document.querySelector('#loading'), status=document.querySelector('#status');
 const retry=document.querySelector('#retry'), failure=document.querySelector('#failure');
 const sound=document.querySelector('#sound'),performanceNotice=document.querySelector('#performance');
 retry.onclick=()=>location.reload();
-let worker,audio,detach,screen,logs=[],finished=false;
+let worker,audio,detach,controls,screen,logs=[],finished=false;
+const warnBeforeLeaving=event=>{if(!finished){event.preventDefault();event.returnValue='';}};
+const displaySize=()=>({width:Math.round(innerWidth*devicePixelRatio),height:Math.round(innerHeight*devicePixelRatio)});
 const resume=()=>audio?.resume().then(()=>{sound.hidden=audio.stats().state==='running';}).catch(()=>{});
 window.addEventListener('pointerdown',resume,{capture:true});
 window.addEventListener('keydown',resume,{capture:true});
 async function finish(message,error) {
   if(finished)return;finished=true;
-  detach?.();worker?.terminate();await audio?.close();
+  window.removeEventListener('beforeunload',warnBeforeLeaving);
+  controls?.close();detach?.();worker?.terminate();await audio?.close();
   sound.hidden=performanceNotice.hidden=true;loading.hidden=false;status.textContent=message;retry.hidden=false;
   if(error){failure.hidden=false;document.querySelector('#error').textContent=error+'\n\n'+logs.slice(-12).join('\n');}
 }
@@ -41,9 +45,17 @@ try {
           if('dx'in event){event.dx=Math.round(event.dx*screen.width/box.width);event.dy=Math.round(event.dy*screen.height/box.height);}
         }
         worker.postMessage(event);
-      });
+      },{viewport:canvas,keepRunningOnBlur:true});
+      controls=attachControls(detach,{onDiagnostics:()=>worker.postMessage({type:'diagnostics'})});
+      if(screen)controls.setScreen(screen);
     }
-    if(data.type==='screen'){screen=data;canvas.style.setProperty('--game-aspect',data.width/data.height);loading.hidden=true;canvas.focus({preventScroll:true});}
+    if(data.type==='screen'){
+      screen=data;controls?.setScreen(data);canvas.style.setProperty('--game-aspect',data.width/data.height);loading.hidden=true;
+      // Opening a phone's keyboard resizes the viewport. Keep its text field
+      // focused when the renderer acknowledges that resize.
+      if(!document.activeElement?.matches('input,textarea'))canvas.focus({preventScroll:true});
+    }
+    if(data.type==='diagnostics')controls?.diagnostics({...data,type:undefined});
     if(data.type==='save-error'){sound.hidden=false;sound.textContent='Local save failed. Keep this tab open and free some browser storage.';}
     if(data.type==='result'){
       data.frame?.close();
@@ -53,8 +65,12 @@ try {
   };
   const offscreen=canvas.transferControlToOffscreen();
   worker.postMessage({type:'start',milliseconds:0,intro:false,softwarePixelLimit:1280*720,audio:audio.configuration,
-    display:{width:Math.round(innerWidth*devicePixelRatio),height:Math.round(innerHeight*devicePixelRatio)},canvas:offscreen},[offscreen]);
+    display:displaySize(),canvas:offscreen},[offscreen]);
+  window.addEventListener('beforeunload',warnBeforeLeaving);
+  worker.postMessage({type:'visibility',visible:!document.hidden});
+  let resizeTimer;
+  window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(!finished)worker.postMessage({type:'viewport',display:displaySize()});},150);});
   // Flush files already serialized by the game when the tab is backgrounded.
-  document.addEventListener('visibilitychange',()=>{if(document.hidden&&!finished)worker.postMessage({type:'checkpoint'});});
+  document.addEventListener('visibilitychange',()=>{if(!finished){worker.postMessage({type:'visibility',visible:!document.hidden});if(document.hidden)worker.postMessage({type:'checkpoint'});}});
   window.addEventListener('pagehide',()=>{if(!finished)worker.postMessage({type:'checkpoint'});});
 } catch(error) {await finish('Unable to start the game',error.stack||String(error));}

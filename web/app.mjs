@@ -9,6 +9,7 @@ const button = document.querySelector('#boot');
 const playButton=document.querySelector('#play'),stopButton=document.querySelector('#stop');
 const write = text => { output.textContent += text + '\n'; };
 let activeWorker;
+document.addEventListener('visibilitychange',()=>activeWorker?.postMessage({type:'visibility',visible:!document.hidden}));
 stopButton.addEventListener('click',()=>{stopButton.disabled=true;status.textContent='Stopping…';activeWorker?.postMessage({type:'stop'});});
 
 async function start(milliseconds) {
@@ -47,7 +48,7 @@ async function start(milliseconds) {
               if('dx' in event){event.dx=Math.round(event.dx*screenSize.width/rect.width);event.dy=Math.round(event.dy*screenSize.height/rect.height);}
             }
             worker.postMessage(event);
-          });
+          },{viewport:canvas,keepRunningOnBlur:true});
         }
         if(data.type==='screen'){
           screenSize=data;canvas.hidden=false;canvas.style.setProperty('--game-aspect',data.width/data.height);
@@ -65,6 +66,7 @@ async function start(milliseconds) {
       worker.postMessage({ type: 'start', milliseconds, audio: audio.configuration,
         display: { width: Math.round(innerWidth * devicePixelRatio), height: Math.round(innerHeight * devicePixelRatio) },
         canvas:offscreen },[offscreen]);
+      worker.postMessage({type:'visibility',visible:!document.hidden});
     });
     window.nfs5Result = result;
     status.textContent = result.stopped?'Stopped.':result.exited?`Game exited (code ${result.exitCode}).`:result.status ? (/budget reached/i.test(result.error)?'Diagnostic execution limit reached':'Execution stopped at a porting dependency') : 'Startup function returned';

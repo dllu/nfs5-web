@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {openingMovies,softwareViewport} from '../web/config.mjs';
+import {selectAdapter} from '../web/renderer.mjs';
 const bytes=s=>new TextEncoder().encode(s);
 for(const [text,expected] of [
   ['',true],['[NFS5]\nNoMovies=1',false],['[NFS5]\nNoMovies=0',true],
@@ -21,3 +22,10 @@ for(const [display,expected] of [
 assert.equal(softwareViewport(null,1280*720),null);
 const hardware={width:6144,height:3456};assert.equal(softwareViewport(hardware,0),hardware);
 console.log('7 software-adapter display checks passed (pixel budget, aspect, minimum size and opt-in)');
+const hardwareAdapter={info:{isFallbackAdapter:false}},softwareAdapter={info:{isFallbackAdapter:true}},requests=[];
+assert.equal(await selectAdapter({requestAdapter:async options=>{requests.push(options);return options.powerPreference==='low-power'?hardwareAdapter:softwareAdapter;}}),hardwareAdapter);
+assert.equal(requests.length,2);assert(requests.every(options=>options.forceFallbackAdapter===false));
+assert.equal(await selectAdapter({requestAdapter:async()=>softwareAdapter}),softwareAdapter);
+assert.equal(await selectAdapter({requestAdapter:async options=>{if(options.featureLevel)return hardwareAdapter;throw new Error('Unavailable');}}),hardwareAdapter);
+assert.equal(await selectAdapter({requestAdapter:async()=>null}),undefined);
+console.log('Adapter selection prefers hardware across browser hints and retains software only as a fallback');

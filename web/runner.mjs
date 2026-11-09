@@ -1,7 +1,13 @@
 import { loadRuntime } from './runtime.mjs';
 
-let runtime;
+let runtime,visible=true;
 self.onmessage = async ({ data }) => {
+  if(data.type==='visibility'){visible=data.visible;runtime?.graphics?.setVisible(visible);return;}
+  if(data.type==='viewport'){runtime?.graphics?.setFrontendSize(data.display);return;}
+  if(data.type==='diagnostics'){
+    const r=runtime?.graphics?.renderer;
+    self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:runtime?.module.HEAPU8.byteLength,stats:r?.stats});return;
+  }
   if (data.type === 'input') { runtime?.input(data); return; }
   if(data.type==='checkpoint'){await runtime?.checkpoint().catch(error=>self.postMessage({type:'save-error',error:String(error)}));return;}
   if (data.type === 'stop') { runtime?.stop();return; }
@@ -9,6 +15,7 @@ self.onmessage = async ({ data }) => {
   try {
     runtime = await loadRuntime({ log: text => self.postMessage({ type: 'log', text }), audio: data.audio, display: data.display,
       intro:data.intro,softwarePixelLimit:data.softwarePixelLimit,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
+    runtime.graphics?.setVisible(visible);
     self.postMessage({ type: 'loaded', manifest: runtime.manifest, graphics:runtime.graphics?.renderer.info,
       display:runtime.display,reducedResolution:runtime.reducedResolution });
     const result = await runtime.runAsync(data.milliseconds??0);

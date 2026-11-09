@@ -321,7 +321,7 @@ try {
   result.thrash=await page.evaluate(async()=>{
     const {loadRuntime}=await import('./runtime.mjs');
     const canvas=document.createElement('canvas');canvas.id='thrash-check';canvas.width=640;canvas.height=480;canvas.style.width='640px';document.body.prepend(canvas);
-    const runtime=await loadRuntime({canvas,pace:false,persist:false});window.thrashRuntime=runtime;
+    const runtime=await loadRuntime({canvas,pace:false,persist:false,display:{width:640,height:480}});window.thrashRuntime=runtime;
     const {module,base,manifest}=runtime,view=new DataView(module.HEAPU8.buffer,base),data=0x800000,out=0x120000,image=0x900000;
     const put=(p,v)=>view.setUint32(p,v>>>0,true),get=p=>view.getUint32(p,true);
     const text=s=>{module.HEAPU8.set(new TextEncoder().encode(s+'\0'),base+data);return data;};
@@ -764,6 +764,25 @@ try {
   });
   for(const legacy of result.legacyDraws)assert.deepEqual(legacy.errors,[]);
   assert.deepEqual(errors,[]);
+  result.frontend=await page.evaluate(async()=>{
+    const {createRenderer}=await import('./renderer.mjs'),canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;document.body.append(canvas);
+    const r=await createRenderer(canvas,{frontendSize:{width:1920,height:1080}});
+    try {
+      if(r.info.software)throw new Error('This density check requires a hardware adapter');
+      if(r.width!==640||r.height!==480||canvas.width!==1440||canvas.height!==1080)throw new Error('Frontend density lost its logical coordinates or 4:3 output');
+      r.clear(0xff000000);r.clear(0xff00ff00,1,{mask:1,rect:{x:100,y:100,width:20,height:20}});
+      const output=await r.readPixels({output:true}),logical=await r.readPixels();
+      if(output.length!==1440*1080*4||logical.length!==640*480*4)throw new Error('Readback coordinate spaces disagree');
+      const pixel=(bytes,x,y,width)=>Array.from(bytes.slice((y*width+x)*4,(y*width+x)*4+4)).join();
+      if(pixel(output,226,226,1440)!=='0,255,0,255'||pixel(output,224,226,1440)!=='0,0,0,255'||pixel(logical,101,101,640)!=='0,255,0,255')throw new Error('Scaled clear/scissor or downsampling failed');
+      for(let i=0;i<8;i++){r.present();await r.frameBudget();}
+      await r.validate();if(r.stats.peakPendingFrames>2)throw new Error('GPU frame budget exceeded');
+      const result={logical:[r.width,r.height],output:[canvas.width,canvas.height],peakPendingFrames:r.stats.peakPendingFrames,errors:r.errors.slice()};
+      r.resize(1920,1080);if(canvas.width!==1920||canvas.height!==1080)throw new Error('Race geometry was resized as frontend');
+      return result;
+    } finally{r.close();canvas.remove();}
+  });
+  assert.deepEqual(result.frontend.errors,[]);
   await writeFile('build/webgpu-renderer.json', JSON.stringify({ browser:browser.browser().version(),...result },null,2)+'\n');
   console.log(`WebGPU (${result.info.vendor}): ${result.checks} backend checks; ${result.thrash.checks} native-driver checks and ${result.thrash.calls} ABI calls passed, including 4K, ring wrapping and legacy polling after idle`);
 } finally { await browser.close(); }

@@ -23,29 +23,76 @@ const scans = {
   Insert: 0xd2, Delete: 0xd3, MetaLeft: 0xdb, MetaRight: 0xdc, ContextMenu: 0xdd,
 };
 
-export function attachInput(target, send) {
-  const handlers = [];
-  function listen(type, handler, options) {
-    target.addEventListener(type, handler, options);
-    handlers.push(() => target.removeEventListener(type, handler, options));
+export function attachInput(target, send, {viewport=target,keepRunningOnBlur=false}={}) {
+  const handlers=[],keys=new Map(),releaseTimers=new Map(),pressedAt=new Map();
+  let buttons=0,touchId=null,lastPoint={x:0,y:0},touchStart=0,touchTimer;
+  function listen(object,type,handler,options) {
+    object.addEventListener(type,handler,options);
+    handlers.push(()=>object.removeEventListener(type,handler,options));
+  }
+  function key(scan,down,source='virtual') {
+    const sources=keys.get(scan)??new Set(),was=sources.size>0;
+    if(down)sources.add(source);else sources.delete(source);
+    if(sources.size)keys.set(scan,sources);else keys.delete(scan);
+    if(was!==(sources.size>0))send({type:'input',key:scan,down:sources.size>0});
+  }
+  function pulse(scan,duration=150) {
+    const source=Symbol();key(scan,true,source);
+    const timer=setTimeout(()=>{releaseTimers.delete(source);key(scan,false,source);},duration);
+    releaseTimers.set(source,timer);
   }
   function keyboard(event) {
-    const scan = scans[event.code];
-    if (!scan) return;
-    event.preventDefault();
-    send({ type: 'input', key: scan, down: event.type === 'keydown' });
+    const editing=event.target?.closest?.('input,textarea,[contenteditable="true"]');
+    if(editing&&event.type==='keydown')return;
+    const scan=scans[event.code]??(event.key==='Escape'?1:undefined);
+    if(!scan)return;
+    if(!editing)event.preventDefault();
+    if(event.type==='keydown') {
+      clearTimeout(releaseTimers.get(scan));releaseTimers.delete(scan);
+      if(!event.repeat)pressedAt.set(scan,performance.now());
+      if(scan!==1||!event.repeat)key(scan,true,'keyboard');
+    } else {
+      const delay=scan===1?Math.max(0,150-(performance.now()-(pressedAt.get(scan)??0))):0;
+      if(delay)releaseTimers.set(scan,setTimeout(()=>{releaseTimers.delete(scan);key(scan,false,'keyboard');},delay));
+      else key(scan,false,'keyboard');
+    }
   }
-  listen('keydown', keyboard); listen('keyup', keyboard);
-  listen('blur', () => send({ type: 'input', focus: false }));
-  listen('focus', () => send({ type: 'input', focus: true }));
-  listen('mousemove', event => send({ type: 'input', dx: event.movementX, dy: event.movementY, dz: 0, buttons: event.buttons, x: event.clientX, y: event.clientY }));
-  for (const type of ['mousedown', 'mouseup']) listen(type, event => {
-    send({ type: 'input', dx: 0, dy: 0, dz: 0, buttons: event.buttons, x: event.clientX, y: event.clientY });
-  });
-  listen('wheel', event => {
+  function mouse(event,dz=0) {
+    buttons=event.buttons??0;lastPoint={x:event.clientX,y:event.clientY};
+    send({type:'input',dx:event.movementX||0,dy:event.movementY||0,dz,buttons,...lastPoint});
+  }
+  function release() {
+    for(const timer of releaseTimers.values())clearTimeout(timer);
+    releaseTimers.clear();clearTimeout(touchTimer);
+    for(const scan of keys.keys())send({type:'input',key:scan,down:false});
+    keys.clear();pressedAt.clear();buttons=0;touchId=null;
+    send({type:'input',dx:0,dy:0,dz:0,buttons:0,...lastPoint});
+  }
+  listen(target,'keydown',keyboard);listen(target,'keyup',keyboard);
+  listen(target,'blur',()=>{release();if(!keepRunningOnBlur)send({type:'input',focus:false});});
+  listen(target,'focus',()=>send({type:'input',focus:true}));
+  listen(viewport,'mousemove',event=>mouse(event));
+  listen(viewport,'mousedown',event=>mouse(event));
+  // Preserve mouse-up outside the canvas without forwarding overlay clicks.
+  listen(target,'mouseup',event=>{if(buttons||viewport===target||event.target===viewport)mouse(event);});
+  listen(viewport,'wheel',event=>{event.preventDefault();mouse(event,-Math.sign(event.deltaY)*120);},{passive:false});
+  listen(viewport,'contextmenu',event=>event.preventDefault());
+  function touch(event) {
+    if(event.pointerType!=='touch'&&event.pointerType!=='pen')return;
     event.preventDefault();
-    send({ type: 'input', dx: 0, dy: 0, dz: -Math.sign(event.deltaY) * 120, buttons: event.buttons, x: event.clientX, y: event.clientY });
-  }, { passive: false });
-  listen('contextmenu', event => event.preventDefault());
-  return () => { handlers.forEach(remove => remove()); send({ type: 'input', focus: false }); };
+    if(event.type==='pointerdown') {
+      if(touchId!==null)return;
+      if(buttons)send({type:'input',dx:0,dy:0,dz:0,buttons:0,...lastPoint});
+      clearTimeout(touchTimer);touchId=event.pointerId;touchStart=performance.now();
+      viewport.setPointerCapture?.(touchId);buttons=1;
+    } else if(event.pointerId!==touchId)return;
+    lastPoint={x:event.clientX,y:event.clientY};
+    if(event.type==='pointerup'||event.type==='pointercancel') {
+      touchId=null;
+      touchTimer=setTimeout(()=>{buttons=0;send({type:'input',dx:0,dy:0,dz:0,buttons:0,...lastPoint});},Math.max(0,120-(performance.now()-touchStart)));
+    } else send({type:'input',dx:0,dy:0,dz:0,buttons:1,...lastPoint});
+  }
+  for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])listen(viewport,type,touch,{passive:false});
+  const detach=()=>{handlers.forEach(remove=>remove());release();send({type:'input',focus:false});};
+  Object.assign(detach,{key,pulse,release});return detach;
 }

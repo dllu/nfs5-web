@@ -131,7 +131,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   const storageTimer = storage ? setInterval(() => checkpoint().catch(error => log(`Local save failed: ${error.message}`)), 1000) : null;
   const detachAudio = audio ? attachAudio(module, audio) : null;
   let graphics;
-  try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace}):null; }
+  try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace,frontendSize:display?{...display}:null}):null; }
   catch(error) {clearInterval(storageTimer);detachAudio?.();storage?.close();module.PThread.terminateAllThreads();throw error;}
   const originalDisplay=display;
   if(graphics?.renderer.info.software&&softwarePixelLimit&&display) {

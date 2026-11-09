@@ -12,7 +12,8 @@
     "test:renderer": "node tests/renderer.mjs && node tests/native-shader.mjs",
     "test:transport": "node tests/gpu-transport.mjs",
     "build:public": "python3 tools/public_build.py",
-    "test:public": "node tests/public.mjs"
+    "test:public": "node tests/public.mjs",
+    "test:usability": "node tests/usability.mjs && node tests/race-usability.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.58.2"

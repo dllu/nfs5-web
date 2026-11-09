@@ -11,4 +11,5 @@
   height: min(100dvh, calc(100vw / var(--game-aspect)));
   background: #000;
   cursor: none;
+  touch-action: none;
 }

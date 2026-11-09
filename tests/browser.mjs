@@ -425,16 +425,17 @@ try {
   for(const size of [{width:1440,height:1000},{width:1100,height:700}]) {
     await page.setViewportSize(size);
     const bounds=await page.locator('#game').boundingBox();
-    assert.deepEqual(bounds,{x:0,y:0,...size},'Live game fills the browser viewport at either aspect ratio');
-    const x=size.width/4,y=size.height*3/4;
+    const scale=Math.min(size.width/640,size.height/480);
+    assert(Math.abs(bounds.width-640*scale)<.01&&Math.abs(bounds.height-480*scale)<.01,'Live frontend remains 4:3 inside the viewport');
+    const x=bounds.x+bounds.width/4,y=bounds.y+bounds.height*3/4;
     await page.mouse.move(x,y);
     let input=await page.evaluate(()=>window.viewportInputs.filter(e=>'x' in e).at(-1));
-    assert.deepEqual([input.x,input.y],[160,360],'Mouse movement maps through the stretched 640×480 canvas');
+    assert.deepEqual([input.x,input.y],[160,360],'Mouse movement maps through the fitted 640×480 canvas');
     await page.evaluate(({x,y})=>{
       const canvas=document.querySelector('#game');
       for(const type of ['mousedown','mouseup'])canvas.dispatchEvent(new MouseEvent(type,{bubbles:true,clientX:x,clientY:y,buttons:type==='mousedown'?1:0}));
       canvas.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,clientX:x,clientY:y,deltaY:1}));
-    },{x:size.width*3/4,y:size.height/4});
+    },{x:bounds.x+bounds.width*3/4,y:bounds.y+bounds.height/4});
     const pointers=await page.evaluate(()=>window.viewportInputs.filter(e=>'x' in e).slice(-3));
     assert.deepEqual(pointers.map(e=>[e.x,e.y,e.buttons,e.dz]),[[480,120,1,0],[480,120,0,0],[480,120,0,-120]],
       'Buttons and wheel refresh cursor position without requiring a preceding move');
@@ -454,7 +455,7 @@ try {
   assert.equal((await page.evaluate(()=>window.nfs5Result)).stopped,false);
   assert.equal(await page.evaluate(()=>document.body.classList.contains('playing')),false);
   assert.deepEqual(errors,[]);
-  console.log('Chrome viewport fill/resize, stretched mouse/button/wheel coordinates and Run game/Stop/restart lifecycle verified');
+  console.log('Chrome 4:3 frontend/resize, fitted mouse/button/wheel coordinates and Run game/Stop/restart lifecycle verified');
 } finally {
   await browser.close();
 }

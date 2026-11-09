@@ -27,7 +27,7 @@ try {
   await page.evaluate(async()=>{
     document.body.innerHTML='<canvas id="navigation" width="640" height="480" style="position:fixed;inset:0;width:100vw;height:100vh"></canvas>';
     const {loadRuntime}=await import('./runtime.mjs'),{attachInput}=await import('./input.mjs');
-    const canvas=document.querySelector('canvas'),runtime=await loadRuntime({canvas,persist:false,intro:false});
+    const canvas=document.querySelector('canvas'),runtime=await loadRuntime({canvas,persist:false,intro:false,display:{width:640,height:480}});
     const renderer=runtime.graphics.renderer;
     const detach=attachInput(window,event=>{
       const box=canvas.getBoundingClientRect();

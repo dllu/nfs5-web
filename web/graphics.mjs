@@ -13,8 +13,22 @@ export function decodeGraphicsState(words) {
   return state;
 }
 
-export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true } = {}) {
+export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true, frontendSize } = {}) {
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
+  let visible=true,cancelPacing;
+  const backgroundClock=new Int32Array(new SharedArrayBuffer(4));
+  function nextFrame() {
+    return new Promise(resolve=>{
+      let frame,timer,settled=false;
+      const done=()=>{if(settled)return;settled=true;if(frame!==undefined)cancelAnimationFrame(frame);clearTimeout(timer);cancelPacing=null;resolve();};
+      cancelPacing=done;
+      if(visible&&typeof requestAnimationFrame==='function')frame=requestAnimationFrame(done);
+      else if(typeof Atomics.waitAsync==='function') {
+        const wait=Atomics.waitAsync(backgroundClock,0,0,visible?1000/60:1000/30);
+        Promise.resolve(wait.value).then(done);
+      } else timer=setTimeout(done,visible?1000/60:1000/30);
+    });
+  }
   let channel,yieldResolve;
   const stats={packets:0,copiedBytes:0};
   const pointer=module._web_gpu_transport(), uploads=new Map();
@@ -37,7 +51,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     try{module.HEAPU8.set(bytes,p);module._web_gpu_fail(p);}finally{module._free(p);}
     Atomics.notify(header,0);
   }
-  const renderer=await createRenderer(canvas,{onError:fail});
+  const renderer=await createRenderer(canvas,{onError:fail,frontendSize});
   function packetView(start,count) {
     const at=start%ring.length,first=Math.min(count,ring.length-at);
     if(first===count)return ring.subarray(at,at+count);
@@ -71,8 +85,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
           renderer.clear(data[0],new Float32Array(data.buffer,data.byteOffset,data.length)[1],options);break;
         }
         case 3:
-          if(pace)await new Promise(resolve=>typeof requestAnimationFrame==='function'?requestAnimationFrame(resolve):setTimeout(resolve,1000/60));
-          if(closed)return;renderer.present();break;
+          if(pace)await nextFrame();
+          if(closed)return;renderer.present();await renderer.frameBudget();break;
         case 4:{
           const vertices=data[stateSize],indices=data[stateSize+1],vertexStart=stateSize+2,vertexEnd=vertexStart+vertices*8;
           if(data.length!==vertexEnd+indices)throw new Error('Invalid draw packet length');
@@ -135,6 +149,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   if(timer===null)consume().catch(fail);
   return {
     renderer,stats,
+    setVisible(value){visible=Boolean(value);cancelPacing?.();Atomics.notify(backgroundClock,0);},
+    setFrontendSize(size){if(!frontendSize)return;Object.assign(frontendSize,size);renderer.resize(renderer.width,renderer.height);onResize(renderer.width,renderer.height);},
     async settle() {
       while(!closed && !failure) {
         await pump();views();if((Atomics.load(header,0)>>>0)===(Atomics.load(header,1)>>>0))break;
@@ -143,7 +159,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     },
     close() {
       if(closed)return;fail(new Error('Renderer detached'));closed=true;
-      if(timer!==null)clearInterval(timer);Atomics.notify(header,0);yieldResolve?.();
+      if(timer!==null)clearInterval(timer);Atomics.notify(header,0);yieldResolve?.();cancelPacing?.();Atomics.notify(backgroundClock,0);
       channel?.port1.close();channel?.port2.close();renderer.close();
     },
   };

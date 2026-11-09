@@ -3,6 +3,7 @@
 import ctypes
 import ctypes.util
 import hashlib
+import re
 import gzip
 import json
 from pathlib import Path
@@ -123,15 +124,28 @@ def main():
     static = ['engine.js', 'engine.wasm', 'manifest.json', 'game.exe']
     for name in static:
         shutil.copyfile(source / name, destination / name)
-    for name in ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'config.mjs',
-                 'input.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']:
+    web = ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'config.mjs',
+           'input.mjs', 'controls.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']
+    for name in web:
         shutil.copyfile(ROOT / 'web' / name, destination / name)
     shutil.copyfile(ROOT / 'web/play.html', destination / 'index.html')
     shutil.copyfile(ROOT / 'THIRD_PARTY_NOTICES.md', destination / 'THIRD_PARTY_NOTICES.md')
+    # Intermediaries may assign CSS/JS a browser TTL despite origin no-cache.
+    # Version every code dependency, including Emscripten's Wasm/worker URLs,
+    # so one load cannot mix a new launcher with a cached engine or stylesheet.
+    version = hashlib.sha256()
+    for name in sorted([*static, *web, 'index.html', 'assets.json']):
+        version.update(name.encode() + b'\0' + (destination / name).read_bytes())
+    revision = version.hexdigest()[:16]
+    names = '|'.join(re.escape(name) for name in [*static, *web, 'assets.json'])
+    references = re.compile(r'''(['"])((?:\./)?(?:''' + names + r'''))\1''')
+    for name in ['index.html', 'engine.js', *[n for n in web if n.endswith('.mjs')]]:
+        path = destination / name
+        path.write_text(references.sub(lambda m: m[1] + m[2] + '?v=' + revision + m[1], path.read_text()))
     for name in ('engine.wasm', 'engine.js', 'assets.json'):
         compressed = destination / (name + '.gz')
         compressed.write_bytes(gzip.compress((destination / name).read_bytes(), compresslevel=9, mtime=0))
-    print(f'Public release: {destination.relative_to(ROOT)}/ ({len(referenced)} asset payloads)')
+    print(f'Public release: {destination.relative_to(ROOT)}/ ({len(referenced)} asset payloads, revision {revision})')
 
 
 if __name__ == '__main__':
