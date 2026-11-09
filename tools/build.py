@@ -123,6 +123,7 @@ def main():
     exports.extend(['_web_ui_layout','_web_ui_extent','_web_ui_coordinate','_web_ui_mouse'])
     exports.append('_web_ui_expand')
     exports.extend(['_web_gpu_transport', '_web_gpu_attach', '_web_gpu_fail', '_web_gpu_stats'])
+    exports.append('_web_thrash_textures')
     exports.extend(['_web_pointer','_web_mapping_stats'])
     exports.extend(['_web_intro_config','_web_intro_skipped'])
     exports.extend(['_web_process_exited','_web_exit_code'])

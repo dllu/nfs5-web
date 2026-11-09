@@ -769,6 +769,22 @@ uint32_t *web_gpu_stats(void) {
     stats[4]=atomic_load(&gpu_transport.write)-atomic_load(&gpu_transport.read);
     machine_release(); return stats;
 }
+/* Read-only driver metadata for native visual comparisons. Header words:
+ * version, count, flags, raw spatial/mip filters, override, row words, reserved.
+ * Rows: opaque guest handle, GPU id, width, height, format, extra mip count,
+ * palette format, auxiliary flags. Framebuffer-copy textures are not included. */
+uint32_t *web_thrash_textures(void) {
+    static uint32_t snapshot[8+MAX_TEXTURES*8];machine_acquire();
+    uint32_t count=0;
+    for(unsigned i=0;i<MAX_TEXTURES;i++)if(textures[i].va){
+        const texture_slot *t=textures+i;uint32_t *row=snapshot+8+count++*8;
+        row[0]=t->va;row[1]=t->gpu_id;row[2]=t->width;row[3]=t->height;
+        row[4]=t->format;row[5]=t->mip_levels-1;row[6]=MEM32(t->va+12);row[7]=MEM32(t->va+16)>>16;
+    }
+    snapshot[0]=1;snapshot[1]=count;snapshot[2]=descriptor?MEM32(descriptor+12):0;
+    snapshot[3]=state_values[0][7];snapshot[4]=state_values[0][11];snapshot[5]=thrash_texture_filter;snapshot[6]=8;snapshot[7]=0;
+    machine_release();return snapshot;
+}
 uint32_t web_registry_restore(void) { machine_acquire(); int ok = reg_restore(); machine_release(); return ok; }
 void web_display_size(uint32_t width, uint32_t height) {
     if (!width || !height || width > 16384 || height > 16384) return;

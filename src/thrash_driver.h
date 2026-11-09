@@ -61,7 +61,9 @@ static void make_descriptor(void) {
     formats=hle_va(hle_alloc(16*4));
     MEM32(descriptor)=0x44334437;MEM32(descriptor+4)=0xD0;
     MEM32(descriptor+8)=107;
-    MEM32(descriptor+12)=0x3F;
+    /* Native flags require square/power-of-two textures. Do not advertise
+     * its software, wide-line or window-mode-switching capabilities. */
+    MEM32(descriptor+12)=0x0E;
     MEM32(descriptor+16)=1;MEM32(descriptor+20)=4096;MEM32(descriptor+24)=1;
     MEM32(descriptor+28)=1;MEM32(descriptor+32)=4096;MEM32(descriptor+36)=1;
     MEM32(descriptor+44)=16;MEM32(descriptor+48)=formats;

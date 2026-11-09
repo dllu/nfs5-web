@@ -67,8 +67,11 @@ Côte d'Azur's pink sunset matches the native scene; its sky mesh also produces
 its gradient in an isolated WebGPU pass. The live sun object initializes its
 visibility samples and keeps sampling during driving. Visible flare artwork,
 weather, other effects and stencil-dependent scenes still need comparisons.
-Côte d'Azur currently submits only base texture levels; native mipmap submission
-still needs comparison.
+Native and browser snapshots of the checked Côte d'Azur race have identical
+texture dimension/format/mip-count multisets (312 allocations), with texture/car
+tiers both 4. Both use base levels only in that scene; supplied mipmaps remain
+supported. This metadata comparison does not establish texture-pixel or
+whole-scene equivalence.
 Menu clicks can require retries, and one menu-return memory fault remains
 unexplained. Custom photo import/resizing, full keyboard-layout handling and
 many unused Windows APIs are unsupported. An abrupt close can lose changes
@@ -82,8 +85,8 @@ need verification. The renderer has a core depth/stencil fallback when optional
 
 Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
-visibility. Fog uniforms and sampler parameters are compared against the original
-x86 OpenGL driver. GPU pixels are compared against its embedded GLSL for fog,
+visibility. Hardware/texture capability flags, fog uniforms and sampler parameters
+are compared against the original x86 OpenGL driver. GPU pixels are compared against its embedded GLSL for fog,
 depth clipping, texture projection and flat/smooth color. All nine portrait
 pixel planes match native GIMME conversion.
 The checks also exercise Windows services, threads, x87 state, storage,
@@ -158,6 +161,11 @@ pointer before taking the snapshot. With the reader built and reference running,
 `python3 tools/native_sun.py build/native-sun` records display/sun data as JSON
 and raw snapshots; `--window <X11-ID>` also captures its image. Live reads and
 the image are separate observations, not an atomic frame capture.
+The optional [texture reader](tools/native_textures.c) snapshots the tested
+OpenGL3 driver's live texture list and filter metadata. The host's read-only
+`web_thrash_textures` export supplies matching browser metadata without invoking
+guest routines. [The native descriptor probe](tests/descriptor_native.c) can
+independently query the original DLL in its own Wine process.
 
 `src/` contains the browser host, `web/` the launcher/backend, `tools/` the
 build pipeline and `tests/` the execution checks. See
