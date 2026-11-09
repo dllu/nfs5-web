@@ -23,7 +23,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
     const version=Atomics.load(header,6);
-    if(![1,2,3,4,5,6,7].includes(version))throw new Error('Unsupported graphics transport version');
+    if(![1,2,3,4,5,6,7,8].includes(version))throw new Error('Unsupported graphics transport version');
     stateSize=version>=7?41:version>=6?40:version>=5?31:version>=4?30:version>=3?26:25;
     const size=Atomics.load(header,5)>>>0;
     if(!size || (size&(size-1)))throw new Error('Invalid graphics queue size');
@@ -90,9 +90,9 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
         }
         case 7:renderer.textureDestroy(data[0]);uploads.delete(data[0]);break;
         case 8:{
-          const [destination,width,height]=data;
-          if(width!==renderer.width || height!==renderer.height || destination+width*height*4>module.HEAPU8.length)throw new Error('Invalid graphics readback');
-          const pixels=await renderer.readPixels();if(closed)return;
+          const [destination,width,height,x=0,y=0]=data;
+          if(![3,5].includes(data.length)||!width||!height||x+width>renderer.width||y+height>renderer.height||destination+width*height*4>module.HEAPU8.length)throw new Error('Invalid graphics readback');
+          const pixels=await renderer.readPixels({x,y,width,height});if(closed)return;
           module.HEAPU8.set(pixels,destination);break;
         }
         case 9:renderer.flush();break;

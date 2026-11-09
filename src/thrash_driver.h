@@ -477,10 +477,10 @@ static void r_unlock(void){
 static void r_readrect(void){
     uint32_t x=A32(0),y=A32(1),w=A32(2),h=A32(3),p=A32(4);
     if(!p||!w||!h||x>width||y>height||w>width-x||h>height-y||!open_gpu())RET(0,5);
-    uint8_t *rgba=malloc((size_t)width*height*4);if(!rgba)RET(0,5);
-    int ok=gpu->read_pixels(rgba,width,height);
+    uint8_t *rgba=malloc((size_t)w*h*4);if(!rgba)RET(0,5);
+    int ok=gpu->read_rect(rgba,x,y,w,h);
     if(ok)for(uint32_t j=0;j<h;j++)for(uint32_t i=0;i<w;i++){
-        uint8_t *s=rgba+((size_t)(j+y)*width+x+i)*4;uint32_t n=j*w+i;
+        uint8_t *s=rgba+((size_t)j*w+i)*4;uint32_t n=j*w+i;
         if(color_bits==16)MEM16(p+n*2)=((s[0]>>3)<<11)|((s[1]>>2)<<5)|(s[2]>>3);
         else MEM32(p+n*4)=0xFF000000u|s[0]<<16|s[1]<<8|s[2];
     }free(rgba);RET(ok,5);

@@ -68,7 +68,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   ] });
   const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [uniformLayout, textureLayout] });
   const textures = new Map(), samplers = new Map(), pipelines = new Map();
-  const stats = { frames: 0, draws: 0, batches: 0, vertices: 0, submissions: 0 };
+  const stats = { frames: 0, draws: 0, batches: 0, vertices: 0, submissions: 0, readbackBytes: 0, readbackBufferBytes: 0 };
   let width = 0, height = 0, color, depth, presentGroup;
   let vertices = new Uint8Array(512 * 1024), indices = new Uint32Array(32768), uniforms = new Float32Array(64 * 1024);
   let vertexBytes = 0, indexCount = 0, uniformBytes = 0, operations = [], imageStrip;
@@ -180,7 +180,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     operations.push({ type: 'clear', color: 0xff000000, depth: 1,stencil:0,mask:7 }); onResize(w,h);
   }
   function clear(color, depth = 1, {mask=7,stencil=0,rect}={}) {
-    check();mask&=7;stencil&=255;if(!mask)return;
+    check();mask&=7;stencil&=255;if(!mask)return;imageStrip=null;
     if(rect&&(rect.x!==0||rect.y!==0||rect.width!==width||rect.height!==height)) {
       if(!rect.width||!rect.height||rect.x>=width||rect.y>=height)return;
       // Scissored clears bypass the game's texture, alpha, depth comparison
@@ -211,7 +211,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     // when BOTH endpoints and their texture coordinates already coincide to
     // within half a screen pixel / one texel. Larger animation gaps stay open.
     const entry=textures.get(state.texture);
-    const strip=width===640&&height===480&&count===6&&(!mesh||mesh.length===6&&mesh.every((index,i)=>index===i))&&state.texture&&entry&&state.address_u===0&&state.address_v===0&&
+    const strip=width===640&&height===480&&count===6&&(!mesh||mesh.length===6&&mesh.every((index,i)=>index===i))&&state.texture&&entry&&!state.address_wrap&&
       !state.fog_enable&&state.primitive===0&&state.depth_test&&state.blend_enable;
     if(strip) {
       const view=new DataView(vertices.buffer), previous=imageStrip;
@@ -287,15 +287,18 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0,0,0,1] }] });
     pass.setPipeline(presentPipeline); pass.setBindGroup(0,presentGroup); pass.draw(3); pass.end(); device.queue.submit([encoder.finish()]); stats.frames++; stats.submissions++;
   }
-  async function readPixels() {
-    const encoder = device.createCommandEncoder(); flush(encoder); const stride = Math.ceil(width*4/256)*256;
-    const buffer = device.createBuffer({ size: stride*height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-    encoder.copyTextureToBuffer({ texture: color }, { buffer, bytesPerRow: stride, rowsPerImage: height }, [width,height]);
+  async function readPixels({x=0,y=0,width:w=width,height:h=height}={}) {
+    check();
+    if(![x,y,w,h].every(Number.isInteger)||x<0||y<0||w<1||h<1||x+w>width||y+h>height)throw new Error('Invalid readback rectangle');
+    const encoder = device.createCommandEncoder(); flush(encoder); const stride = Math.ceil(w*4/256)*256;
+    const buffer = device.createBuffer({ size: stride*h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    encoder.copyTextureToBuffer({ texture: color,origin:[x,y,0] }, { buffer, bytesPerRow: stride, rowsPerImage: h }, [w,h]);
     device.queue.submit([encoder.finish()]);
     stats.submissions++;
     try {
-      await buffer.mapAsync(GPUMapMode.READ); const source = new Uint8Array(buffer.getMappedRange()), pixels = new Uint8Array(width*height*4);
-      for (let y = 0; y < height; y++) pixels.set(source.subarray(y*stride,y*stride+width*4),y*width*4);
+      await buffer.mapAsync(GPUMapMode.READ); const source = new Uint8Array(buffer.getMappedRange()), pixels = new Uint8Array(w*h*4);
+      for (let row = 0; row < h; row++) pixels.set(source.subarray(row*stride,row*stride+w*4),row*w*4);
+      stats.readbackBytes+=pixels.length;stats.readbackBufferBytes+=stride*h;
       buffer.unmap(); check(); return pixels;
     } finally { buffer.destroy(); }
   }

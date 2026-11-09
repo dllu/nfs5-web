@@ -130,10 +130,14 @@ static int gpu_draw(const nfspu_gpu_vertex *vertices,uint32_t count,const uint32
     struct {nfspu_gpu_state state;uint32_t count,indices;} args={*state,count,index_count};
     gpu_send(GPU_DRAW,&args,sizeof args,vertices,count*32,indices,index_count*4);return 1;
 }
+static int gpu_read_rect(uint8_t *rgba,uint32_t x,uint32_t y,uint32_t width,uint32_t height) {
+    if(!width||!height||x>gpu_width||y>gpu_height||width>gpu_width-x||height>gpu_height-y)return 0;
+    uint32_t args[]={(uint32_t)(uintptr_t)rgba,width,height,x,y};
+    gpu_wait(gpu_send(GPU_READ_PIXELS,args,sizeof args,NULL,0,NULL,0));return 1;
+}
 static int gpu_read_pixels(uint8_t *rgba,uint32_t width,uint32_t height) {
     if(width!=gpu_width||height!=gpu_height)return 0;
-    uint32_t args[]={(uint32_t)(uintptr_t)rgba,width,height};
-    gpu_wait(gpu_send(GPU_READ_PIXELS,args,12,NULL,0,NULL,0));return 1;
+    return gpu_read_rect(rgba,0,0,width,height);
 }
 static void gpu_close(void) {
     gpu_wait(gpu_send(GPU_RESET,NULL,0,NULL,0,NULL,0));memset(gpu_textures,0,sizeof gpu_textures);
@@ -144,9 +148,10 @@ static const struct {
     uint32_t(*texture_create)(uint32_t,uint32_t,const uint8_t*,uint32_t);int(*texture_update)(uint32_t,const uint8_t*);void(*texture_destroy)(uint32_t);
     int(*draw)(const nfspu_gpu_vertex*,uint32_t,const uint32_t*,uint32_t,const nfspu_gpu_state*);
     int(*read_pixels)(uint8_t*,uint32_t,uint32_t);
-} web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels};
+    int(*read_rect)(uint8_t*,uint32_t,uint32_t,uint32_t,uint32_t);
+} web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels,gpu_read_rect};
 static void gpu_reset(void) {
-    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=7;
+    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=8;
     memset(gpu_textures,0,sizeof gpu_textures);gpu_width=gpu_height=gpu_next_texture=0;gpu_error[0]=0;
 }
 #endif

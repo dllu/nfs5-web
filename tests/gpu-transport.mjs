@@ -73,7 +73,7 @@ try {
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
-  assert.equal(Atomics.load(header,6),7,'Gamma state uses transport v7');checks++;
+  assert.equal(Atomics.load(header,6),8,'Rectangle readback uses transport v8');checks++;
   for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000],[10,3],[36,128],[47,1],[48,5],[52,3],[53,4],[54,6]])assert.equal(await call(methods.setstate,[state,value]),1);
   assert.equal(await call(methods.window,[3]),1);
   const vertex=data+256;
@@ -105,9 +105,9 @@ try {
     acknowledge(clear);
   }
   const present=await barrier(methods.pageflip,[],3);acknowledge(present);assert.equal(await finish(),1);
-  const readback=await barrier(methods.readrect,[0,0,1,1,data+128],8);
-  const [destination,width,height]=readback.words.slice(3);
-  assert.deepEqual([width,height],[640,480]);checks++;
+  const readback=await barrier(methods.readrect,[123,234,1,1,data+128],8);
+  const [destination,width,height,x,y]=readback.words.slice(3);
+  assert.deepEqual([width,height,x,y],[1,1,123,234]);checks++;
   module.HEAPU8.set([0x12,0xab,0x34,0xff],destination);
   acknowledge(readback);assert.equal(await finish(),1);
   assert.equal(view.getUint16(data+128,true),0x1546,'RGB565 readback is copied only after completion');checks++;

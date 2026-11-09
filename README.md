@@ -37,7 +37,9 @@ The Thrash backend implements geometry, supplied texture mips, filtering,
 blending/alpha tests, depth/stencil, fog, gamma, headlights, weather and
 framebuffer transfers. The frontend's nearly touching picture strips share
 edges to prevent subpixel black seams. Graphics queue packets are consumed
-without copying contiguous payloads, reducing allocations during play.
+without copying contiguous payloads, reducing allocations during play. Small
+framebuffer reads transfer only their requested rectangle, including the
+sun-visibility sample, instead of a complete 4K/6K frame.
 **Sustained 4K/120 Hz remains a target, not a verified result.** Microstutters,
 intermittent menu input retries and a previously observed menu-return fault
 still need investigation. No Wine reference runs are needed for normal work.
@@ -85,6 +87,11 @@ npm run build:public
 python3 tools/serve.py --directory build/public --port 8001
 python3 tools/deploy_public.py
 ```
+
+With the public preview running, `npm run test:public` checks direct launch,
+blank-profile defaults and persistence across a complete browser restart. This
+check uses Python Pillow for rendered-screen readiness. Set `NFS5_PUBLIC_URL`
+to run it against the deployment instead.
 
 The public packager includes only referenced assets, strips installation
 players/replays/records, and supplies Showroom plus the original blank-profile

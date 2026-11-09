@@ -48,7 +48,7 @@ try {
     // subpixel gap across the shared image edge must not leave a black row.
     renderer.resize(640,480);
     renderer.textureCreate(970,8,8,new Uint8Array(8*8*4).fill(255));
-    const panel={texture:970,address_wrap:0,depth_test:1,depth_write:1,blend_enable:1};
+    const panel={texture:970,address_wrap:0,address_u:1,address_v:1,depth_test:1,depth_write:1,blend_enable:1};
     const strip=(top,bottom,v0,v1)=>pack([
       {x:100,y:bottom,u:0,v:v1},{x:400,y:top,u:1,v:v0},{x:100,y:top,u:0,v:v0},
       {x:400,y:top,u:1,v:v0},{x:100,y:bottom,u:0,v:v1},{x:400,y:bottom,u:1,v:v1},
@@ -267,6 +267,15 @@ try {
     pixels = await renderer.readPixels(); expect([renderer.stats.batches-before],[1],'consecutive draw batching'); expect(pixel(pixels,16,16),[0,255,255,255],'batched vertices/indices');
     renderer.resize(3840,2160); renderer.clear(0xff203040); renderer.draw(quad(3832,2152,8,8,0xffff0000),mesh,{stencil_enable:1,stencil_func:2,stencil_ref:0});
     pixels = await renderer.readPixels(); expect(pixel(pixels,0,0),[32,48,64,255],'4K target'); expect(pixel(pixels,3838,2158),[255,0,0,255],'4K lower-right raster');
+    renderer.draw(quad(3838,2158,2,2,0xff00ff00),mesh);
+    const readBefore={bytes:renderer.stats.readbackBytes,buffer:renderer.stats.readbackBufferBytes};
+    const region=await renderer.readPixels({x:3838,y:2156,width:2,height:4});
+    expect([region.length],[32],'partial 4K readback returns only requested pixels');
+    expect(Array.from(region.slice(0,4)),[255,0,0,255],'partial readback preserves nonzero origin');
+    expect(Array.from(region.slice(-4)),[0,255,0,255],'partial readback removes row padding');
+    expect([renderer.stats.readbackBytes-readBefore.bytes,renderer.stats.readbackBufferBytes-readBefore.buffer],[32,1024],'small readback bounds CPU and aligned GPU allocations');
+    let invalid=false;try{await renderer.readPixels({x:3839,y:2159,width:2,height:2});}catch(error){invalid=/rectangle/.test(error.message);}
+    expect([Number(invalid)],[1],'out-of-bounds readback is rejected before GPU submission');
     renderer.resize(640,360); renderer.clear(0xff102030);
     renderer.draw(pack([{x:40,y:40,color:0xffff0000},{x:350,y:55,color:0xff00ff00},{x:80,y:320,color:0xff0000ff}]),null);
     renderer.textureUpdate(1,texels); renderer.draw(quad(395,85,180,180),mesh,{texture:1,filter_linear:0,address_wrap:0});
@@ -696,10 +705,10 @@ try {
   assert.deepEqual(result.fallback.errors,[]);
   result.legacyDraws=await page.evaluate(async()=>{
     const {attachGraphics}=await import('./graphics.mjs'),results=[];
-    for(const version of [1,2,3,4,5,6]) {
+    for(const version of [1,2,3,4,5,6,7]) {
       // Older state layouts still decode geometry/textures and retain their
       // alpha >= reference comparison without the v5 alpha-function field.
-      const memory=new SharedArrayBuffer(32768),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
+      const memory=new SharedArrayBuffer(65536),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
       header[5]=ring.length;header[6]=version;let sequence=0;
       const module={HEAPU8:heap,_web_gpu_transport:()=>0,_web_gpu_attach:()=>{header[3]=1;},
         _malloc:()=>30000,_free:()=>{},_web_gpu_fail:()=>{}};
@@ -712,10 +721,11 @@ try {
       }
       try {
         send(1,Uint32Array.of(64,64));
-        const stateSize=version>=6?40:version>=5?31:version>=4?30:version>=3?26:25,start=stateSize+2,end=start+24;
+        const stateSize=version>=7?41:version>=6?40:version>=5?31:version>=4?30:version>=3?26:25,start=stateSize+2,end=start+24;
         const draw=new Uint32Array(end+3),floats=new Float32Array(draw.buffer);
         draw[6]=draw[7]=draw[8]=draw[22]=1;draw[16]=4;floats[14]=floats[24]=1;
         if(version>=3)draw[25]=1;
+        if(version>=7)floats[40]=1;
         if(version>=6){draw[32]=7;draw[36]=2;draw[37]=draw[38]=255;draw[39]=1;}
         draw[stateSize]=draw[stateSize+1]=3;
         [[0,0,1,0xffff0000],[64,0,.25,0xff00ff00],[0,64,.5,0xff0000ff]].forEach(([x,y,rhw,color],i)=>{
@@ -744,7 +754,10 @@ try {
         send(4,draw.subarray(0,end));await graphics.settle();
         const textured=sample(await graphics.renderer.readPixels());
         if(textured.join()!==(version>=5?'0,0,255,255':'255,0,0,255'))throw new Error(`Legacy v${version} texture/alpha packet: ${textured}`);
-        results.push({version,indexed,unindexed,textured,errors:graphics.renderer.errors.slice()});
+        send(8,Uint32Array.of(32768,64,64));await graphics.settle();
+        const legacyReadback=sample(heap.subarray(32768,32768+64*64*4));
+        if(legacyReadback.join()!==textured.join())throw new Error(`Legacy v${version} full readback packet changed pixels`);
+        results.push({version,indexed,unindexed,textured,legacyReadback,errors:graphics.renderer.errors.slice()});
       } finally {graphics.close();canvas.remove();}
     }
     return results;

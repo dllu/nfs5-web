@@ -54,7 +54,7 @@ const oracle=spawnSync(new URL('../.venv/bin/python',import.meta.url).pathname,[
 assert.equal(oracle.status,0,oracle.stderr);
 const expected=JSON.parse(oracle.stdout),header=new Int32Array(m.HEAPU8.buffer,m._web_gpu_transport(),8);
 const ring=new Uint32Array(m.HEAPU8.buffer,header.byteOffset+32,Atomics.load(header,5));
-let current,reads=0,failure;
+let current,reads=0,readBytes=0,fullFrameBytes=0,failure;
 // A controlled consumer returns display pixels and lets the production HLE
 // execute its blocking readback/copy. GPU rasterization has separate tests.
 function consume(){try{
@@ -62,11 +62,12 @@ function consume(){try{
     const at=Atomics.load(header,1)>>>0,count=ring[at%ring.length],packet=Uint32Array.from({length:count},(_,i)=>ring[(at+i)%ring.length]);
     assert(count>=3&&count<ring.length);const op=packet[1];
     if(op===8){
-      reads++;const [p,width,height]=packet.slice(3),[x,y,w,h]=current.rect;
-      assert.deepEqual([width,height],current.size.slice(0,2));
+      reads++;const [p,width,height,rx,ry]=packet.slice(3),[x,y,w,h]=current.rect;
+      assert.deepEqual([width,height,rx,ry],[w,h,x,y]);
+      readBytes+=width*height*4;fullFrameBytes+=current.size[0]*current.size[1]*4;
       for(let j=0;j<h;j++)for(let i=0;i<w;i++){
         const rgba=current.flare?[0x11,0x22,0x33,255]:[(x+i)&255,(y+j)&255,(0x7d^(x+i)^(y+j))&255,255];
-        m.HEAPU8.set(rgba,p+((y+j)*width+x+i)*4);
+        m.HEAPU8.set(rgba,p+(j*width+i)*4);
       }
     }else assert([1,10].includes(op),'Unexpected visibility-test GPU command '+op);
     Atomics.store(header,1,(at+count)|0);Atomics.store(header,2,packet[2]|0);Atomics.notify(header,1);Atomics.notify(header,2);
@@ -121,6 +122,6 @@ try{
       }
     }
   }
-  await writeFile('build/visibility-differential.json',JSON.stringify({clampCases,flareCases:cases.length-clampCases,passed:true})+'\n');
+  await writeFile('build/visibility-differential.json',JSON.stringify({clampCases,flareCases:cases.length-clampCases,reads,readBytes,fullFrameBytes,passed:true})+'\n');
   console.log(`${clampCases} native guarded-readback and ${cases.length-clampCases} original flare visibility comparisons passed (edges, 16/32-bit, 4K/6K, legacy timing and occlusion)`);
 }finally{clearInterval(timer);r.stop();r.dispose();}
