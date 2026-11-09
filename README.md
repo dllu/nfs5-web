@@ -105,12 +105,15 @@ Current implementation:
   highlights and shadows rather than its flat fallback.
   Verok’s texture-selection and five-level car-mesh hooks are statically
   translated from the supplied `nfs5.dll`; race textures honor the saved quality
-  instead of the original CPU-based autodetection.
+  instead of the original CPU-based autodetection. Successful video-mode changes
+  also update Verok’s aspect-dependent projection bases and camera field of view;
+  projected effects and camera zoom use the corresponding native operands.
   Multitexture, projected headlights and broader 3D scene fidelity need further
   implementation/auditing.
 
 Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
-routines and 260 native Verok DLL comparisons for texture tiers and car layers,
+routines, 260 native Verok DLL comparisons for texture tiers and car layers,
+260 projection calculations and 168 original camera/zoom comparisons,
 plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 228 Thrash loader/ABI calls,
@@ -137,7 +140,7 @@ a fresh restart. An original frontend run verifies its capability-selected
 Gouraud UI path and the actual button highlight/center/shadow pixels.
 143 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
 an OffscreenCanvas rendered in a dedicated Worker using the core depth/stencil
-format. Another 177 checks exercise
+format. Another 187 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure, asynchronous flush and reuse of
 guest vertex memory before consumer execution. Pixel checks cover flat provoking
@@ -178,7 +181,8 @@ frontend properties and the selected mode's physical-pixel dimensions, alongside
 the actual menu-gradient pixels. A new player’s maximum-quality save survives a
 full Chrome restart byte-for-byte. Côte d’Azur renders at 6144×3162×32 with
 texture and car tiers both confirmed as 4 in the original race state, without
-WebGPU validation errors. Full rendering of the selected effects,
+WebGPU validation errors. Its live camera half-FOV is 48.195°, matching Verok’s
+aspect calculation for that viewport. Full rendering of the selected effects,
 including nighttime projected headlights, still needs verification. Stencil
 behavior is covered by native-driver pixel checks; a completed in-game effect
 comparison remains outstanding.

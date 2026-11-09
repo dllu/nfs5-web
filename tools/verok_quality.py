@@ -1,4 +1,4 @@
-"""Generate the supplied Verok 1.06 texture-selection and five-level car hooks."""
+"""Generate the supplied Verok 1.06 quality, car-layer and projection hooks."""
 import hashlib
 from pathlib import Path
 import re
@@ -47,6 +47,8 @@ class QualityHooks:
     def apply(self, address, source):
         def instruction(pc, replacement):
             nonlocal source
+            if '/* 0x' + pc + ':' not in source:
+                return
             pattern = r'(?m)^.*?/\* 0x' + pc + r':[^\n]*$'
             source, count = re.subn(pattern, replacement, source)
             self.counts[pc] = self.counts.get(pc, 0) + count
@@ -87,6 +89,35 @@ class QualityHooks:
         instruction('0043A083', '    ebx = web_verok_car_budget(ebx); /* Verok: five car-detail budgets */')
         instruction('0043A08A', '    eax = MEM32(ebp - 0x20); /* Verok: selected detail tier */')
         instruction('0043A3B6', '    eax = MEM32(esi + 0x2C0); if (!eax) eax = 1; /* Verok: minimum layer */')
+        # The native mode hook (10003B90 -> 10003840) computes these three
+        # float values. The browser driver updates them after a successful mode
+        # change; use the same operands in all recovered camera/effect copies.
+        operands = {
+            '0043A2DD': (0, '5B2A8C', False),
+            '00451824': (0, '5B3D50', True),
+            '00451834': (1, '5B3D4C', True),
+            '00466FE5': (0, '5B2A8C', False), '00466FF2': (1, '5B2A88', False),
+            '00467138': (0, '5B2A8C', False), '00467148': (1, '5B2A88', False),
+            **{pc: (2, '5B3C9C', False) for pc in ['0044ECB0', '0044F1AF',
+                '00462BFA', '00462C24', '00462CA9', '00462CC2', '00462DD5', '00462DEE']},
+        }
+        for pc, (field, operand, divide) in operands.items():
+            if '/* 0x' + pc + ':' not in source:
+                continue
+            line = self._line(source, pc)
+            updated = line.replace('*(float*)ADDR(0x' + operand + ')', f'web_projection[{field}]')
+            updated = updated.replace('*(float*)&MEM32(0x' + operand + ')', f'web_projection[{field}]')
+            if updated == line:
+                raise ValueError('Projection operand changed at ' + pc)
+            if divide:
+                updated = updated.replace('*=', '/=')
+            instruction(pc, updated)
+        for pc in ['0046414B', '0046584F', '00465AE8']:
+            instruction(pc, '    eax = web_projection_bits(2); /* Verok half-FOV */')
+        instruction('00462B86', '    MEM32(esp) = web_projection_bits(2); /* Verok default camera */')
+        instruction('004692E2', '    eax = web_projection_bits(2); MEM32(ebx + 0x9C) = eax; /* Verok camera initializer */')
+        for pc in ['004E8B7F', '004E9900', '004E9BAA']:
+            instruction(pc, '    ecx = web_projection_bits(2); MEM32(esi + 0x290) = ecx; ecx = esi; /* Verok frontend camera */')
         if '/* 0x004E5B86:' in source:
             # Browser policy, after original hardware autodetection. The game
             # regenerates XXDefXX.sav from these properties during startup;
@@ -124,3 +155,10 @@ class QualityHooks:
                    '0043A3B6', '0044EF8B', '0044EFAD', '0044F110', '0044F133', '004E5B86']:
             if not self.counts.get(pc):
                 raise ValueError('Missing Verok quality hook at ' + pc)
+        for pc in ['0043A2DD', '00451824', '00451834', '00466FE5', '00466FF2',
+                   '00467138', '00467148', '0044ECB0', '0044F1AF', '00462BFA',
+                   '00462C24', '00462CA9', '00462CC2', '00462DD5', '00462DEE',
+                   '0046414B', '0046584F', '00465AE8', '00462B86', '004692E2',
+                   '004E8B7F', '004E9900', '004E9BAA']:
+            if not self.counts.get(pc):
+                raise ValueError('Missing Verok projection hook at ' + pc)

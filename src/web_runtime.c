@@ -6,6 +6,7 @@
 #include <strings.h>
 #include <time.h>
 #include "win32_locale.h"
+#include "web_projection.h"
 
 #define GUEST_SIZE WEB_GUEST_SIZE
 #define HEAP_LIMIT (224u * 1024u * 1024u)
@@ -530,6 +531,7 @@ uint32_t web_init(void) {
     if (!g_mem_base) g_mem_base = (ptrdiff_t)calloc(1, GUEST_SIZE);
     else memset((void *)g_mem_base, 0, GUEST_SIZE);
     if (!g_mem_base) return 0;
+    web_projection_update(640,480);
     entered_low = recomp_dispatch_table[0].address;
     entered_span = recomp_dispatch_table[recomp_dispatch_count - 1].address - entered_low + 1;
     if (!entered) entered = calloc(1, (entered_span + 7) / 8);

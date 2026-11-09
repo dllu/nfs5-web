@@ -41,6 +41,7 @@ def main():
         except (OSError, ValueError) as error:
             parser.error(str(error))
         patches.append('verok-graphics-quality')
+        patches.append('verok-projection')
     functions = discover_functions(data, info, iat)
     lifter = Lifter(iat_map=iat, lifted=set(functions))
     unsupported = Counter()

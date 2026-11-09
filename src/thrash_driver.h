@@ -112,6 +112,7 @@ static void r_mode(void) {
     if(color_bits>MEM32(modes+i*40+8))color_bits=16;
     if(opened){if(!gpu->resize(width,height))RET(0,3);}else if(!open_gpu())RET(0,3);
     hle_set_screen_size(width,height);
+    web_projection_update(width,height);
     MEM32(lockdesc+4)=width*color_bits/8;MEM32(lockdesc+8)=color_bits==16?4:6;
     MEM32(lockdesc+12)=width;MEM32(lockdesc+16)=height;
     memcpy(hle_ptr(surface_info),hle_ptr(lockdesc),20);MEM32(surface_info)=0;RET(1,3);

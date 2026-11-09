@@ -309,6 +309,10 @@ try {
     const descriptor=await method('_THRASH_about@0'),count=get(descriptor+60),modes=get(descriptor+64);
     function mode(w,h){for(let i=1;i<=count;i++)if(get(modes+i*40)===w&&get(modes+i*40+4)===h&&get(modes+i*40+8)===32)return i;throw new Error('Missing mode');}
     expect(await method('_THRASH_setvideomode@12',mode(640,480),0,2),1,'video mode');
+    const projection=()=>Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_projection_state(),3));
+    expect(projection()[0],0x44200000,'4:3 projection virtual width');
+    expect(projection()[1],0x43f00000,'4:3 projection virtual height');
+    expect(projection()[2],0x42160000,'4:3 projection half-FOV');
     await invoke('GetClientRect',hwnd,out);expect(get(out+8),640,'window tracks render width');expect(get(out+12),480,'window tracks render height');
     await invoke('GetMessageA',out,hwnd,5,5);expect(get(out+12),(480<<16)|640,'mode change queues WM_SIZE');
     expect(await method('_THRASH_setstate@8',3,0xff112233),1,'clear state');await method('_THRASH_clearwindow@0');
@@ -493,6 +497,12 @@ try {
     expect(await pixel(200,200),0xff12ab34,'wrapped upload includes smallest mip at the end of the chain');
     await method('_THRASH_setstate@8',11,0);await method('_THRASH_setstate@8',8,0);await method('_THRASH_tfree@4',large);
     await method('_THRASH_setvideomode@12',mode(3840,2160),0,2);await method('_THRASH_clip@16',0,0,3840,2160);
+    // Expected float bits come from the supplied DLL's native x87 helper.
+    expect(projection()[0],0x44555555,'16:9 projection virtual width');
+    expect(projection()[1],0x43f00000,'16:9 projection virtual height');
+    expect(projection()[2],0x42369df5,'16:9 projection expands horizontal half-FOV');
+    expect(await method('_THRASH_setvideomode@12',0,0,2),0,'rejected mode');
+    expect(projection()[2],0x42369df5,'rejected mode preserves projection');
     await invoke('GetClientRect',hwnd,out);expect(get(out+8),3840,'4K client width');expect(get(out+12),2160,'4K client height');
     await invoke('GetMessageA',out,hwnd,5,5);expect(get(out+12),(2160<<16)|3840,'4K WM_SIZE');
     await method('_THRASH_setstate@8',3,0xff203040);await method('_THRASH_clearwindow@0');
@@ -508,6 +518,8 @@ try {
     const stats=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
     const nativeMode=[runtime.graphics.renderer.width,runtime.graphics.renderer.height];
     await method('_THRASH_restore@0');await method('_THRASH_setvideomode@12',mode(640,480),0,2);
+    expect(projection()[0],0x44200000,'menu mode restores virtual width');
+    expect(projection()[2],0x42160000,'menu mode restores half-FOV');
     await invoke('GetClientRect',hwnd,out);expect(get(out+8),640,'restored client width');expect(get(out+12),480,'restored client height');
     await method('_THRASH_clip@16',0,0,640,480);await method('_THRASH_setstate@8',3,0xff102030);await method('_THRASH_clearwindow@0');
     vertex(vertices,40,40,0xffff0000);vertex(vertices+32,600,60,0xff00ff00);vertex(vertices+64,80,440,0xff0000ff);
