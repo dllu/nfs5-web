@@ -199,6 +199,9 @@ aspect calculation for that viewport. Full rendering of the selected effects,
 including nighttime projected headlights, still needs verification. Stencil
 behavior is covered by native-driver pixel checks; a completed in-game effect
 comparison remains outstanding.
+Côte d’Azur's pink sunset appearance has been visually checked against the
+native Wine/FEX game. The original sky mesh also renders its color gradient in
+an isolated WebGPU pass. Matching-profile headlight comparisons remain pending.
 One menu-return memory fault remains unexplained; it did not recur in a fresh
 run with a verified asset server.
 Custom portrait conversion
@@ -214,6 +217,15 @@ is about 84 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
 approximation of Windows NLS. Full floating-point and binary compatibility are
 unverified.
+
+For native visual comparisons on this machine, `python3 tools/native_reference.py`
+copies the installed Wine prefix into `.cache/native-reference/prefix` on first
+use. Bubblewrap keeps the source installation and other filesystem locations
+read-only, with project-local caches and temporary files. The reference copy
+retains its own settings and saves. `--dry-run` prints the command; arguments
+after `--` run an alternate Wine program in the same reference prefix.
+The optional 32-bit [native memory reader](tools/native_memory.c) snapshots the
+running reference game's code/data without modifying its process.
 
 ## Build and inspect locally
 
