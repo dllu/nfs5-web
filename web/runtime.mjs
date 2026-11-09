@@ -20,7 +20,10 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   const base = module._web_init();
   if (!base) throw new Error('Unable to allocate guest memory');
   const memorySize = module._web_memory_size();
-  display ??= typeof innerWidth === 'number' ? { width: innerWidth, height: innerHeight } : null;
+  display ??= typeof innerWidth === 'number' ? {
+    width: Math.round(innerWidth * (globalThis.devicePixelRatio || 1)),
+    height: Math.round(innerHeight * (globalThis.devicePixelRatio || 1)),
+  } : null;
   if (display) module._web_display_size(display.width, display.height);
   const pe = new DataView(executable.buffer).getUint32(0x3c, true);
   const headerSize = new DataView(executable.buffer).getUint32(pe + 24 + 60, true);

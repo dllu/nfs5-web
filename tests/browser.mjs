@@ -332,12 +332,24 @@ try {
       runtime.stop();const result=await run;
       const {module,base}=runtime;
       if(module.HEAPU8[base+0x6197aa]!==1||!runtime.seen(0x4d96b0))throw new Error('Original frontend did not enable and execute Gouraud UI geometry');
+      const view=new DataView(module.HEAPU8.buffer,base),graphics={};
+      for(const [name,offset]of Object.entries({Resolutions:4,CarChrome:12,CarDetail:16,SpecialFX:20,
+        ViewDistance:28,Headlights:32,LensFlare:36,TextureDetail:44,SkyRendering:64})) {
+        const property=view.getUint32(0x6908f0+offset,true);
+        graphics[name]=view.getUint32(property+24,true);
+      }
+      const resolution=view.getUint32(0x6908f4,true),selected=graphics.Resolutions;
+      const raceMode=[0x38,0x3c,0x40].map(offset=>view.getUint32(view.getUint32(resolution+offset,true)+selected*4,true));
+      const viewportMode=[Math.max(640,Math.round(innerWidth*devicePixelRatio)),Math.max(480,Math.round(innerHeight*devicePixelRatio)),32];
       const still=document.createElement('canvas');still.width=640;still.height=480;still.id='menu-frame';
       still.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(capture.pixels),640,480),0,0);canvas.replaceWith(still);
-      return {top:capture.top,middle:capture.middle,bottom:capture.bottom,stopped:result.stopped,gpuErrors:renderer.errors};
+      return {top:capture.top,middle:capture.middle,bottom:capture.bottom,graphics,raceMode,viewportMode,stopped:result.stopped,gpuErrors:renderer.errors};
     }finally{clearTimeout(watchdog);runtime?.stop();runtime?.dispose();}
   });
   assert.equal(menu.stopped,true);assert.deepEqual(menu.gpuErrors,[]);assert.deepEqual(errors,[]);
+  assert.deepEqual(menu.graphics,{Resolutions:26,CarChrome:2,CarDetail:4,SpecialFX:3,ViewDistance:3,
+    Headlights:1,LensFlare:1,TextureDetail:4,SkyRendering:2},'Original frontend initializes maximum quality and the viewport race mode');
+  assert.deepEqual(menu.raceMode,menu.viewportMode,'Selected race mode matches the physical browser viewport at 32-bit color');
   await page.locator('#menu-frame').screenshot({path:'build/original-menu-gradients.png'});
   await writeFile('build/original-menu-gradients.json',JSON.stringify(menu,null,2)+'\n');
   console.log(`Original menu gradient verified: top ${menu.top}, middle ${menu.middle}, bottom ${menu.bottom}`);

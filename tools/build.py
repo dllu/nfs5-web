@@ -71,12 +71,16 @@ def main():
         parser.error('Run tools/prepare.py again to generate logical x87 indices')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'verok-no-movies' not in metadata.get('patches',[]):
         parser.error('Run tools/prepare.py again to generate the opening-movie configuration hook')
+    if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'verok-graphics-quality' not in metadata.get('patches',[]):
+        parser.error('Run tools/prepare.py again to generate the Verok graphics-quality hooks')
     configuration = hashlib.sha256(json.dumps([str(compiler), flags]).encode()).hexdigest()
     def compile(source):
         obj = objects / (source.stem + '.o')
         signature = obj.with_suffix('.flags')
         dependencies = [source, ROOT / 'src/web_runtime.h', ROOT / 'src/web_memory.h', memory_header,
                         ROOT / 'src/web_fpu.h', lift / 'functions.h']
+        if (lift / 'verok_quality.h').exists():
+            dependencies.append(lift / 'verok_quality.h')
         if source.parent == ROOT / 'src':
             dependencies.extend((ROOT / 'src').glob('*.h'))
         if (obj.exists() and signature.exists() and signature.read_text() == configuration

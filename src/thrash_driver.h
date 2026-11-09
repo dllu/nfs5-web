@@ -6,7 +6,7 @@
 #define THRASH_MODULE 0x7A000001u
 #define MAX_TEXTURES 8192
 static const uint32_t mode_sizes[][2]={{640,480},{800,600},{1024,768},{1280,720},{1280,960},{1600,1200},{1920,1080},{960,720},{1600,900},{2560,1440},{3840,2160},{5120,2880},{6144,3456},{320,240}};
-enum {MODE_RESOLUTIONS=sizeof mode_sizes/sizeof mode_sizes[0],MODE_COUNT=MODE_RESOLUTIONS*2};
+enum {MODE_RESOLUTIONS=sizeof mode_sizes/sizeof mode_sizes[0],VIEWPORT_MODE=MODE_RESOLUTIONS*2+1,MODE_COUNT=VIEWPORT_MODE+1};
 static const __typeof__(web_gpu_api) *gpu=&web_gpu_api;
 static uint32_t descriptor,modes,formats,framebuffer,framebuffer_capacity,lockdesc,surface_info,callbacks;
 static uint32_t width=640,height=480,color_bits=16;
@@ -85,6 +85,14 @@ static void make_descriptor(void) {
         /* +0x0C is the surface pixel-format enum, not flags. */
         MEM32(m+12)=depth?6:4;MEM32(m+16)=1;MEM32(m+20)=2;MEM32(m+24)=2;
     }
+    /* Append a 32-bit browser-viewport mode without shifting saved mode indices.
+     * The original chooser omits the two 320x240 modes, so this is property 26. */
+    /* The frontend iterates [0, maximum), unlike the driver's [1, maximum].
+     * Keep an unused final sentinel so both loops include the viewport mode. */
+    uint32_t m=modes+VIEWPORT_MODE*40;
+    MEM32(m)=win_viewport_width<640?640:win_viewport_width;
+    MEM32(m+4)=win_viewport_height<480?480:win_viewport_height;
+    MEM32(m+8)=32;MEM32(m+12)=6;MEM32(m+16)=1;MEM32(m+20)=2;MEM32(m+24)=2;
 }
 static void r_about(void){make_descriptor();RET(descriptor,0);}
 static void r_init(void){make_descriptor();RET(1,0);}

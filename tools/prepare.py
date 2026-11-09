@@ -15,11 +15,13 @@ PCRECOMP = ROOT / "third_party/nfspu-recomp/third_party/pcrecomp"
 sys.path.insert(0, str(PCRECOMP))
 from tools.lift.translator import load_pe, discover_functions
 from tools.lift.lift32 import Lifter
+from verok_quality import IMAGE_SHA, LIBRARY_SHA, QualityHooks
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
+    parser.add_argument("--patch-library", type=Path, help="Verok nfs5.dll (default: beside executable)")
     args = parser.parse_args()
     image = args.executable.resolve()
     info, data, iat = load_pe(str(image))
@@ -31,6 +33,14 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     for path in output.glob("*.c"):
         path.unlink()
+    quality = None
+    if image_sha == IMAGE_SHA:
+        library = args.patch_library or image.with_name('nfs5.dll')
+        try:
+            quality = QualityHooks(library, output)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        patches.append('verok-graphics-quality')
     functions = discover_functions(data, info, iat)
     lifter = Lifter(iat_map=iat, lifted=set(functions))
     unsupported = Counter()
@@ -41,10 +51,14 @@ def main():
     for start in range(0, len(addresses), 200):
         lines = ['#define RECOMP_GENERATED_CODE', '#include "web_runtime.h"',
                  '#include "functions.h"']
+        if quality:
+            lines.append('#include "verok_quality.h"')
         for address in addresses[start:start + 200]:
             function = functions[address]
             function.name = f"sub_{address:08X}"
             source = lifter.lift_function(function)
+            if quality:
+                source = quality.apply(address, source)
             # Keep logical x87 indices independent of the physical stack file.
             source = re.sub(r'\b_st\[([0-7])\]',r'FP_ST(\1)',source)
             source = re.sub(r'\bg_st_i64\[([0-7])\]',r'FP_I64(\1)',source)
@@ -74,6 +88,8 @@ def main():
                             "instructions": function.num_instructions})
         (output / f"code_{start // 200:04d}.c").write_text("\n".join(lines))
         print(f"Lifted {min(start + 200, len(addresses))}/{len(addresses)}", flush=True)
+    if quality:
+        quality.validate()
     dispatch = ['#include "web_runtime.h"', '#include "functions.h"',
                 'const recomp_dispatch_entry_t recomp_dispatch_table[] = {']
     dispatch += [f"{{0x{a:08X}u, sub_{a:08X}}}," for a in addresses]
@@ -96,6 +112,8 @@ def main():
                 "sections": [asdict(s) for s in info.sections], "imports": imports,
                 "functions": len(functions), "instructions": sum(r['instructions'] for r in records),
                 "unsupported": dict(unsupported)}
+    if quality:
+        manifest['qualityLibrary'] = {'sha256': LIBRARY_SHA, 'hooks': quality.counts}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (output / "functions.json").write_text(json.dumps(records, indent=2) + "\n")
     dist = ROOT / "dist"

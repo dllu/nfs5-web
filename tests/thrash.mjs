@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {webcrypto} from 'node:crypto';
 import {loadRuntime} from '../dist/runtime.mjs';
 globalThis.crypto??=webcrypto;
-const runtime=await loadRuntime({read:async p=>new Response(await readFile(new URL('../dist/'+p,import.meta.url)))});
+const runtime=await loadRuntime({display:{width:2345,height:1237},read:async p=>new Response(await readFile(new URL('../dist/'+p,import.meta.url)))});
 const {module,base,manifest}=runtime,view=new DataView(module.HEAPU8.buffer,base),data=0x800000;
 const get=p=>view.getUint32(p,true),put=(p,v)=>view.setUint32(p,v>>>0,true);
 const text=(s,p=data)=>{module.HEAPU8.set(Buffer.from(s+'\0'),base+p);return p;};
@@ -31,6 +31,9 @@ try {
   const sizes=[];for(let i=1;i<=count;i++)sizes.push([get(modes+i*40),get(modes+i*40+4),get(modes+i*40+8)]);
   assert(sizes.some(v=>v[0]===3840&&v[1]===2160&&v[2]===32));
   assert(sizes.some(v=>v[0]===6144&&v[1]===3456&&v[2]===32));
+  assert.equal(count,30,'An unused final sentinel keeps the viewport mode visible to the original frontend');
+  assert.deepEqual(sizes.at(-2),[2345,1237,32],'Viewport mode uses arbitrary display dimensions and 32-bit color');
+  assert.equal(get(modes+count*40+16),0,'The sentinel is disabled');
   assert.deepEqual([get(formats+4),get(formats+8)],[0,0],'Indexed formats use the original game conversion fallback');
   assert.equal(await method('_THRASH_init@0'),1);
   assert.equal(await method('_THRASH_getstate@4',6),1,'Native default is Gouraud shading');

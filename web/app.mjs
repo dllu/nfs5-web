@@ -61,7 +61,9 @@ async function start(milliseconds) {
         }
       };
       const offscreen=canvas.transferControlToOffscreen();
-      worker.postMessage({ type: 'start', milliseconds, audio: audio.configuration, display: { width: innerWidth, height: innerHeight },canvas:offscreen },[offscreen]);
+      worker.postMessage({ type: 'start', milliseconds, audio: audio.configuration,
+        display: { width: Math.round(innerWidth * devicePixelRatio), height: Math.round(innerHeight * devicePixelRatio) },
+        canvas:offscreen },[offscreen]);
     });
     window.nfs5Result = result;
     status.textContent = result.stopped?'Stopped.':result.exited?`Game exited (code ${result.exitCode}).`:result.status ? (/budget reached/i.test(result.error)?'Diagnostic execution limit reached':'Execution stopped at a porting dependency') : 'Startup function returned';

@@ -9,6 +9,7 @@ typedef struct {
     char title[260];
 } guest_window;
 static guest_window win_windows[64];
+static uint32_t win_viewport_width=1920,win_viewport_height=1080;
 static uint32_t win_foreground, win_focus;
 static int32_t win_cursor_count;
 static uint32_t win_cursor;
@@ -33,6 +34,7 @@ static void win_origin(guest_window *w,int32_t *x,int32_t *y) {
     }
 }
 static void win_reset(void) {
+    win_viewport_width=1920;win_viewport_height=1080;
     memset(win_windows, 0, sizeof win_windows);
     win_windows[0] = (guest_window){.handle = WIN_DESKTOP, .style = 0x90000000, .width = 1920, .height = 1080, .visible = 1};
     strcpy(win_windows[0].title, "Desktop"); win_foreground = win_focus = 0;

@@ -37,7 +37,9 @@ Current implementation:
 - Browser startup runs off the UI thread. The static server supplies the
   cross-origin isolation headers required for shared Wasm memory.
   During play the canvas fills the browser viewport, stretching the original
-  640×480 menus and the selected race mode. Mouse movement, buttons and wheel
+  640×480 menus and the selected race mode. New players select a 32-bit race
+  mode at the browser viewport’s physical-pixel size at launch; fixed choices
+  retain their saved indices. Mouse movement, buttons and wheel
   coordinates follow that scaling across window resizes. Stop returns to the
   launcher and its final frame.
   Original `ExitProcess` calls end the guest, wake blocked workers and report
@@ -101,11 +103,15 @@ Current implementation:
   framebuffer lock/unlock. The frontend submits original geometry and textures.
   The native renderer-extension probe enables the original menu gradients,
   highlights and shadows rather than its flat fallback.
+  Verok’s texture-selection and five-level car-mesh hooks are statically
+  translated from the supplied `nfs5.dll`; race textures honor the saved quality
+  instead of the original CPU-based autodetection.
   Multitexture, projected headlights and broader 3D scene fidelity need further
   implementation/auditing.
 
 Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
-routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
+routines and 260 native Verok DLL comparisons for texture tiers and car layers,
+plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 228 Thrash loader/ABI calls,
 84 graphics-transport, 19 lifecycle and 10 startup-configuration checks. Another
@@ -164,18 +170,18 @@ zero account balance, with identical saved bytes. Confirmed Exit writes career
 changes; the launcher's Stop only checkpoints files the game has already written.
 The main menu's Load Game opens the original player chooser. Race results and
 campaign advancement remain untested.
-Visual fidelity takes priority over further performance work. The active Chrome
-test profile has maximum texture, car, lighting, world and distance controls,
-projected headlights, lens flare and high sky detail selected at 6144×3456×32.
-Those choices survive a browser restart; a Normandie race renders at that mode,
-accepts keyboard acceleration and reaches second gear without WebGPU errors.
-That race submits 337 textures with 4–8 supplied mip levels and uses trilinear
-sampling, LOD biases of −3.25/−1, and mixed U/V address modes through the bridge.
-The frontend/race also exercise separate depth-only and color/depth clears.
-The sampled daylight run submits no stencil draws; stencil behavior is verified
-through native-driver pixel tests rather than a completed game-effect comparison.
-The supplied new-player template still defaults to medium textures; highest
-quality defaults and complete rendering of the selected effects need work.
+Visual fidelity takes priority over further performance work. New graphics
+properties default to Very High textures/car detail/world/distance, High car
+lighting/sky, projected headlights and lens flare, with a 32-bit viewport mode.
+Existing player saves retain their preferences. Chrome verifies these original
+frontend properties and the selected mode's physical-pixel dimensions, alongside
+the actual menu-gradient pixels. A new player’s maximum-quality save survives a
+full Chrome restart byte-for-byte. Côte d’Azur renders at 6144×3162×32 with
+texture and car tiers both confirmed as 4 in the original race state, without
+WebGPU validation errors. Full rendering of the selected effects,
+including nighttime projected headlights, still needs verification. Stencil
+behavior is covered by native-driver pixel checks; a completed in-game effect
+comparison remains outstanding.
 One menu-return memory fault remains unexplained; it did not recur in a fresh
 run with a verified asset server.
 Custom portrait conversion
@@ -237,7 +243,9 @@ On this machine the read-only input is:
 
 The tested executable's SHA-256 is
 `c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906`.
-The differential checks require this version. Original executables, generated
+The differential checks require this version. Preparation also reads the matching
+Verok `nfs5.dll` beside the executable (`--patch-library` selects another path).
+Original executables, generated
 game C, and compiled output are ignored by Git; users supply their own game.
 Serving `dist/` exposes the supplied executable and staged game assets.
 
