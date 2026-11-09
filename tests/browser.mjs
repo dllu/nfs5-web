@@ -321,8 +321,13 @@ try {
         renderer.readPixels().then(pixels=>{
           const at=(x,y)=>Array.from(pixels.subarray((y*640+x)*4,(y*640+x)*4+4));
           const top=at(250,346),middle=at(250,353),bottom=at(250,360);
-          if(top[0]>100&&top[0]>bottom[0]+60&&top[1]>bottom[1]+20&&bottom[0]>30&&bottom[1]<10&&bottom[2]<10){
-            capture={pixels,top,middle,bottom};resolveFrame();
+          let portraitColors=0;
+          for(let y=236;y<300;y++)for(let x=216;x<270;x++){
+            const rgb=pixels.subarray((y*640+x)*4,(y*640+x)*4+3);
+            if(Math.max(...rgb)-Math.min(...rgb)>50)portraitColors++;
+          }
+          if(top[0]>100&&top[0]>bottom[0]+60&&top[1]>bottom[1]+20&&bottom[0]>30&&bottom[1]<10&&bottom[2]<10&&portraitColors>200){
+            capture={pixels,top,middle,bottom,portraitColors};resolveFrame();
           }
         }).finally(()=>busy=false);
       };
@@ -332,6 +337,19 @@ try {
       runtime.stop();const result=await run;
       const {module,base}=runtime;
       if(module.HEAPU8[base+0x6197aa]!==1||!runtime.seen(0x4d96b0))throw new Error('Original frontend did not enable and execute Gouraud UI geometry');
+      // The original caller must convert the selected built-in portrait and
+      // produce its browser-local FSH, as well as painting the face on screen.
+      const snapshot=module._web_fs_snapshot(),files=new DataView(module.HEAPU8.buffer);
+      let cursor=snapshot+12,portraitSize=0;
+      for(let i=0;i<files.getUint32(snapshot+8,true);i++){
+        const nameLength=files.getUint32(cursor+20,true),length=files.getUint32(cursor+24,true),size=files.getUint32(cursor+8,true);
+        cursor+=28;
+        const name=new TextDecoder('windows-1252').decode(Uint8Array.from(module.HEAPU8.subarray(cursor,cursor+nameLength-1)));
+        cursor+=(nameLength+3)&~3;
+        if(name.toLowerCase()==='c:\\nfs5\\savedata\\pic16.fsh'&&length!==0xffffffff)portraitSize=size;
+        if(length!==0xffffffff)cursor+=(length+3)&~3;
+      }
+      if(portraitSize!==6960||!runtime.seen(0x4dbba0))throw new Error('Original built-in portrait conversion did not produce its image');
       const view=new DataView(module.HEAPU8.buffer,base),graphics={};
       for(const [name,offset]of Object.entries({Resolutions:4,CarChrome:12,CarDetail:16,SpecialFX:20,
         ViewDistance:28,Headlights:32,LensFlare:36,TextureDetail:44,SkyRendering:64})) {
@@ -344,7 +362,7 @@ try {
       const still=document.createElement('canvas');still.width=640;still.height=480;still.id='menu-frame';
       still.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(capture.pixels),640,480),0,0);canvas.replaceWith(still);
       return {top:capture.top,middle:capture.middle,bottom:capture.bottom,graphics,raceMode,viewportMode,
-        mmx:view.getUint32(0x5deb18,true),stopped:result.stopped,gpuErrors:renderer.errors};
+        portraitColors:capture.portraitColors,portraitSize,mmx:view.getUint32(0x5deb18,true),stopped:result.stopped,gpuErrors:renderer.errors};
     }finally{clearTimeout(watchdog);runtime?.stop();runtime?.dispose();}
   });
   assert.equal(menu.stopped,true);assert.deepEqual(menu.gpuErrors,[]);assert.deepEqual(errors,[]);
@@ -352,6 +370,8 @@ try {
     Headlights:1,LensFlare:1,TextureDetail:4,SkyRendering:2},'Original frontend initializes maximum quality and the viewport race mode');
   assert.deepEqual(menu.raceMode,menu.viewportMode,'Selected race mode matches the physical browser viewport at 32-bit color');
   assert.equal(menu.mmx,1,'Original CPU detection enables the MMX capability required by flare initialization');
+  assert(menu.portraitColors>200,'Original player chooser paints its built-in portrait');
+  assert.equal(menu.portraitSize,6960,'Original portrait converter writes its browser-local FSH');
   await page.locator('#menu-frame').screenshot({path:'build/original-menu-gradients.png'});
   await writeFile('build/original-menu-gradients.json',JSON.stringify(menu,null,2)+'\n');
   console.log(`Original menu gradient verified: top ${menu.top}, middle ${menu.middle}, bottom ${menu.bottom}`);

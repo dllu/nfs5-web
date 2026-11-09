@@ -61,6 +61,7 @@ static void thread_exit_code_import(void);
 static recomp_func_t dinput_lookup(uint32_t address);
 static recomp_func_t dsound_lookup(uint32_t address);
 static recomp_func_t thrash_lookup(uint32_t address);
+static void gimme_convert(void);
 static void fail(uint32_t pc,const char *format,...);
 static int mapping_name_exists(const char *name);
 static int mapping_node_active(uint32_t node);
@@ -122,6 +123,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
 }
 
 recomp_func_t recomp_lookup_manual(uint32_t va) {
+    if(va==0xF7000000u)return gimme_convert;
     if(va==0xF6000000)return map_flush_import;
     if (va == 0xF1000000) return thread_exit_code_import;
     if (va == 0xF1000010) return timer_dispatch;
@@ -228,6 +230,7 @@ static uint32_t module_handle(const char *name) {
 #include "win32_paths.h"
 #include "win32_files.h"
 #include "win32_mapping.h"
+#include "gimme.h"
 #include "win32_memory.h"
 #include "win32_windows.h"
 #include "win32_registry.h"
@@ -316,13 +319,13 @@ void web_import(uint32_t index) {
     }
     if (!strcmp(name, "DisableThreadLibraryCalls")) {
         uint32_t module=argument(0);
-        int valid=module==THRASH_MODULE || (module>=0x70000000 && module<0x70010000 && !(module&15) && web_import_lookup(0xF0000000+module-0x70000000));
+        int valid=module==THRASH_MODULE || module==GIMME_MODULE || (module>=0x70000000 && module<0x70010000 && !(module&15) && web_import_lookup(0xF0000000+module-0x70000000));
         if(!valid)last_error=6;
         result(valid,1);return;
     }
     if(!strcmp(name,"FreeLibrary")) {
         uint32_t handle=argument(0);
-        int valid=handle==THRASH_MODULE||(handle>=0x70000000&&handle<0x70010000&&!(handle&15)&&web_import_lookup(0xF0000000+handle-0x70000000));
+        int valid=handle==THRASH_MODULE||handle==GIMME_MODULE||(handle>=0x70000000&&handle<0x70010000&&!(handle&15)&&web_import_lookup(0xF0000000+handle-0x70000000));
         if(!valid)last_error=6;
         /* Static host service bindings remain resident for the process. */
         result(valid,1);return;
@@ -339,11 +342,7 @@ void web_import(uint32_t index) {
         }
         uint32_t handle = module_handle(library);
         if (!handle) handle = thrash_module(library);
-        if(!handle&&!strcasecmp(library,"gimme.dll")) {
-            /* Optional FaceInRace photo import has a caller-owned fallback.
-             * A PE image converter is not an executable Wasm host module. */
-            last_error=193;result(0,1);return;
-        }
+        if (!handle) handle = gimme_module(library);
         if (!handle) {
             if (!strcmp(name, "LoadLibraryA")) fail(g_cur_func, "Dynamic library needs porting: %s", (const char *)ADDR(argument(0)));
             last_error = 126;
@@ -352,6 +351,11 @@ void web_import(uint32_t index) {
     }
     if (!strcmp(name, "GetProcAddress")) {
         uint32_t handle = argument(0), symbol = argument(1);
+        if(handle==GIMME_MODULE){
+            uint32_t function=symbol==1||(symbol>=0x10000&&!strcmp((const char*)ADDR(symbol),"ConvertFile"))?GIMME_CONVERT:0;
+            if(!function)last_error=127;
+            result(function,2);return;
+        }
         if (handle == THRASH_MODULE) {
             uint32_t function = thrash_proc(symbol); if (!function) last_error = 127;
             result(function, 2); return;

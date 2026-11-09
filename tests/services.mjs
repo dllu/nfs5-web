@@ -51,7 +51,7 @@ invoke('QueryPerformanceCounter',output);const elapsedMicros=Number(memory().get
 assert(elapsedMicros>=20000&&Math.abs(elapsedMicros/1000-(tickAfter-tickBefore))<100);
 const patchVersion=await runtime.invokeAsync(manifest.imports.find(i=>i.dll==='NFS5.dll'&&i.name==='GetVersion').slot,[]);
 assert.equal(patchVersion.status,0,patchVersion.error);assert.equal(patchVersion.registers[0],0x60001);checks++;
-assert.equal(invoke('LoadLibraryA',string('GIMME.DLL')),0);assert.equal(invoke('GetLastError'),193);
+const portrait=invoke('LoadLibraryA',string('GIMME.DLL'));assert(portrait);assert.equal(invoke('FreeLibrary',portrait),1);
 assert.equal(invoke('FreeLibrary',0),0);assert.equal(invoke('GetLastError'),6);
 const resident=invoke('LoadLibraryA',string('KERNEL32'));assert(resident);assert.equal(invoke('FreeLibrary',resident),1);
 

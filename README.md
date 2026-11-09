@@ -6,10 +6,11 @@ incomplete.** Visual fidelity takes priority over further performance work.
 
 ## Current state
 
-- Original startup, intro video/audio, the 3D frontend, player chooser,
-  quick-race setup and race scenes run in Chrome. Keyboard acceleration,
-  pause/Continue and race restart have been exercised. Race results and full
-  campaign advancement remain unverified. Multiplayer is outside the scope;
+- Original startup, intro video/audio, the 3D frontend, player chooser with
+  nine built-in portraits, quick-race setup and race scenes run in Chrome.
+  Keyboard acceleration, pause/Continue and race restart have been exercised.
+  Race results and full campaign advancement remain unverified.
+  Multiplayer is outside the scope;
   controllers and steering wheels are not implemented.
 - The canvas fills the browser viewport. Menus retain their original 640×480
   rendering and stretch to fill it; the race uses its selected resolution.
@@ -66,7 +67,7 @@ its gradient in an isolated WebGPU pass. The live sun object initializes its
 visibility samples and keeps sampling during driving. Visible flare artwork,
 weather, other effects and stencil-dependent scenes still need comparisons.
 Menu clicks can require retries, and one menu-return memory fault remains
-unexplained. Custom portrait conversion, full keyboard-layout handling and
+unexplained. Custom photo import/resizing, full keyboard-layout handling and
 many unused Windows APIs are unsupported. An abrupt close can lose changes
 since the last checkpoint.
 
@@ -78,10 +79,11 @@ need verification. The renderer has a core depth/stencil fallback when optional
 
 Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
-visibility. They also exercise Windows services, threads, x87 state, storage,
+visibility. All nine portrait pixel planes match native GIMME conversion.
+The checks also exercise Windows services, threads, x87 state, storage,
 audio, input and lifecycle behavior. Real Chrome checks cover intro/audio,
-menu-gradient pixels, maximum defaults, viewport/input scaling, persistence
-and Stop/restart. GPU pixel tests cover native shading, blend/alpha/depth/stencil
+menu gradients and portraits, maximum defaults, viewport/input scaling,
+persistence and Stop/restart. GPU pixel tests cover native shading, blend/alpha/depth/stencil
 semantics, mipmaps, addressing, scaled UI and framebuffer transfers, including
 4K output. These checks do not measure gameplay FPS. Detailed evidence and
 limitations are recorded in the [progress diary](diary/).
