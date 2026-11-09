@@ -257,7 +257,7 @@ try {
         const lock = [get(result),get(result+4),get(result+8),get(result+12)];
         for (let i = 0; i < rate/10; i++) view.setInt16(lock[0] + i*2, Math.round(Math.sin(2*Math.PI*440*i/rate)*8192), true);
         if (method(buffer,19,...lock) || method(buffer,12,0,0,1)) throw new Error('PCM playback failed');
-        window.audioHarness = { stats: audio.stats, async close() { method(buffer,18); runtime.dispose(); await audio.close(); delete window.audioHarness; } };
+        window.audioHarness = { stats: audio.stats, async close() { method(buffer,18); runtime.dispose(); runtime.dispose(); await audio.close(); delete window.audioHarness; } };
       } catch (error) { runtime?.dispose(); await audio?.close(); window.audioFailure = String(error); }
     };
   });

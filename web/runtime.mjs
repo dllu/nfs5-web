@@ -183,7 +183,12 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       args.forEach((value,i)=>view.setUint32(stack+i*4,value>>>0,true));module._web_set_register(4,stack);
       return executeAsync(entry,milliseconds);
     },
-    dispose: () => { clearInterval(storageTimer); graphics?.close(); detachAudio?.(); disposed = true; storage?.close(); module._web_shutdown(); module.PThread.terminateAllThreads(); },
+    dispose: () => {
+      if(disposed)return;
+      disposed=true;
+      clearInterval(storageTimer);graphics?.close();detachAudio?.();storage?.close();
+      module._web_shutdown();module.PThread.terminateAllThreads();
+    },
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),
     call: (entry, ...args) => snapshot(module._web_call(entry, ...Array.from({ length: 4 }, (_, i) => args[i] ?? 0))),
   };

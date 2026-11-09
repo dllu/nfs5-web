@@ -4,7 +4,8 @@ import {webcrypto} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {loadRuntime} from '../dist/runtime.mjs';
 globalThis.crypto??=webcrypto;
-const runtime=await loadRuntime({read:async p=>new Response(await readFile(new URL('../dist/'+p,import.meta.url)))});
+const runtime=await loadRuntime({audio:{buffer:new SharedArrayBuffer(32+4096*2*4),rate:48000},
+  read:async p=>new Response(await readFile(new URL('../dist/'+p,import.meta.url)))});
 const {module,base,manifest}=runtime,data=0x800000,stack=runtime.memorySize-0x10000;
 const view=new DataView(module.HEAPU8.buffer,base),slot=name=>manifest.imports.find(i=>i.name===name).slot;
 let checks=0;
@@ -69,5 +70,8 @@ try {
     {encoding:'utf8',timeout:30000});
   assert.equal(exit.status,0,exit.error?.message||exit.stderr);
   assert.match(exit.stdout,/23 process-exit checks passed/);console.log(exit.stdout.trim());checks++;
-  console.log(`${checks} lifecycle checks passed (unbounded runs, message/sleep/loop/GPU cancellation, compute-worker shutdown, timer wakeup, stop/restart)`);
+  // Audio owns a Wasm allocation. Repeated disposal must not free that block
+  // twice or re-enter native shutdown after worker resources are released.
+  runtime.dispose();assert.doesNotThrow(()=>runtime.dispose());checks++;
+  console.log(`${checks} lifecycle checks passed (unbounded runs, message/sleep/loop/GPU cancellation, compute-worker shutdown, timer wakeup, stop/restart, repeated audio disposal)`);
 }finally{runtime.dispose();}
