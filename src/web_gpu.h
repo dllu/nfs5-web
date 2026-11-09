@@ -2,6 +2,8 @@
  * the application Worker consumes snapshots without entering the guest CPU. */
 #ifndef NFS5_WEB_GPU_H
 #define NFS5_WEB_GPU_H
+#include <emscripten/threading.h>
+#include <limits.h>
 #define GPU_QUEUE_WORDS (1u << 22)
 typedef struct { float x,y,z,rhw; uint32_t color,specular; float u,v; } nfspu_gpu_vertex;
 typedef struct {
@@ -23,6 +25,17 @@ static struct {
 static char gpu_error[256];
 static uint32_t gpu_width,gpu_height,gpu_next_texture;
 static struct { uint32_t id,width,height; } gpu_textures[8192];
+static void gpu_wake_waiters(void) {
+    emscripten_futex_wake(&gpu_transport.read,INT_MAX);
+    emscripten_futex_wake(&gpu_transport.completed,INT_MAX);
+}
+static void gpu_park(_Atomic uint32_t *word,uint32_t value) {
+    machine_release();
+    /* The bounded wait also handles older consumers without acknowledgement
+     * notifications. Stop and renderer failures explicitly wake both words. */
+    emscripten_futex_wait(word,value,10);
+    machine_acquire();machine_abort_check();
+}
 
 static void gpu_check(void) {
     if (atomic_load(&gpu_transport.failed)) fail(g_cur_func, "WebGPU: %s", gpu_error);
@@ -30,7 +43,11 @@ static void gpu_check(void) {
     if (emscripten_get_now() > deadline) fail(g_cur_func, "Graphics wait budget reached at %08X", g_cur_func);
 }
 static void gpu_wait(uint32_t sequence) {
-    while ((int32_t)(atomic_load(&gpu_transport.completed) - sequence) < 0) { gpu_check(); machine_pause(500); }
+    for(;;) {
+        uint32_t completed=atomic_load(&gpu_transport.completed);
+        if((int32_t)(completed-sequence)>=0)break;
+        gpu_check();gpu_park(&gpu_transport.completed,completed);
+    }
     gpu_check();
 }
 static void gpu_copy(uint32_t *cursor, const void *bytes, uint32_t length) {
@@ -46,13 +63,16 @@ static uint32_t gpu_send(uint32_t opcode, const void *a, uint32_t an, const void
     uint64_t bytes = (uint64_t)an + bn + cn;
     if ((bytes & 3) || bytes / 4 + 3 >= GPU_QUEUE_WORDS) fail(g_cur_func, "Graphics command too large (%llu bytes)", (unsigned long long)bytes);
     uint32_t count = (uint32_t)(bytes / 4) + 3;
-    while (GPU_QUEUE_WORDS - (uint32_t)(atomic_load(&gpu_transport.write) - atomic_load(&gpu_transport.read)) < count) {
-        machine_pause(500); gpu_check();
+    for(;;) {
+        uint32_t read=atomic_load(&gpu_transport.read);
+        if(GPU_QUEUE_WORDS-(uint32_t)(atomic_load(&gpu_transport.write)-read)>=count)break;
+        gpu_park(&gpu_transport.read,read);gpu_check();
     }
     uint32_t cursor = atomic_load(&gpu_transport.write), sequence = ++gpu_transport.sequence;
     uint32_t header[] = {count,opcode,sequence};
     gpu_copy(&cursor,header,12); gpu_copy(&cursor,a,an); gpu_copy(&cursor,b,bn); gpu_copy(&cursor,c,cn);
     atomic_store(&gpu_transport.write,cursor);
+    emscripten_futex_wake(&gpu_transport.write,1);
     return sequence;
 }
 static int gpu_resize(uint32_t width,uint32_t height) {
@@ -109,7 +129,7 @@ static const struct {
     int(*read_pixels)(uint8_t*,uint32_t,uint32_t);
 } web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels};
 static void gpu_reset(void) {
-    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=1;
+    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=2;
     memset(gpu_textures,0,sizeof gpu_textures);gpu_width=gpu_height=gpu_next_texture=0;gpu_error[0]=0;
 }
 #endif

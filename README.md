@@ -71,7 +71,9 @@ Current implementation:
   alpha tests, clipping, fog and texture-update ordering. A 41-export Thrash
   replacement connects guest driver calls to an OffscreenCanvas through a
   bounded shared-memory queue, with chunked texture uploads, framebuffer
-  reads/writes and mode changes. The original video decoder presents through
+  reads/writes and mode changes. Queue writes, free space and completed barriers
+  wake their consumers/producers through shared-memory notifications; older
+  engines retain polling. The original video decoder presents through
   framebuffer lock/unlock. The frontend submits original geometry and textures.
   Multitexture, mipmap and broader 3D scene fidelity remain unverified.
 
@@ -91,13 +93,15 @@ Chrome also verifies unbounded Run game, cooperative Stop and a fresh restart.
 27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
 an OffscreenCanvas rendered in a dedicated Worker. Another 41 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
-wrapping under texture-upload backpressure. These do not measure game FPS.
+wrapping under texture-upload backpressure. A legacy polling check also covers
+commands arriving after idle. These checks do not measure game FPS.
 
 Manual Chrome navigation reaches quick-race setup and renders the Côte d'Azur
 track and Porsche 356 at 6144x3456. Holding Up accelerates the car; the original
 HUD showed roughly 80 km/h and third gear. Pause and race restart work.
 Menu clicks can require retries. HUD scaling, broader input, fidelity and
-performance need further verification.
+performance need further verification. The original graphics menu selects a
+4K race mode successfully.
 Creating a player writes its original save and HUD files to browser storage;
 the player reappears selected after a full browser restart, with identical save
 bytes. Campaign progress and explicit race-save/load flows remain untested.
@@ -107,9 +111,10 @@ Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
-The 4K/120 Hz target is unmeasured; a short 6K race-scene sample delivered about
-23 presented frames per second. The current diagnostic
-Wasm module is about 72 MiB and retains tracing and optional execution limits. The x87
+The 4K/120 Hz gameplay target remains unverified. Short Chrome samples at
+6144x3456 delivered about 81 presented frames per second while driving and 160
+while paused. Sustained performance across tracks remains untested. The current diagnostic
+Wasm module is about 126 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
 approximation of Windows NLS. Full floating-point and binary compatibility are
 unverified.
@@ -134,6 +139,8 @@ the next unsupported dependency or diagnostic time limit, retains its final
 frame and lists recent original functions.
 `npm run test:browser` tests installed Chrome against that server and writes
 its reports and screenshots, including `original-startup.png`, to `build/`.
+`python3 tools/build.py --profile` also writes `dist/engine.js.symbols` for
+resolving Wasm function indices in browser CPU profiles.
 `npm run test:renderer` opens normal Chrome for GPU pixel checks and writes
 `build/webgpu-renderer.png`, `build/thrash-driver.png` and a JSON report. Headless Vulkan adapter
 initialization is unreliable on this Chrome build; the normal browser works.

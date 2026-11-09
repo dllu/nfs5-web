@@ -204,7 +204,30 @@ try {
   assert.deepEqual(result.thrash.errors,[]);assert.deepEqual(result.thrash.nativeMode,[3840,2160]);assert(result.thrash.checks>=25);
   await page.locator('#thrash-check').screenshot({path:'build/thrash-driver.png'});
   await page.evaluate(()=>{window.thrashRuntime.dispose();delete window.thrashRuntime;});
+  result.fallback=await page.evaluate(async()=>{
+    const {loadRuntime}=await import('./runtime.mjs'),{attachGraphics}=await import('./graphics.mjs');
+    const runtime=await loadRuntime({persist:false}),{module,base,manifest}=runtime;
+    const transport=new Int32Array(module.HEAPU8.buffer,module._web_gpu_transport(),8);
+    Atomics.store(transport,6,1); // Legacy producers cannot notify their consumer.
+    const canvas=document.createElement('canvas');document.body.append(canvas);
+    const graphics=await attachGraphics(module,canvas,{pace:false}),data=0x800000;
+    const text=s=>{module.HEAPU8.set(new TextEncoder().encode(s+'\0'),base+data);return data;};
+    async function call(address,args=[]) {const r=await runtime.invokeAsync(address,args);if(r.status)throw new Error(r.error);await graphics.settle();return r.registers[0];}
+    const invoke=(name,...args)=>call(manifest.imports.find(i=>i.name===name).slot,args);
+    try {
+      const library=await invoke('LoadLibraryA',text('drivers\\opengl3z'));
+      const method=async(name,...args)=>call(await invoke('GetProcAddress',library,text(name)),args);
+      await method('_THRASH_setvideomode@12',1,0,1);
+      await new Promise(resolve=>setTimeout(resolve,25));
+      await method('_THRASH_setstate@8',3,0xff112233);await method('_THRASH_clearwindow@0');
+      await method('_THRASH_flushwindow@0');await method('_THRASH_pageflip@0');
+      const pixel=Array.from((await graphics.renderer.readPixels()).slice(0,4));
+      if(pixel.join()!=='17,34,51,255'||graphics.renderer.stats.frames!==1)throw new Error('Legacy polling transport lost a command after idle');
+      return {pixel,frames:graphics.renderer.stats.frames,errors:graphics.renderer.errors.slice()};
+    } finally {graphics.close();runtime.dispose();}
+  });
+  assert.deepEqual(result.fallback.errors,[]);
   assert.deepEqual(errors,[]);
   await writeFile('build/webgpu-renderer.json', JSON.stringify({ browser:browser.browser().version(),...result },null,2)+'\n');
-  console.log(`WebGPU (${result.info.vendor}): ${result.checks} backend checks; ${result.thrash.checks} native-driver checks and ${result.thrash.calls} ABI calls passed, including 4K framebuffer round trip and command-ring wrapping`);
+  console.log(`WebGPU (${result.info.vendor}): ${result.checks} backend checks; ${result.thrash.checks} native-driver checks and ${result.thrash.calls} ABI calls passed, including 4K, ring wrapping and legacy polling after idle`);
 } finally { await browser.close(); }

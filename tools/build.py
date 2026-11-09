@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--profile", action="store_true", help="Emit a Wasm CPU-profile symbol map")
     args = parser.parse_args()
     sdk = ROOT / ".cache/emsdk"
     compiler = sdk / "upstream/emscripten/emcc"
@@ -83,7 +84,10 @@ def main():
     exports.extend(['_web_gpu_transport', '_web_gpu_attach', '_web_gpu_fail', '_web_gpu_stats'])
     exports.extend(['_web_pointer','_web_mapping_stats'])
     exports.extend(['_web_intro_config','_web_intro_skipped'])
-    subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', '-o', str(ROOT / 'dist/engine.js'),
+    profile_flags = ['--emit-symbol-map'] if args.profile else []
+    if not args.profile:
+        (ROOT / 'dist/engine.js.symbols').unlink(missing_ok=True)
+    subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', *profile_flags, '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=536870912',
                     '-sSTACK_SIZE=8388608', '-sEXPORTED_FUNCTIONS=' + json.dumps(exports),

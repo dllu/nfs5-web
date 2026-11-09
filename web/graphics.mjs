@@ -6,12 +6,13 @@ const stateFields = ['texture','depth_test','depth_write','blend_enable','src_bl
 
 export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true } = {}) {
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
+  let channel,yieldResolve;
   const pointer=module._web_gpu_transport(), uploads=new Map();
   let header,ring;
   function views() {
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
-    if(Atomics.load(header,6)!==1)throw new Error('Unsupported graphics transport version');
+    if(![1,2].includes(Atomics.load(header,6)))throw new Error('Unsupported graphics transport version');
     const size=Atomics.load(header,5)>>>0;
     if(!size || (size&(size-1)))throw new Error('Invalid graphics queue size');
     ring=new Uint32Array(module.HEAPU8.buffer,pointer+32,size);
@@ -22,6 +23,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     failure=error instanceof Error?error:new Error(String(error));
     const bytes=new TextEncoder().encode(failure.message+'\0'),p=module._malloc(bytes.length);
     try{module.HEAPU8.set(bytes,p);module._web_gpu_fail(p);}finally{module._free(p);}
+    Atomics.notify(header,0);
   }
   const renderer=await createRenderer(canvas,{onError:fail});
   function snapshot(start,count) {
@@ -47,6 +49,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
       // Copy before releasing the queue span; producers may immediately reuse it.
       const packet=snapshot(read,count),opcode=packet[1],sequence=packet[2],data=packet.subarray(3);
       Atomics.store(header,1,(read+count)|0);
+      Atomics.notify(header,1);
       switch(opcode) {
         case 1:renderer.resize(data[0],data[1]);onResize(data[0],data[1]);break;
         case 2:renderer.clear(data[0],new Float32Array(data.buffer,data.byteOffset,data.length)[1]);break;
@@ -77,6 +80,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
         default:throw new Error(`Unsupported graphics command ${opcode}`);
       }
       views();Atomics.store(header,2,sequence|0);
+      if(opcode===1||opcode===3||opcode>=8)Atomics.notify(header,2);
       if(performance.now()>until)return;
     }
   }
@@ -84,7 +88,29 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     if(pumping || closed || failure)return pumping;
     pumping=drain().catch(fail).finally(()=>{pumping=null;});return pumping;
   }
-  module._web_gpu_attach();const timer=setInterval(pump,1);
+  function yieldTask() {
+    if(globalThis.scheduler?.yield)return globalThis.scheduler.yield();
+    channel??=new MessageChannel();
+    return new Promise(resolve=>{
+      yieldResolve=resolve;channel.port1.onmessage=()=>{yieldResolve=null;resolve();};channel.port2.postMessage(0);
+    });
+  }
+  async function consume() {
+    while(!closed&&!failure) {
+      await pump();if(closed||failure)return;
+      views();const write=Atomics.load(header,0);
+      if((Atomics.load(header,1)|0)!==write){await yieldTask();continue;}
+      // Native producers notify after publishing a complete packet. Check and
+      // wait on the same value to avoid losing a write between these steps.
+      const wait=Atomics.waitAsync(header,0,write);
+      if(wait.async)await wait.value;
+    }
+  }
+  module._web_gpu_attach();
+  // Browser interval timers are clamped to about 4 ms. Wake on queue writes
+  // without polling; retain the interval path for older JS engines.
+  const timer=typeof Atomics.waitAsync==='function'&&Atomics.load(header,6)>=2?null:setInterval(pump,1);
+  if(timer===null)consume().catch(fail);
   return {
     renderer,
     async settle() {
@@ -94,7 +120,9 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
       if(failure)throw failure;await renderer.validate();
     },
     close() {
-      if(closed)return;fail(new Error('Renderer detached'));closed=true;clearInterval(timer);renderer.close();
+      if(closed)return;fail(new Error('Renderer detached'));closed=true;
+      if(timer!==null)clearInterval(timer);Atomics.notify(header,0);yieldResolve?.();
+      channel?.port1.close();channel?.port2.close();renderer.close();
     },
   };
 }

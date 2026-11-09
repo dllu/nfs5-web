@@ -624,7 +624,7 @@ int web_start(uint32_t entry, uint32_t milliseconds) {
 int web_async_status(void) { return atomic_load(&asynchronous_run.status); }
 int web_stop(void) {
     if(atomic_load(&asynchronous_run.status)!=1)return 0;
-    atomic_store(&stop_requested,1);return 1;
+    atomic_store(&stop_requested,1);gpu_wake_waiters();return 1;
 }
 
 int web_async_finish(void) {
@@ -715,7 +715,7 @@ void web_shutdown(void) { stop_guest_workers(); }
 void *web_gpu_transport(void) { return &gpu_transport; }
 void web_gpu_attach(void) { atomic_store(&gpu_transport.failed,0); atomic_store(&gpu_transport.attached,1); }
 void web_gpu_fail(const char *message) {
-    snprintf(gpu_error,sizeof gpu_error,"%s",message); atomic_store(&gpu_transport.failed,1);
+    snprintf(gpu_error,sizeof gpu_error,"%s",message); atomic_store(&gpu_transport.failed,1);gpu_wake_waiters();
 }
 uint32_t *web_gpu_stats(void) {
     static uint32_t stats[5]; machine_acquire();
