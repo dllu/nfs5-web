@@ -15,6 +15,9 @@ const browser = await chromium.launchPersistentContext(resolve('.cache/chrome-re
 });
 try {
   const page = await browser.newPage(), errors = [];
+  const session = await browser.newCDPSession(page);
+  await session.send('Network.enable');
+  await session.send('Network.setCacheDisabled', { cacheDisabled: true });
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(process.env.NFS5_TEST_URL ?? 'http://127.0.0.1:8000');
   const result = await page.evaluate(async () => {

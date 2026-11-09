@@ -211,7 +211,9 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     if (last?.type === 'draw' && last.key === key) last.count += n;
     else {
       uniforms = grow(uniforms, (uniformBytes + 256) / 4);
-      const values = [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,...rgba(state.fog_color),state.alpha_test?state.alpha_func:7,state.alpha_ref/255,state.fog_enable,state.texture ? state.alpha_modulate : 1,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
+      // effects.w: bit 0 modulates diffuse alpha, bit 1 enables texturing.
+      const textureFlags=state.texture?2+Number(Boolean(state.alpha_modulate)):1;
+      const values = [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,...rgba(state.fog_color),state.alpha_test?state.alpha_func:7,state.alpha_ref/255,state.fog_enable,textureFlags,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
       uniforms.set(values, uniformBytes / 4);
       operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: uniformBytes }); uniformBytes += 256;
     }

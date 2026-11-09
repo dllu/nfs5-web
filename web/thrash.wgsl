@@ -13,23 +13,24 @@ struct Effects {
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) @interpolate(linear) color: vec4f,
-    @location(1) uv: vec2f,
+    @location(1) @interpolate(linear) projected_uv: vec3f,
     @location(2) @interpolate(linear) fog_amount: f32,
     @location(4) @interpolate(flat) flat_color: vec4f,
     @location(5) @interpolate(linear) specular: vec4f,
 };
 @vertex fn vertex_main(@location(0) position: vec4f, @location(1) color: vec4f,
                       @location(2) specular: vec4f, @location(3) uv: vec2f) -> VertexOutput {
-    var w = 1.0;
-    if abs(position.w) > 0.0000001 { w = 1.0 / position.w; }
     var output: VertexOutput;
-    output.position = vec4f((position.x * 2.0 / fx.view.x - 1.0) * w,
-                           (1.0 - position.y * 2.0 / fx.view.y) * w,
-                           clamp(position.z, 0.0, 1.0) * w, w);
+    // Native clip-space W is one: RHW affects texture projection and fog,
+    // not geometry clipping. Depth above one resets to zero; negative depth
+    // reaches the clipper. WebGPU's depth range directly represents TL Z.
+    output.position = vec4f(position.x * 2.0 / fx.view.x - 1.0,
+                           1.0 - position.y * 2.0 / fx.view.y,
+                           select(0.0, position.z, position.z <= 1.0), 1.0);
     output.color = color.bgra;
     output.flat_color = color.bgra;
     output.specular = specular.bgra;
-    output.uv = uv;
+    output.projected_uv = vec3f(uv * position.w, position.w);
     // Verok calculates fog at vertices, then interpolates its amount in screen
     // space. The ARGB fog color's alpha controls its maximum strength.
     var fog_amount = 1.0 - specular.a;
@@ -46,11 +47,15 @@ struct VertexOutput {
     return output;
 }
 @fragment fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
-    let texel = textureSampleBias(image, image_sampler, input.uv, fx.view.w);
+    let texture_flags = u32(fx.effects.w);
+    var texel = vec4f(1.0);
+    if (texture_flags & 2u) != 0u {
+        texel = textureSampleBias(image, image_sampler, input.projected_uv.xy / input.projected_uv.z, fx.view.w);
+    }
     var diffuse = input.color;
     if fx.view.z < 0.5 { diffuse = input.flat_color; }
     var color = vec4f(texel.rgb * diffuse.rgb, texel.a);
-    if fx.effects.w > 0.5 { color.a *= diffuse.a; }
+    if (texture_flags & 1u) != 0u { color.a *= diffuse.a; }
     if fx.view.z > 1.5 { color += input.specular; }
     switch u32(fx.effects.x) {
         case 0u: { discard; }

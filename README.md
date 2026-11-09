@@ -80,8 +80,9 @@ need verification. The renderer has a core depth/stencil fallback when optional
 Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
 visibility. Fog state handlers are compared against the original x86 OpenGL
-driver, and fog pixels against its embedded GLSL. All nine portrait pixel planes
-match native GIMME conversion.
+driver. GPU pixels are compared against its embedded GLSL for fog, depth clipping,
+texture projection and flat/smooth color. All nine portrait pixel planes match
+native GIMME conversion.
 The checks also exercise Windows services, threads, x87 state, storage,
 audio, input and lifecycle behavior. Real Chrome checks cover intro/audio,
 menu gradients and portraits, maximum defaults, viewport/input scaling,
