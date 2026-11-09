@@ -14,6 +14,8 @@ int main(int argc,char **argv){
  if(!window||!GetWindowThreadProcessId(window,&pid)){fprintf(stderr,"No Porsche window\n");return 3;}
  HANDLE process=OpenProcess(PROCESS_VM_READ|PROCESS_QUERY_INFORMATION,FALSE,pid);
  if(!process){fprintf(stderr,"OpenProcess: %lu\n",GetLastError());return 4;}
+ DWORD exit_code=0;GetExitCodeProcess(process,&exit_code);
+ fprintf(stderr,"Native target process %lu, exit status %lu\n",pid,exit_code);
  int indirect=argv[1][0]=='@';
  uintptr_t address=strtoul(argv[1]+indirect,NULL,0);SIZE_T length=strtoul(argv[2],NULL,0),read=0;
  if(indirect){

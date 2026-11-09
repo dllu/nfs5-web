@@ -54,6 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path, help='Project-local output prefix')
     parser.add_argument('--reader', type=Path, default=ROOT / 'build/native-memory.exe')
+    parser.add_argument('--reference-dir', type=Path, default=ROOT / '.cache/native-reference')
     parser.add_argument('--window', help='Optional X11 window ID to capture with ImageMagick')
     parser.add_argument('--weather', action='store_true', help='Also read sky/weather keyframes')
     args = parser.parse_args()
@@ -71,6 +72,7 @@ def main():
         path.unlink(missing_ok=True)
         windows_path = 'Z:' + str(path).replace('/', '\\')
         result = subprocess.run([sys.executable, str(ROOT / 'tools/native_reference.py'),
+                                 '--reference-dir', str(args.reference_dir),
                                  '--', str(reader), address, hex(size), windows_path],
                                 capture_output=True, text=True, timeout=30)
         if (nullable and address.startswith('@') and result.returncode == 5

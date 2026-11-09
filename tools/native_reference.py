@@ -19,9 +19,14 @@ def main():
     parser.add_argument('--proton-dist', type=Path, default=wines / 'build/proton/proton-build-arm64/dist')
     parser.add_argument('--fex-install', type=Path, default=wines / 'build/fex/FEX-upstream-main/install-windows')
     parser.add_argument('--dry-run', action='store_true', help='Print the launch command without copying or running')
+    parser.add_argument('--fe-config', type=Path,
+                        help='Mount a project-local fe.txt read-only (use a fresh --reference-dir)')
     parser.add_argument('wine_args', nargs=argparse.REMAINDER,
                         help='Optional Wine command instead of nfs5.exe (after --)')
     args = parser.parse_args()
+    config = args.fe_config.resolve() if args.fe_config else None
+    if config and (not config.is_relative_to(ROOT) or not config.is_file()):
+        parser.error('Race configuration must be an existing file inside this project')
     reference = args.reference_dir.resolve()
     if not reference.is_relative_to(ROOT) or reference == ROOT:
         parser.error('The writable reference directory must be inside this project')
@@ -59,6 +64,8 @@ def main():
                '--dev-bind', '/dev', '/dev', '--bind', str(reference / 'tmp'), '/tmp']
     if Path('/tmp/.X11-unix').is_dir():
         command += ['--ro-bind', '/tmp/.X11-unix', '/tmp/.X11-unix']
+    if config:
+        command += ['--ro-bind', str(config), str(game / 'fe.txt')]
     command += ['--chdir', str(game)]
     for key, value in env.items():
         command += ['--setenv', key, value]

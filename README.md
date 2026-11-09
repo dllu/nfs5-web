@@ -66,14 +66,19 @@ exposes the same eight tracks in both versions.
 Côte d'Azur's pink sunset matches the native scene; its sky mesh also produces
 its gradient in an isolated WebGPU pass. The live sun object initializes its
 visibility samples and keeps sampling during driving. Visible flare artwork,
-weather, other effects and stencil-dependent scenes still need comparisons.
+other effects and stencil-dependent scenes still need comparisons.
 Native and browser snapshots of the checked Côte d'Azur race have identical
 texture dimension/format/mip-count multisets (312 allocations), with texture/car
 tiers both 4. Both use base levels only in that scene; supplied mipmaps remain
 supported. This metadata comparison does not establish texture-pixel or
 whole-scene equivalence.
-Pyrénées' weather keys match the native game and specify zero rain/snow;
-this scene is a control, not a precipitation-art comparison. Original rain/snow
+Autobahn renders rain and translucent windshield droplets in both versions at
+1152×864×32 and maximum texture/car tiers. Its 144 weather keys match byte for
+byte, as do all 260 texture allocation descriptors. Alps renders heavy snow
+and blue fog in both versions at intensity 1; its 37 weather keys and 255
+texture descriptors also match. Different positions and animation timing
+prevent a pixel-identical weather comparison.
+Pyrénées' matching keys specify zero precipitation. Original rain/snow
 interpolation is checked against x86 execution using Autobahn and Alps data.
 Menu clicks can require retries, and one menu-return memory fault remains
 unexplained. Custom photo import/resizing, full keyboard-layout handling and
@@ -155,6 +160,11 @@ selects another path. On this machine the read-only input is:
 `.cache/native-reference/prefix` on first use. Bubblewrap keeps the source
 installation and other filesystem locations read-only, with project-local
 caches and temporary files. The reference copy retains its own settings/saves.
+`--reference-dir` selects another project-local copy. `--fe-config <file>`
+mounts a project-local `fe.txt` read-only for a reproducible race; use a fresh
+reference directory so its Wine server starts with that mount. The supplied
+native startup wrapper discards game command-line options, so race fixtures
+use `debugmode=0` and the original configuration keys in `fe.txt`.
 `--dry-run` prints the command; arguments after `--` run an alternate Wine
 program in the same prefix. The optional 32-bit
 [native memory reader](tools/native_memory.c) snapshots the reference game's
@@ -165,6 +175,7 @@ pointer before taking the snapshot. With the reader built and reference running,
 `python3 tools/native_sun.py build/native-sun` records display/sun data as JSON
 and raw snapshots; `--window <X11-ID>` also captures its image. Live reads and
 the image are separate observations, not an atomic frame capture.
+Pass the same `--reference-dir` here when inspecting another reference copy.
 Add `--weather` to include the live sky's position, weather-key intervals,
 rain/snow keyframes and ranges. A frontend without a sky reports null weather.
 The optional [texture reader](tools/native_textures.c) snapshots the tested
