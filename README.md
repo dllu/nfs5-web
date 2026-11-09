@@ -145,6 +145,8 @@ program in the same prefix. The optional 32-bit
 [native memory reader](tools/native_memory.c) snapshots the reference game's
 code/data without modifying its process. On Sway, focus the Porsche container
 before sending X11 input; activating only its X11 window can leave it unfocused.
+The reader accepts a direct address or `@address` to follow a stored 32-bit
+pointer before taking the snapshot.
 
 `src/` contains the browser host, `web/` the launcher/backend, `tools/` the
 build pipeline and `tests/` the execution checks. See
