@@ -54,7 +54,7 @@ Wasm module is about 84 MiB and retains tracing and optional execution limits.
 
 ## Validation and remaining work
 
-Manual Chrome runs render Côte d'Azur, Schwarzwald and Zone Industrielle at
+Manual Chrome runs render Côte d'Azur, Schwarzwald, Pyrénées and Zone Industrielle at
 6144×3162×32 without WebGPU errors, with active texture and car tiers both 4.
 The live camera half-FOV is 48.195°, matching Verok's aspect calculation.
 Physical L input switches the projected headlight beam on the industrial
@@ -72,6 +72,9 @@ texture dimension/format/mip-count multisets (312 allocations), with texture/car
 tiers both 4. Both use base levels only in that scene; supplied mipmaps remain
 supported. This metadata comparison does not establish texture-pixel or
 whole-scene equivalence.
+Pyrénées' weather keys match the native game and specify zero rain/snow;
+this scene is a control, not a precipitation-art comparison. Original rain/snow
+interpolation is checked against x86 execution using Autobahn and Alps data.
 Menu clicks can require retries, and one menu-return memory fault remains
 unexplained. Custom photo import/resizing, full keyboard-layout handling and
 many unused Windows APIs are unsupported. An abrupt close can lose changes
@@ -85,8 +88,9 @@ need verification. The renderer has a core depth/stencil fallback when optional
 
 Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
-visibility. Hardware/texture capability flags, fog uniforms and sampler parameters
-are compared against the original x86 OpenGL driver. GPU pixels are compared against its embedded GLSL for fog,
+visibility and weather curves. Hardware/texture capability flags, fog uniforms
+and sampler parameters are compared against the original x86 OpenGL driver.
+GPU pixels are compared against its embedded GLSL for fog,
 depth clipping, texture projection and flat/smooth color. All nine portrait
 pixel planes match native GIMME conversion.
 The checks also exercise Windows services, threads, x87 state, storage,
@@ -161,6 +165,8 @@ pointer before taking the snapshot. With the reader built and reference running,
 `python3 tools/native_sun.py build/native-sun` records display/sun data as JSON
 and raw snapshots; `--window <X11-ID>` also captures its image. Live reads and
 the image are separate observations, not an atomic frame capture.
+Add `--weather` to include the live sky's position, weather-key intervals,
+rain/snow keyframes and ranges. A frontend without a sky reports null weather.
 The optional [texture reader](tools/native_textures.c) snapshots the tested
 OpenGL3 driver's live texture list and filter metadata. The host's read-only
 `web_thrash_textures` export supplies matching browser metadata without invoking
