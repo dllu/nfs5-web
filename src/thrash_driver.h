@@ -283,6 +283,10 @@ static void r_getstate(void){uint32_t s=A32(0)&0xFFFF,stage=(A32(0)>>16)&7;if(s=
 static void r_state(void) {
     uint32_t raw=A32(0),s=raw&0xFFFF,v=A32(1);
     uint32_t stage=(raw>>16)&7;
+    /* Original 0044EB82 probes this extension with zero before enabling the
+     * detailed frontend path (6197AA). Verok's OpenGL3 driver accepts it
+     * without storing state. Our Gouraud/alpha draws support that path too. */
+    if(raw==451&&v==0)RET(1,2);
     /* State 37 is an optional timer hook. Advertising it installs a callback
      * that must be implemented, not an innocuous successful no-op. */
     if(!known_state(s)||!s||s==12||s==16||s==17||s==29||s==34||s==37||s==38||

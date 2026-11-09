@@ -89,12 +89,14 @@ Current implementation:
   for a consumer acknowledgement; presentation, readback, resize and reset
   retain their barriers. The original video decoder presents through
   framebuffer lock/unlock. The frontend submits original geometry and textures.
+  The native renderer-extension probe enables the original menu gradients,
+  highlights and shadows rather than its flat fallback.
   Multitexture, mipmap and broader 3D scene fidelity remain unverified.
 
 Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
-54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
+54 DirectSound, 31 registry, 98 window/desktop and 86 Thrash loader/ABI calls,
 27 graphics-transport, 19 lifecycle and 10 startup-configuration checks. Another
 43 blocked-wait checks cover signal races, seven parked workers, finite budgets,
 normal completion, Stop and worker-error delivery. Another 23 process-exit
@@ -114,7 +116,8 @@ An additional 15-second original-code run verifies advancing video, visible
 pixels, timer callbacks and nonzero game PCM.
 Chrome also verifies viewport fill at two window sizes, mouse/button/wheel
 coordinates through stretched menus, unbounded Run game, cooperative Stop and
-a fresh restart.
+a fresh restart. An original frontend run verifies its capability-selected
+Gouraud UI path and the actual button highlight/center/shadow pixels.
 27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
 an OffscreenCanvas rendered in a dedicated Worker. Another 47 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
@@ -134,17 +137,22 @@ bytes. Buying the first Evolution car (a 1950 356 1100 Cabriolet for 11,000),
 confirming the game's Exit and restarting Chrome restores the owned car and
 zero account balance, with identical saved bytes. Confirmed Exit writes career
 changes; the launcher's Stop only checkpoints files the game has already written.
-Race results, campaign advancement and explicit race-save/load flows remain
-untested.
+The main menu's Load Game opens the original player chooser. Race results and
+campaign advancement remain untested.
+Visual fidelity takes priority over further performance work. The active Chrome
+test profile has maximum texture, car, lighting, world and distance controls,
+projected headlights, lens flare and high sky detail selected at 6144×3456×32.
+The supplied new-player template still defaults to medium textures; highest
+quality defaults and complete rendering of the selected effects need work.
 Custom portrait conversion
 is unavailable; the original caller uses its optional-converter failure path.
 Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
-The 4K/120 Hz gameplay target remains unmet: the latest eight-second Chrome
-driving check at 3840x2160 averaged about 85 presented frames per second.
-Sustained performance across tracks remains untested. The optimized Wasm module
+The 4K/120 Hz gameplay target remains unmet. Representative performance at the
+maximum visual settings and sustained performance across tracks remain untested.
+The optimized Wasm module
 is about 84 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
 approximation of Windows NLS. Full floating-point and binary compatibility are

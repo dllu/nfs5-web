@@ -301,6 +301,46 @@ try {
   await page.locator('#movie-frame').screenshot({path:'build/original-startup.png'});
   await writeFile('build/original-startup.json',JSON.stringify(movie.result,null,2)+'\n');
   console.log(`Original intro: ${movie.result.rendering[3]} presented frames, ${movie.result.lit} visible pixels and game PCM peak ${movie.result.audio.peak.toFixed(3)}`);
+  // Exercise the original frontend, including its renderer-capability probe.
+  // Capture the source texture immediately at presentation, before another
+  // frame can overwrite it. The opaque Create Player button has a pale red
+  // highlight at the top and a dark red shadow at the bottom.
+  const menu=await page.evaluate(async()=>{
+    let runtime,watchdog;
+    try {
+      const {loadRuntime}=await import('./runtime.mjs');
+      const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;document.body.prepend(canvas);
+      runtime=await loadRuntime({canvas,persist:false,intro:false});
+      const renderer=runtime.graphics.renderer,present=renderer.present;
+      let capture,busy=false,last=0,resolveFrame;
+      const frame=new Promise(resolve=>resolveFrame=resolve);
+      renderer.present=()=>{
+        present();
+        if(capture||busy||renderer.width!==640||performance.now()-last<100)return;
+        last=performance.now();busy=true;
+        renderer.readPixels().then(pixels=>{
+          const at=(x,y)=>Array.from(pixels.subarray((y*640+x)*4,(y*640+x)*4+4));
+          const top=at(250,346),middle=at(250,353),bottom=at(250,360);
+          if(top[0]>100&&top[0]>bottom[0]+60&&top[1]>bottom[1]+20&&bottom[0]>30&&bottom[1]<10&&bottom[2]<10){
+            capture={pixels,top,middle,bottom};resolveFrame();
+          }
+        }).finally(()=>busy=false);
+      };
+      watchdog=setTimeout(()=>runtime.stop(),30000);
+      const run=runtime.runAsync(0);
+      await Promise.race([frame,run.then(result=>{throw new Error(`Original menu did not produce its gradient: ${result.error}`);})]);
+      runtime.stop();const result=await run;
+      const {module,base}=runtime;
+      if(module.HEAPU8[base+0x6197aa]!==1||!runtime.seen(0x4d96b0))throw new Error('Original frontend did not enable and execute Gouraud UI geometry');
+      const still=document.createElement('canvas');still.width=640;still.height=480;still.id='menu-frame';
+      still.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(capture.pixels),640,480),0,0);canvas.replaceWith(still);
+      return {top:capture.top,middle:capture.middle,bottom:capture.bottom,stopped:result.stopped,gpuErrors:renderer.errors};
+    }finally{clearTimeout(watchdog);runtime?.stop();runtime?.dispose();}
+  });
+  assert.equal(menu.stopped,true);assert.deepEqual(menu.gpuErrors,[]);assert.deepEqual(errors,[]);
+  await page.locator('#menu-frame').screenshot({path:'build/original-menu-gradients.png'});
+  await writeFile('build/original-menu-gradients.json',JSON.stringify(menu,null,2)+'\n');
+  console.log(`Original menu gradient verified: top ${menu.top}, middle ${menu.middle}, bottom ${menu.bottom}`);
   await page.reload();
   await page.evaluate(()=>{
     window.viewportInputs=[];

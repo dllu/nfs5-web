@@ -36,6 +36,15 @@ try {
   assert.equal(await method('_THRASH_selectdisplay@4',0),1);assert.equal(await method('_THRASH_selectdisplay@4',1),0);
   assert.equal(await method('_THRASH_window@4',1),1);assert.equal(await method('_THRASH_window@4',3),0);
   assert.equal(await method('_THRASH_setstate@8',37,1),0,'Optional timer callbacks are not falsely advertised');
+  assert.equal(await method('_THRASH_setstate@8',451,0),1,'Native frontend extension probe enables detailed menu draws');
+  assert.equal(await method('_THRASH_getstate@4',451),0xffffffff,'The native probe does not create retained state');
+  // Execute the original capability setup, which decides whether menu
+  // highlights and shadows use Gouraud geometry or the flat fallback.
+  for(const [at,name] of [[0x6bd934,'_THRASH_about@0'],[0x6bd984,'_THRASH_getstate@4'],[0x6bd97c,'_THRASH_setstate@8']])
+    put(at,await invoke('GetProcAddress',library,text(name)));
+  put(0x619784,640);put(0x619788,480);put(0x61978c,32);
+  await call(0x44e890);
+  assert.equal(view.getUint8(0x6197aa),1,'Original capability setup enables detailed frontend rendering');
   assert.equal(await method('_THRASH_setstate@8',42,1),1);assert.equal(await method('_THRASH_getstate@4',42),1);
   const before=module._web_trace_count();
   assert.equal(await method('_THRASH_setstate@8',39,0x444110),1);
