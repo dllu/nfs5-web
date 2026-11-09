@@ -81,25 +81,27 @@ Current implementation:
 - A WebGPU backend batches geometry and effect uploads, preserving Thrash
   screen-space projection, perspective UVs, flat/Gouraud diffuse colors,
   screen-linear specular RGBA addition, texture RGBA modulation, depth, blending,
-  alpha tests, clipping, fog and texture-update ordering. A 41-export Thrash
+  alpha tests, clipping, fog and texture-update ordering. Supplied mip chains,
+  separate spatial/mip filters, LOD bias and independent U/V clamp, repeat and
+  mirrored-repeat modes are implemented. A 41-export Thrash
   replacement connects guest driver calls to an OffscreenCanvas through a
   bounded shared-memory queue, with chunked texture uploads, framebuffer
   reads/writes and mode changes. Queue writes, free space and completed barriers
   wake their consumers/producers through shared-memory notifications; older
-  engines retain polling. The consumer accepts both older 25-word draw states
-  and the v3 shading extension. Flush queues an ordered submission without waiting
+  engines retain polling. The v4 consumer also accepts v1–v3 draw and texture
+  packets. Flush queues an ordered submission without waiting
   for a consumer acknowledgement; presentation, readback, resize and reset
   retain their barriers. The original video decoder presents through
   framebuffer lock/unlock. The frontend submits original geometry and textures.
   The native renderer-extension probe enables the original menu gradients,
   highlights and shadows rather than its flat fallback.
-  Multitexture, mipmap and broader 3D scene fidelity remain unverified.
+  Multitexture, projected headlights and broader 3D scene fidelity remain unverified.
 
 Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
-54 DirectSound, 31 registry, 98 window/desktop and 104 Thrash loader/ABI calls,
-42 graphics-transport, 19 lifecycle and 10 startup-configuration checks. Another
+54 DirectSound, 31 registry, 98 window/desktop and 128 Thrash loader/ABI calls,
+47 graphics-transport, 19 lifecycle and 10 startup-configuration checks. Another
 43 blocked-wait checks cover signal races, seven parked workers, finite budgets,
 normal completion, Stop and worker-error delivery. Another 23 process-exit
 checks cover unsigned exit codes, seven blocked workers and callback-driven
@@ -120,15 +122,18 @@ Chrome also verifies viewport fill at two window sizes, mouse/button/wheel
 coordinates through stretched menus, unbounded Run game, cooperative Stop and
 a fresh restart. An original frontend run verifies its capability-selected
 Gouraud UI path and the actual button highlight/center/shadow pixels.
-41 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
-an OffscreenCanvas rendered in a dedicated Worker. Another 65 checks exercise
+53 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
+an OffscreenCanvas rendered in a dedicated Worker. Another 90 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure, asynchronous flush and reuse of
 guest vertex memory before consumer execution. Pixel checks cover flat provoking
 vertices and quad/sprite splits, diffuse/specular interpolation with unequal RHW,
 specular ordering with texture alpha, alpha tests and fog, and shading changes
-between queued draws. Legacy v1/v2 packets retain Gouraud defaults and decode
-indexed/unindexed draws after idle. These checks do not measure game FPS.
+between queued draws, supplied mip colors, minification, mip blending, LOD bias,
+rectangular mip chains and independent address modes. Repeated 5.3 MiB source
+mip-chain uploads verify their last level through ring wrapping and backpressure.
+Legacy v1–v3 packets decode indexed/unindexed draws and textures and wake after
+idle. These checks do not measure game FPS.
 
 Manual Chrome navigation reaches quick-race setup and renders the Côte d'Azur
 track and Porsche 356 at 6144x3456. Holding Up accelerates the car; the original
@@ -149,6 +154,8 @@ test profile has maximum texture, car, lighting, world and distance controls,
 projected headlights, lens flare and high sky detail selected at 6144×3456×32.
 Those choices survive a browser restart; a Normandie race renders at that mode,
 accepts keyboard acceleration and reaches second gear without WebGPU errors.
+That race submits 337 textures with 4–8 supplied mip levels and uses trilinear
+sampling, LOD biases of −3.25/−1, and mixed U/V address modes through the bridge.
 The supplied new-player template still defaults to medium textures; highest
 quality defaults and complete rendering of the selected effects need work.
 One menu-return memory fault remains unexplained; it did not recur in a fresh

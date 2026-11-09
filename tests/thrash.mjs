@@ -40,6 +40,13 @@ try {
   }
   assert.equal(await method('_THRASH_setstate@8',6,3),0,'Unknown shading modes are rejected');
   assert.equal(await method('_THRASH_getstate@4',6),1,'Rejected shading mode preserves state');
+  assert.equal(await method('_THRASH_getstate@4',7),1,'Native default spatial filter is linear');
+  assert.equal(await method('_THRASH_getstate@4',11),1,'Native default mip filter is nearest');
+  for(const state of [13,65,66]) {
+    assert.equal(await method('_THRASH_setstate@8',state,2),1,'Native mirrored addressing is accepted');
+    assert.equal(await method('_THRASH_setstate@8',state,3),0,'Invalid texture addressing is rejected');
+    assert.equal(await method('_THRASH_getstate@4',state),2,'Invalid addressing preserves retained state');
+  }
   assert.equal(await method('_THRASH_selectdisplay@4',0),1);assert.equal(await method('_THRASH_selectdisplay@4',1),0);
   assert.equal(await method('_THRASH_window@4',1),1);assert.equal(await method('_THRASH_window@4',3),0);
   assert.equal(await method('_THRASH_setstate@8',37,1),0,'Optional timer callbacks are not falsely advertised');
@@ -59,6 +66,7 @@ try {
   assert.equal(module._web_trace_count()-before,2,'Original stdcall state callbacks execute');
   assert.equal(await method('_THRASH_setstate@8',39,0),1);
   assert.equal(await method('_THRASH_talloc@20',0,16,6,0,0),0);
+  assert.equal(await method('_THRASH_talloc@20',8,8,6,0,4),0,'Mip count cannot exceed the full texture chain');
   const texture=await method('_THRASH_talloc@20',8,4,6,0,0);assert(texture);
   assert.deepEqual([get(texture),get(texture+4),get(texture+8)],[8,4,6]);
   assert.equal(await method('_THRASH_tfree@4',texture),1);

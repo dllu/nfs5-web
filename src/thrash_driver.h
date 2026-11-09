@@ -19,7 +19,7 @@ static uint8_t fog_visibility[256];
 static nfspu_gpu_state render_state;
 static unsigned frames,draws,uploads,software_frames,partial_clears;
 static uint32_t vertex_stride=32,sprite_stride=32,thrash_calls;
-typedef struct {uint32_t va,gpu_id,width,height,format;uint8_t *pixels;uint32_t *palette;} texture_slot;
+typedef struct {uint32_t va,gpu_id,width,height,format,mip_levels;uint8_t *pixels;uint32_t *palette;} texture_slot;
 static texture_slot textures[MAX_TEXTURES];
 static float as_float(uint32_t value){float f;memcpy(&f,&value,4);return f;}
 static void *th_guest_alloc(uint32_t n){return (void*)ADDR(allocate(n));}
@@ -223,8 +223,13 @@ static void r_spritemesh(void){uint32_t n=A32(0),v=A32(1),idx=A32(2);for(uint32_
 
 static void r_talloc(void) {
     uint32_t w=A32(0),h=A32(1),f=A32(2);if(!w||!h||w>16384||h>16384)RET(0,5);
+    /* Native +0x10 is the additional mip count, from argument 5's low word.
+     * _THRASH_tupdate uploads the supplied levels consecutively, largest first. */
+    uint32_t levels=(A32(4)&0xFFFF)+1,max_levels=1;
+    for(uint32_t extent=w>h?w:h;extent>1;extent>>=1)max_levels++;
+    if(levels>max_levels)RET(0,5);
     for(int i=0;i<MAX_TEXTURES;i++)if(!textures[i].va) {
-        uint32_t va=hle_va(hle_alloc(128));textures[i]=(texture_slot){va,0,w,h,f};
+        uint32_t va=hle_va(hle_alloc(128));textures[i]=(texture_slot){va,0,w,h,f,levels};
         MEM32(va)=w;MEM32(va+4)=h;MEM32(va+8)=f;MEM32(va+12)=A32(3);MEM32(va+16)=A32(4);RET(va,5);
     } RET(0,5);
 }
@@ -233,7 +238,7 @@ static void r_tfree(void){texture_slot *t=find_texture(A32(0));if(t)release_text
 static void r_treset(void){for(int i=0;i<MAX_TEXTURES;i++)if(textures[i].va)release_texture(&textures[i]);render_state.texture=0;RET(1,0);}
 static void r_tupdate(void) {
     texture_slot *t=find_texture(A32(0));if(!t||!open_gpu())RET(0,3);
-    size_t n=(size_t)t->width*t->height,bytes=0;
+    size_t n=gpu_texture_pixels(t->width,t->height,t->mip_levels),bytes=0;
     if(t->format==1)bytes=(n+1)/2;else if(t->format==2)bytes=n;
     else if(t->format==3||t->format==4||t->format==7)bytes=n*2;
     else if(t->format==5)bytes=n*3;else if(t->format==6)bytes=n*4;else RET(0,3);
@@ -258,7 +263,7 @@ static void r_tupdate(void) {
         }
         rgba[i*4]=r;rgba[i*4+1]=g;rgba[i*4+2]=b;rgba[i*4+3]=a;
     }
-    int ok=1;if(t->gpu_id)ok=gpu->texture_update(t->gpu_id,rgba);else t->gpu_id=gpu->texture_create(t->width,t->height,rgba);
+    int ok=1;if(t->gpu_id)ok=gpu->texture_update(t->gpu_id,rgba);else t->gpu_id=gpu->texture_create(t->width,t->height,rgba,t->mip_levels);
     
     
     if(state_values[0][1]==t->va)render_state.texture=t->gpu_id;
@@ -292,6 +297,7 @@ static void r_state(void) {
     if(s==10&&v!=0&&v!=2)RET(0,2);
     if(s==2&&v>2)RET(0,2);
     if(s==6&&v>2)RET(0,2);
+    if((s==13||s==65||s==66)&&v>2)RET(0,2);
     if(s==30&&(v<32||v>128))RET(0,2);
     if(s==21&&v!=0&&v!=1&&v!=2&&v!=4&&v!=8)RET(0,2);
     uint32_t previous=state_values[stage][s];
@@ -304,9 +310,15 @@ static void r_state(void) {
     case 4:render_state.depth_test=render_state.depth_write=v!=0;break;
     /* Native 10006716: flat, Gouraud, Gouraud with specular addition. */
     case 6:render_state.shade_mode=v;break;
-    case 7:case 47:case 48:render_state.address_wrap=v==1;break;
+    /* Native 10008AF1 uses state 7 for spatial filtering and 11 for mips.
+     * States 13/65/66 select clamp, repeat or mirrored repeat on both/U/V. */
+    case 7:render_state.filter_linear=v!=0;break;
+    case 8:render_state.mip_lod_bias=as_float(v);break;
+    case 11:render_state.mip_filter=v==0?0:v==1?1:2;break;
+    case 13:render_state.address_u=render_state.address_v=v;render_state.address_wrap=v==1;break;
+    case 65:render_state.address_u=v;break;
+    case 66:render_state.address_v=v;break;
     case 10:render_state.blend_enable=v==2;break;
-    case 11:case 13:case 65:case 66:render_state.filter_linear=v!=0;break;
     case 14:{float density=v>0&&v<4096?1.0f/v:as_float(v);render_state.fog_density=isfinite(density)&&density>=0?density:0;break;}
     case 15:render_state.fog_color=v&0x00FFFFFFu;break;
     case 19:callbacks=v;break;
@@ -367,7 +379,7 @@ static uint8_t *decode_window_pixels(uint32_t p,uint32_t w,uint32_t h) {
 static int blit_pixels(uint32_t p,uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     if(!open_gpu())return 0;
     uint8_t *rgba=decode_window_pixels(p,w,h);if(!rgba)return 0;
-    uint32_t tex=gpu->texture_create(w,h,rgba);free(rgba);if(!tex)return 0;
+    uint32_t tex=gpu->texture_create(w,h,rgba,1);free(rgba);if(!tex)return 0;
     nfspu_gpu_vertex v[4]={{x,y,0,1,0xFFFFFFFF,0,0,0},{x+w,y,0,1,0xFFFFFFFF,0,1,0},{x+w,y+h,0,1,0xFFFFFFFF,0,1,1},{x,y+h,0,1,0xFFFFFFFF,0,0,1}};
     const uint32_t idx[]={0,1,2,0,2,3};nfspu_gpu_state s={.texture=tex,.src_blend=2,.dst_blend=1,.cull=1};
     int ok=gpu->draw(v,4,idx,6,&s);gpu->texture_destroy(tex);return ok;
@@ -441,7 +453,7 @@ static void thrash_reset(void) {
     width=640;height=480;color_bits=16;opened=trace=software_fog=fog_table_valid=0;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
     frames=draws=uploads=software_frames=partial_clears=thrash_calls=0;vertex_stride=sprite_stride=32;
-    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.address_wrap=1,.cull=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1};
-    state_values[0][6]=1;
+    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1};
+    state_values[0][6]=state_values[0][7]=state_values[0][11]=1;
 }
 #endif

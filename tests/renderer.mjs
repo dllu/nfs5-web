@@ -120,6 +120,42 @@ try {
     renderer.draw(quad(0,0,32,64),mesh,{texture:3}); renderer.textureUpdate(3,Uint8Array.of(0,255,0,255));
     renderer.draw(quad(32,0,32,64),mesh,{texture:3}); pixels = await renderer.readPixels();
     expect(pixel(pixels,16,32),[255,0,0,255],'draw before texture mutation'); expect(pixel(pixels,48,32),[0,255,0,255],'draw after texture mutation');
+    // Deliberately distinct source levels expose missing uploads or an
+    // incorrect LOD/filter choice even when base-level rendering looks fine.
+    const mipBytes=new Uint8Array((64+16+4+1)*4);
+    [[0,64,[255,0,0,255]],[64,16,[0,255,0,255]],[80,4,[0,0,255,255]],[84,1,[255,255,255,255]]]
+      .forEach(([start,count,color])=>{for(let i=start;i<start+count;i++)mipBytes.set(color,i*4);});
+    renderer.textureCreate(5,8,8,mipBytes,4);
+    function scaledUVQuad(x,y,w,h,scale) {
+      return pack([{x,y,u:0,v:0},{x:x+w,y,u:scale,v:0},
+        {x:x+w,y:y+h,u:scale,v:scale},{x,y:y+h,u:0,v:scale}]);
+    }
+    const minified=scaledUVQuad(0,0,64,64,32),mipState={texture:5,filter_linear:0,mip_filter:1};
+    renderer.clear(0xff000000);renderer.draw(minified,mesh,{...mipState,mip_filter:0});
+    expect(pixel(await renderer.readPixels(),16,16),[255,0,0,255],'disabled mip filter selects base level');
+    renderer.draw(minified,mesh,mipState);
+    expect(pixel(await renderer.readPixels(),16,16),[0,0,255,255],'implicit minification selects supplied level two');
+    renderer.draw(minified,mesh,{...mipState,mip_lod_bias:-1});
+    expect(pixel(await renderer.readPixels(),16,16),[0,255,0,255],'negative LOD bias preserves finer detail');
+    renderer.draw(minified,mesh,{...mipState,mip_lod_bias:1});
+    expect(pixel(await renderer.readPixels(),16,16),[255,255,255,255],'positive LOD bias selects coarser detail');
+    renderer.draw(scaledUVQuad(0,0,64,64,16*Math.SQRT2),mesh,{...mipState,mip_filter:2});
+    expect(pixel(await renderer.readPixels(),16,16),[0,128,128,255],'linear mip filtering blends adjacent supplied levels',2);
+    renderer.draw(scaledUVQuad(0,0,64,64,1),mesh,mipState);
+    expect(pixel(await renderer.readPixels(),16,16),[255,0,0,255],'magnification uses base level');
+    renderer.clear(0xff000000);renderer.draw(scaledUVQuad(0,0,32,64,8),mesh,mipState);
+    const updatedMips=mipBytes.slice();for(let i=64;i<80;i++)updatedMips.set([255,255,0,255],i*4);
+    renderer.textureUpdate(5,updatedMips);renderer.draw(scaledUVQuad(32,0,32,64,8),mesh,mipState);pixels=await renderer.readPixels();
+    expect(pixel(pixels,8,16),[0,255,0,255],'queued draw retains old mip data');
+    expect(pixel(pixels,40,16),[255,255,0,255],'texture mutation replaces every supplied level');
+    const narrow=new Uint8Array((8+4+2+1)*4);for(let i=0;i<15;i++)narrow.set(i<12?[255,0,0,255]:[0,255,0,255],i*4);
+    renderer.textureCreate(6,1,8,narrow,4);renderer.draw(scaledUVQuad(0,0,64,64,32),mesh,{texture:6,mip_filter:1,filter_linear:0});
+    expect(pixel(await renderer.readPixels(),16,16),[0,255,0,255],'rectangular mip chain retains a one-texel axis');
+    renderer.textureUpdate(1,texels);
+    for(const [u,v,wanted] of [[0,1,[255,255,255,255]],[1,0,[255,0,0,255]],[2,2,[0,255,0,255]]]) {
+      renderer.draw(quad(0,0,64,64,0xffffffff,{u:1.25,v:-.25}),mesh,{texture:1,filter_linear:0,address_u:u,address_v:v});
+      expect(pixel(await renderer.readPixels(),16,16),wanted,'independent clamp/repeat/mirror texture axes');
+    }
     renderer.clear(0xff000000); const before = renderer.stats.batches;
     for (let i = 0; i < 100; i++) renderer.draw(quad(0,0,64,64,0xff00ffff),mesh);
     pixels = await renderer.readPixels(); expect([renderer.stats.batches-before],[1],'consecutive draw batching'); expect(pixel(pixels,16,16),[0,255,255,255],'batched vertices/indices');
@@ -186,7 +222,10 @@ try {
     const library=await invoke('LoadLibraryA',text('.\\drivers\\opengl3z'));
     const functions=new Map();
     async function method(name,...args){if(!functions.has(name))functions.set(name,await invoke('GetProcAddress',library,text(name)));return call(functions.get(name),args);}
-    function expect(got,wanted,label){if(got!==wanted)throw new Error(`${label}: ${got.toString(16)} != ${wanted.toString(16)}`);checks++;}
+    function expect(got,wanted,label,tolerance=0){
+      const differs=tolerance?[0,8,16,24].some(shift=>Math.abs((got>>>shift&255)-(wanted>>>shift&255))>tolerance):got!==wanted;
+      if(differs)throw new Error(`${label}: ${got.toString(16)} != ${wanted.toString(16)}`);checks++;
+    }
     const descriptor=await method('_THRASH_about@0'),count=get(descriptor+60),modes=get(descriptor+64);
     function mode(w,h){for(let i=1;i<=count;i++)if(get(modes+i*40)===w&&get(modes+i*40+4)===h&&get(modes+i*40+8)===32)return i;throw new Error('Missing mode');}
     expect(await method('_THRASH_setvideomode@12',mode(640,480),0,2),1,'video mode');
@@ -248,17 +287,49 @@ try {
     vertex(vertices,0,0);vertex(vertices+32,64,64,0xffffffff,1,1);
     await method('_THRASH_drawsprite@8',vertices,vertices+32);
     for(const [x,y,color] of [[8,8,0xffff0000],[48,8,0xff00ff00],[8,48,0xff0000ff],[48,48,0xffffffff]])expect(await pixel(x,y),color,'RGB565 texture orientation');
+    vertex(vertices,0,0,0xffffffff,.5,.5);vertex(vertices+32,64,0,0xffffffff,.5,.5);vertex(vertices+64,0,64,0xffffffff,.5,.5);
+    await method('_THRASH_setstate@8',7,1);
+    for(const [state,value] of [[11,0],[13,1],[65,2],[66,0]]) {
+      await method('_THRASH_setstate@8',state,value);await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+      expect(await pixel(8,8),0xff808080,'native addressing/mip state preserves spatial bilinear filter',1);
+    }
+    await method('_THRASH_setstate@8',7,0);
+    for(let i=0;i<3;i++){view.setFloat32(vertices+i*32+24,1.25,true);view.setFloat32(vertices+i*32+28,-.25,true);}
+    for(const [u,v,color] of [[0,1,0xffffffff],[1,0,0xffff0000],[2,2,0xff00ff00]]) {
+      await method('_THRASH_setstate@8',65,u);await method('_THRASH_setstate@8',66,v);
+      await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+      expect(await pixel(8,8),color,'native independent U/V texture addressing');
+    }
+    await method('_THRASH_setstate@8',13,1);await method('_THRASH_setstate@8',47,0);await method('_THRASH_setstate@8',48,0);
+    await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    expect(await pixel(8,8),0xff0000ff,'stencil states do not overwrite repeat texture addressing');
     await method('_THRASH_tfree@4',texture);
-    const large=await method('_THRASH_talloc@20',1024,1024,6,0,0);
+    const mipTexture=await method('_THRASH_talloc@20',4,4,4,0,2);
+    for(let i=0;i<21;i++)view.setUint16(image+i*2,i<16?0xf800:i<20?0x07e0:0x001f,true);
+    expect(await method('_THRASH_tupdate@12',mipTexture,image,0),mipTexture,'native RGB565 mip chain upload');
+    await method('_THRASH_settexture@4',mipTexture);await method('_THRASH_setstate@8',13,0);
+    vertex(vertices,0,0);vertex(vertices+32,64,0,0xffffffff,64,0);vertex(vertices+64,0,64,0xffffffff,0,64);
+    for(const [filter,bias,color] of [[0,0,0xffff0000],[1,0,0xff0000ff],[1,0xbf800000,0xff00ff00]]) {
+      await method('_THRASH_setstate@8',11,filter);await method('_THRASH_setstate@8',8,bias);
+      await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+      expect(await pixel(8,8),color,'native source mips and LOD bias reach shader');
+    }
+    await method('_THRASH_tfree@4',mipTexture);await method('_THRASH_setstate@8',8,0);await method('_THRASH_setstate@8',11,0);
+    const large=await method('_THRASH_talloc@20',1024,1024,6,0,10),largePixels=(4**11-1)/3;
     for(let i=0;i<5;i++){
-      new Uint32Array(module.HEAPU8.buffer,base+image,1024*1024).fill((0xff000000|(i*32)<<16|0x2233)>>>0);
+      const chain=new Uint32Array(module.HEAPU8.buffer,base+image,largePixels);
+      chain.fill((0xff000000|(i*32)<<16|0x2233)>>>0);chain[largePixels-1]=0xff12ab34;
       expect(await method('_THRASH_tupdate@12',large,image,0),large,'large texture update');
     }
     const transport=module._web_gpu_transport(),header=new Uint32Array(module.HEAPU8.buffer,transport,8);
     if(header[0]<=header[5])throw new Error('The native command ring did not wrap');checks++;
     await method('_THRASH_settexture@4',large);vertex(vertices,0,0);vertex(vertices+32,640,480,0xffffffff,1,1);
     await method('_THRASH_drawsprite@8',vertices,vertices+32);
-    expect(await pixel(200,200),0xff802233,'wrapped texture command bytes');await method('_THRASH_tfree@4',large);
+    expect(await pixel(200,200),0xff802233,'wrapped texture command bytes');
+    await method('_THRASH_setstate@8',11,1);await method('_THRASH_setstate@8',8,0x41800000);
+    await method('_THRASH_drawsprite@8',vertices,vertices+32);
+    expect(await pixel(200,200),0xff12ab34,'wrapped upload includes smallest mip at the end of the chain');
+    await method('_THRASH_setstate@8',11,0);await method('_THRASH_setstate@8',8,0);await method('_THRASH_tfree@4',large);
     await method('_THRASH_setvideomode@12',mode(3840,2160),0,2);await method('_THRASH_clip@16',0,0,3840,2160);
     await invoke('GetClientRect',hwnd,out);expect(get(out+8),3840,'4K client width');expect(get(out+12),2160,'4K client height');
     await invoke('GetMessageA',out,hwnd,5,5);expect(get(out+12),(2160<<16)|3840,'4K WM_SIZE');
@@ -310,9 +381,9 @@ try {
   assert.deepEqual(result.fallback.errors,[]);
   result.legacyDraws=await page.evaluate(async()=>{
     const {attachGraphics}=await import('./graphics.mjs'),results=[];
-    for(const version of [1,2]) {
-      // Original 25-word states must still decode both indexed and unindexed
-      // vertex payloads, using Gouraud without specular as their default.
+    for(const version of [1,2,3]) {
+      // Original 25-word and v3 26-word states still decode indexed and
+      // unindexed vertices without acquiring the new sampler controls.
       const memory=new SharedArrayBuffer(32768),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
       header[5]=ring.length;header[6]=version;let sequence=0;
       const module={HEAPU8:heap,_web_gpu_transport:()=>0,_web_gpu_attach:()=>{header[3]=1;},
@@ -322,25 +393,39 @@ try {
       function send(opcode,data) {
         const packet=Uint32Array.of(data.length+3,opcode,++sequence,...data),start=Atomics.load(header,0);
         packet.forEach((word,i)=>ring[(start+i)%ring.length]=word);Atomics.store(header,0,start+packet.length);
-        if(version===2)Atomics.notify(header,0);
+        if(version>=2)Atomics.notify(header,0);
       }
       try {
         send(1,Uint32Array.of(64,64));
-        const draw=new Uint32Array(25+2+24+3),floats=new Float32Array(draw.buffer);
-        draw[6]=draw[7]=draw[8]=draw[22]=1;draw[16]=4;floats[14]=floats[24]=1;draw[25]=draw[26]=3;
+        const stateSize=version===3?26:25,start=stateSize+2,end=start+24;
+        const draw=new Uint32Array(end+3),floats=new Float32Array(draw.buffer);
+        draw[6]=draw[7]=draw[8]=draw[22]=1;draw[16]=4;floats[14]=floats[24]=1;
+        if(version===3)draw[25]=1;
+        draw[stateSize]=draw[stateSize+1]=3;
         [[0,0,1,0xffff0000],[64,0,.25,0xff00ff00],[0,64,.5,0xff0000ff]].forEach(([x,y,rhw,color],i)=>{
-          const at=27+i*8;floats[at]=x;floats[at+1]=y;floats[at+2]=.5;floats[at+3]=rhw;draw[at+4]=color;draw[at+5]=0xffffffff;
+          const at=start+i*8;floats[at]=x;floats[at+1]=y;floats[at+2]=.5;floats[at+3]=rhw;draw[at+4]=color;draw[at+5]=0xffffffff;
         });
-        draw.set([0,1,2],51);send(4,draw);send(3,new Uint32Array());await graphics.settle();
+        draw.set([0,1,2],end);send(4,draw);send(3,new Uint32Array());await graphics.settle();
         const sample=bytes=>Array.from(bytes.slice((8*64+8)*4,(8*64+8)*4+4));
         const indexed=sample(await graphics.renderer.readPixels());
         if(indexed.some((v,i)=>Math.abs(v-[187,34,34,255][i])>1))throw new Error(`Legacy v${version} indexed Gouraud: ${indexed}`);
         await new Promise(resolve=>setTimeout(resolve,25));
-        draw[26]=0;for(let i=0;i<3;i++)draw[27+i*8+4]=0xff00ff00;
-        send(4,draw.subarray(0,51));send(3,new Uint32Array());await graphics.settle();
+        draw[stateSize+1]=0;for(let i=0;i<3;i++)draw[start+i*8+4]=0xff00ff00;
+        send(4,draw.subarray(0,end));send(3,new Uint32Array());
+        const deadline=performance.now()+2000;
+        while(Atomics.load(header,2)!==sequence) {
+          if(performance.now()>deadline)throw new Error(`Legacy v${version} consumer did not wake after idle`);
+          await new Promise(resolve=>setTimeout(resolve,1));
+        }
+        await graphics.settle();
         const unindexed=sample(await graphics.renderer.readPixels());
         if(unindexed.join()!=='0,255,0,255')throw new Error(`Legacy v${version} unindexed draw: ${unindexed}`);
-        results.push({version,indexed,unindexed,errors:graphics.renderer.errors.slice()});
+        send(5,Uint32Array.of(7,1,1));send(6,Uint32Array.of(7,0,4,4,0xff0000ff));
+        draw[0]=7;for(let i=0;i<3;i++)draw[start+i*8+4]=0xffffffff;
+        send(4,draw.subarray(0,end));await graphics.settle();
+        const textured=sample(await graphics.renderer.readPixels());
+        if(textured.join()!=='255,0,0,255')throw new Error(`Legacy v${version} texture packet: ${textured}`);
+        results.push({version,indexed,unindexed,textured,errors:graphics.renderer.errors.slice()});
       } finally {graphics.close();canvas.remove();}
     }
     return results;

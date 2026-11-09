@@ -36,7 +36,7 @@ struct VertexOutput {
     return output;
 }
 @fragment fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
-    let texel = textureSample(image, image_sampler, input.uv);
+    let texel = textureSampleBias(image, image_sampler, input.uv, fx.view.w);
     var diffuse = input.color;
     if fx.view.z < 0.5 { diffuse = input.flat_color; }
     var color = vec4f(texel.rgb * diffuse.rgb, texel.a);

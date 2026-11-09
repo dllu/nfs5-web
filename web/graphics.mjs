@@ -1,8 +1,9 @@
-import { createRenderer } from './renderer.mjs';
+import { createRenderer, mipLayout } from './renderer.mjs';
 
 const stateFields = ['texture','depth_test','depth_write','blend_enable','src_blend','dst_blend','filter_linear','address_wrap','cull',
   'alpha_test','alpha_ref','fog_enable','fog_color','fog_near','fog_far','primitive','depth_func',
-  'scissor_enable','scissor_x','scissor_y','scissor_w','scissor_h','alpha_modulate','fog_mode','fog_density','shade_mode'];
+  'scissor_enable','scissor_x','scissor_y','scissor_w','scissor_h','alpha_modulate','fog_mode','fog_density','shade_mode',
+  'mip_filter','address_u','address_v','mip_lod_bias'];
 
 export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true } = {}) {
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
@@ -13,8 +14,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
     const version=Atomics.load(header,6);
-    if(![1,2,3].includes(version))throw new Error('Unsupported graphics transport version');
-    stateSize=version>=3?26:25;
+    if(![1,2,3,4].includes(version))throw new Error('Unsupported graphics transport version');
+    stateSize=version>=4?30:version>=3?26:25;
     const size=Atomics.load(header,5)>>>0;
     if(!size || (size&(size-1)))throw new Error('Invalid graphics queue size');
     ring=new Uint32Array(module.HEAPU8.buffer,pointer+32,size);
@@ -36,7 +37,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     if(!stateWords || stateWords.some((v,i)=>v!==data[i])) {
       stateWords=data.slice(0,stateSize);stateCache={serial:++serial};
       const floats=new Float32Array(stateWords.buffer);
-      for(let i=0;i<stateSize;i++)stateCache[stateFields[i]]=i===13||i===14||i===24?floats[i]:stateWords[i];
+      for(let i=0;i<stateSize;i++)stateCache[stateFields[i]]=i===13||i===14||i===24||i===29?floats[i]:stateWords[i];
     }
     return stateCache;
   }
@@ -63,7 +64,10 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
           if(data.length!==vertexEnd+indices)throw new Error('Invalid draw packet length');
           renderer.draw(new Uint8Array(data.buffer,data.byteOffset+vertexStart*4,vertices*32),indices?data.subarray(vertexEnd):null,state(data));break;
         }
-        case 5:renderer.textureCreate(data[0],data[1],data[2]);uploads.set(data[0],{size:data[1]*data[2]*4,next:0,bytes:null});break;
+        case 5:{
+          const levels=data[3]??1,size=mipLayout(data[1],data[2],levels).size;
+          renderer.textureCreate(data[0],data[1],data[2],null,levels);uploads.set(data[0],{size,next:0,bytes:null});break;
+        }
         case 6:{
           const [id,offset,length,total]=data,entry=uploads.get(id);
           if(!entry || total!==entry.size || offset!==entry.next || length>total-offset || data.length*4!==length+16)throw new Error('Invalid texture upload');

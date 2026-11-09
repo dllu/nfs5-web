@@ -6,7 +6,18 @@ const defaults = {
   fog_enable: 0, fog_color: 0, fog_near: 0, fog_far: 1, primitive: 0, depth_func: 4,
   scissor_enable: 0, scissor_x: 0, scissor_y: 0, scissor_w: 0, scissor_h: 0,
   alpha_modulate: 0, fog_mode: 0, fog_density: 1, shade_mode: 1,
+  mip_filter: 0, address_u: null, address_v: null, mip_lod_bias: 0,
 };
+export function mipLayout(width,height,levels=1) {
+  if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||
+     !Number.isInteger(levels)||levels<1||levels>1+Math.floor(Math.log2(Math.max(width,height))))throw new Error('Invalid texture mip layout');
+  const layout=[];let offset=0;
+  for(let level=0;level<levels;level++) {
+    const length=width*height*4;layout.push({level,width,height,offset,length});offset+=length;
+    width=Math.max(1,width>>1);height=Math.max(1,height>>1);
+  }
+  return {layout,size:offset};
+}
 const rgba = value => [(value >>> 16 & 255) / 255, (value >>> 8 & 255) / 255, (value & 255) / 255, (value >>> 24) / 255];
 const blendFactors = ['one','zero','one','src','one-minus-src','src-alpha','one-minus-src-alpha','dst-alpha','one-minus-dst-alpha','dst','one-minus-dst','src-alpha-saturated'];
 const compares = ['less-equal','never','less','equal','less-equal','greater','not-equal','greater-equal','always'];
@@ -59,17 +70,20 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
 
   function check() { if (closed) throw new Error('Renderer is closed'); if (errors.length) throw new Error(errors[0]); }
   function sampler(state) {
-    const key = `${Boolean(state.filter_linear)}:${Boolean(state.address_wrap)}`;
+    const key = samplerKey(state);
     if (!samplers.has(key)) samplers.set(key, device.createSampler({
       magFilter: state.filter_linear ? 'linear' : 'nearest', minFilter: state.filter_linear ? 'linear' : 'nearest',
-      addressModeU: state.address_wrap ? 'repeat' : 'clamp-to-edge', addressModeV: state.address_wrap ? 'repeat' : 'clamp-to-edge',
+      mipmapFilter:state.mip_filter===2?'linear':'nearest',lodMaxClamp:state.mip_filter?32:0,
+      addressModeU:['clamp-to-edge','repeat','mirror-repeat'][state.address_u],
+      addressModeV:['clamp-to-edge','repeat','mirror-repeat'][state.address_v],
     }));
     return samplers.get(key);
   }
+  function samplerKey(state) {return `${Boolean(state.filter_linear)}:${state.mip_filter}:${state.address_u}:${state.address_v}`;}
   function textureGroup(state) {
     const entry = textures.get(state.texture);
     if (!entry) throw new Error(`Unknown GPU texture ${state.texture}`);
-    const key = `${Boolean(state.filter_linear)}:${Boolean(state.address_wrap)}`;
+    const key = samplerKey(state);
     if (!entry.groups.has(key)) entry.groups.set(key, device.createBindGroup({ layout: textureLayout, entries: [
       { binding: 0, resource: entry.texture.createView() }, { binding: 1, resource: sampler(state) },
     ] }));
@@ -152,6 +166,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   }
   function draw(data, mesh, requested = {}) {
     check(); const state = { ...defaults, ...requested };
+    state.address_u??=state.address_wrap?1:0;state.address_v??=state.address_wrap?1:0;
     if (!(data instanceof Uint8Array) || data.byteLength % 32) throw new Error('Invalid Thrash vertex buffer');
     const count = data.byteLength / 32, n = mesh ? mesh.length : count; if (!n) return;
     const key = state.serial === undefined ? Object.values(state).join(':') : `${state.serial}:${state.primitive}`;
@@ -170,21 +185,26 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     if (last?.type === 'draw' && last.key === key) last.count += n;
     else {
       uniforms = grow(uniforms, (uniformBytes + 256) / 4);
-      const values = [width,height,state.shade_mode,0,...rgba(state.fog_color),state.alpha_test,state.alpha_ref/255,state.fog_enable,state.texture ? state.alpha_modulate : 1,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
+      const values = [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,...rgba(state.fog_color),state.alpha_test,state.alpha_ref/255,state.fog_enable,state.texture ? state.alpha_modulate : 1,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
       uniforms.set(values, uniformBytes / 4);
       operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: uniformBytes }); uniformBytes += 256;
     }
     vertexBytes += data.byteLength; stats.draws++; stats.vertices += count;
   }
-  function textureCreate(id, w, h, pixels = null) {
-    check(); if (textures.has(id) || !w || !h || (pixels && pixels.length !== w*h*4)) throw new Error('Invalid texture creation');
-    const texture = device.createTexture({ size: [w,h], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-    textures.set(id,{ texture, width: w, height: h, groups: new Map() });
-    if(pixels)device.queue.writeTexture({ texture }, pixels, { bytesPerRow: w*4, rowsPerImage: h }, [w,h]);
+  function textureCreate(id, w, h, pixels = null, mipLevels = 1) {
+    check();const {layout,size}=mipLayout(w,h,mipLevels);
+    if (textures.has(id) || w>device.limits.maxTextureDimension2D || h>device.limits.maxTextureDimension2D || (pixels && pixels.length!==size)) throw new Error('Invalid texture creation');
+    const texture = device.createTexture({ size: [w,h], mipLevelCount:mipLevels, format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    const entry={texture,layout,size,groups:new Map()};textures.set(id,entry);
+    if(pixels)writeTexture(entry,pixels);
+  }
+  function writeTexture(entry,pixels) {
+    for(const {level,width,height,offset,length} of entry.layout)
+      device.queue.writeTexture({texture:entry.texture,mipLevel:level},pixels.subarray(offset,offset+length),{bytesPerRow:width*4,rowsPerImage:height},[width,height]);
   }
   function textureUpdate(id, pixels) {
-    check(); const entry = textures.get(id); if (!entry || pixels.length !== entry.width*entry.height*4) throw new Error('Invalid texture update');
-    flush(); device.queue.writeTexture({ texture: entry.texture }, pixels, { bytesPerRow: entry.width*4, rowsPerImage: entry.height }, [entry.width,entry.height]);
+    check(); const entry = textures.get(id); if (!entry || pixels.length !== entry.size) throw new Error('Invalid texture update');
+    flush();writeTexture(entry,pixels);
   }
   function textureDestroy(id) { check(); if (!id) return; flush(); textures.get(id)?.texture.destroy(); textures.delete(id); }
   function reset() { flush();for(const [id,entry] of textures)if(id){entry.texture.destroy();textures.delete(id);}clear(0xff000000); }

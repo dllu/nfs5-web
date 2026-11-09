@@ -73,7 +73,8 @@ try {
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
-  assert.equal(Atomics.load(header,6),3,'Extended shading state uses transport v3');checks++;
+  assert.equal(Atomics.load(header,6),4,'Extended sampling state uses transport v4');checks++;
+  for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000]])assert.equal(await call(methods.setstate,[state,value]),1);
   const vertex=data+256;
   for(let i=0;i<3;i++) {
     [i===1?64:0,i===2?64:0,.5,1].forEach((v,j)=>view.setFloat32(vertex+i*32+j*4,v,true));
@@ -82,11 +83,12 @@ try {
   for(const mode of [0,2,1]) {
     assert.equal(await call(methods.setstate,[6,mode]),1);
     assert.equal(await call(methods.drawtri,[vertex,vertex+32,vertex+64]),1);
-    const draw=await packet(4),state=draw.words.subarray(3,29);
+    const draw=await packet(4),state=draw.words.subarray(3,33);
     assert.equal(state[25],mode,'Shading mode survives queued state snapshot');
     assert.equal(state[22],1,'Native texture alpha modulation is enabled');
-    assert.deepEqual(Array.from(draw.words.slice(29,31)),[3,0],'Extended-state vertex/index counts');
-    assert.equal(draw.words[35],0x80402010);assert.equal(draw.words[36],0x40203040);checks++;
+    assert.deepEqual(Array.from(state.slice(26)),[2,1,2,0xbf800000],'Independent mip/U/V/bias sampling state');
+    assert.deepEqual(Array.from(draw.words.slice(33,35)),[3,0],'Extended-state vertex/index counts');
+    assert.equal(draw.words[39],0x80402010);assert.equal(draw.words[40],0x40203040);checks++;
     acknowledge(draw);
   }
   const present=await barrier(methods.pageflip,[],3);acknowledge(present);assert.equal(await finish(),1);
