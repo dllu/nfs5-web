@@ -65,8 +65,9 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8000)
+    parser.add_argument('--directory', type=Path, default=Path(__file__).resolve().parents[1] / 'dist')
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1] / 'dist'
+    root = args.directory.resolve()
     server = ThreadingHTTPServer(('127.0.0.1', args.port), partial(Handler, directory=str(root)))
     print(f'Local: http://127.0.0.1:{args.port}', flush=True)
     try:

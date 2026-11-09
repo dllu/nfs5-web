@@ -1,6 +1,6 @@
 // One producer (the application Worker), one real-time AudioWorklet consumer.
 // Only the producer enters Wasm; the audio callback never waits on a VM lock.
-export async function openAudio() {
+export async function openAudio({waitForResume=true}={}) {
   const context = new AudioContext({ latencyHint: 'interactive' });
   try {
     const resume = context.resume();
@@ -8,9 +8,10 @@ export async function openAudio() {
     const state = new Int32Array(buffer, 0, 8); Atomics.store(state, 5, 1);
     await context.audioWorklet.addModule(new URL('./audio-worklet.mjs', import.meta.url));
     const node = new AudioWorkletNode(context, 'nfs5-audio', { numberOfInputs: 0, outputChannelCount: [2], processorOptions: { buffer } });
-    node.connect(context.destination); await resume;
+    node.connect(context.destination); if(waitForResume)await resume;else resume.catch(()=>{});
     return {
       configuration: { buffer, rate: context.sampleRate },
+      resume: () => context.resume(),
       stats: () => ({ rendered: Atomics.load(state, 3) >>> 0, missing: Atomics.load(state, 2) >>> 0, peak: Atomics.load(state, 4) / 32767, state: context.state }),
       async close() { Atomics.store(state, 5, 0); node.disconnect(); await context.close(); },
     };

@@ -10,7 +10,8 @@
     "test:loading": "node tests/loading.mjs",
     "test:navigation": "node tests/navigation.mjs",
     "test:renderer": "node tests/renderer.mjs && node tests/native-shader.mjs",
-    "test:transport": "node tests/gpu-transport.mjs"
+    "test:transport": "node tests/gpu-transport.mjs",
+    "build:public": "python3 tools/public_build.py"
   },
   "devDependencies": {
     "playwright-core": "1.58.2"

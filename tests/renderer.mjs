@@ -44,6 +44,31 @@ try {
       if (value.length !== wanted.length || value.some((v, i) => Math.abs(v-wanted[i]) > tolerance)) throw new Error(`${label}: ${value} != ${wanted}`);
       checks++;
     }
+    // Real frontend picture topology: two triangles per rotating strip. A
+    // subpixel gap across the shared image edge must not leave a black row.
+    renderer.resize(640,480);
+    renderer.textureCreate(970,8,8,new Uint8Array(8*8*4).fill(255));
+    const panel={texture:970,address_wrap:0,depth_test:1,depth_write:1,blend_enable:1};
+    const strip=(top,bottom,v0,v1)=>pack([
+      {x:100,y:bottom,u:0,v:v1},{x:400,y:top,u:1,v:v0},{x:100,y:top,u:0,v:v0},
+      {x:400,y:top,u:1,v:v0},{x:100,y:bottom,u:0,v:v1},{x:400,y:bottom,u:1,v:v1},
+    ]);
+    renderer.clear(0xff000000);renderer.draw(strip(200.65,220.65,.5,.75),null,panel);
+    renderer.draw(strip(180.35,200.35,.25,.5),null,panel);
+    expect(pixel(await renderer.readPixels(),200,200),[255,255,255,255],'shared picture-strip edge has no raster crack');
+    const reverseStrip=(top,bottom,v0,v1)=>pack([
+      {x:100,y:top,u:0,v:v0},{x:100,y:bottom,u:0,v:v1},{x:400,y:bottom,u:1,v:v1},
+      {x:100,y:top,u:0,v:v0},{x:400,y:bottom,u:1,v:v1},{x:400,y:top,u:1,v:v0},
+    ]);
+    renderer.clear(0xff000000);
+    renderer.draw(reverseStrip(200.65,220.65,.5,.75),Uint32Array.of(0,1,2,3,4,5),panel);
+    renderer.draw(reverseStrip(180.35,200.35,.25,.5),Uint32Array.of(0,1,2,3,4,5),panel);
+    expect(pixel(await renderer.readPixels(),200,200),[255,255,255,255],'indexed reverse-facing image strips have no raster crack');
+
+    renderer.clear(0xff000000);renderer.draw(strip(200.85,220.85,.5,.75),null,panel);
+    renderer.draw(strip(180.15,200.15,.25,.5),null,panel);
+    expect(pixel(await renderer.readPixels(),200,200),[0,0,0,255],'larger picture animation gaps remain open');
+    renderer.textureDestroy(970);renderer.resize(64,64);
     renderer.clear(0xff102030); expect(pixel(await renderer.readPixels(),5,5),[16,32,48,255],'clear');
     renderer.clear(0xff000000); renderer.draw(quad(0,0,32,32,0xffff0000),mesh);
     let pixels = await renderer.readPixels(); expect(pixel(pixels,8,8),[255,0,0,255],'screen-space XY/ARGB'); expect(pixel(pixels,48,48),[0,0,0,255],'outside geometry');

@@ -16,6 +16,7 @@ export function decodeGraphicsState(words) {
 export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true } = {}) {
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
   let channel,yieldResolve;
+  const stats={packets:0,copiedBytes:0};
   const pointer=module._web_gpu_transport(), uploads=new Map();
   let header,ring,stateSize;
   function views() {
@@ -37,8 +38,11 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     Atomics.notify(header,0);
   }
   const renderer=await createRenderer(canvas,{onError:fail});
-  function snapshot(start,count) {
-    const result=new Uint32Array(count),at=start%ring.length,first=Math.min(count,ring.length-at);
+  function packetView(start,count) {
+    const at=start%ring.length,first=Math.min(count,ring.length-at);
+    if(first===count)return ring.subarray(at,at+count);
+    stats.copiedBytes+=count*4;
+    const result=new Uint32Array(count);
     result.set(ring.subarray(at,at+first));if(first<count)result.set(ring.subarray(0,count-first),first);return result;
   }
   function state(data) {
@@ -55,10 +59,10 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
       if(read===write)return;
       const count=ring[read%ring.length];
       if(count<3 || count>=ring.length || count>((write-read)>>>0))throw new Error('Corrupt graphics command');
-      // Copy before releasing the queue span; producers may immediately reuse it.
-      const packet=snapshot(read,count),opcode=packet[1],sequence=packet[2],data=packet.subarray(3);
-      Atomics.store(header,1,(read+count)|0);
-      Atomics.notify(header,1);
+      // Keep the span reserved while its views are consumed. Contiguous packets
+      // need no allocation; only a packet crossing the ring boundary is copied.
+      stats.packets++;
+      const packet=packetView(read,count),opcode=packet[1],sequence=packet[2],data=packet.subarray(3);
       switch(opcode) {
         case 1:renderer.resize(data[0],data[1]);onResize(data[0],data[1]);break;
         case 2:{
@@ -95,7 +99,9 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
         case 10:renderer.reset();uploads.clear();stateWords=stateCache=null;break;
         default:throw new Error(`Unsupported graphics command ${opcode}`);
       }
-      views();Atomics.store(header,2,sequence|0);
+      views();
+      Atomics.store(header,1,(read+count)|0);Atomics.notify(header,1);
+      Atomics.store(header,2,sequence|0);
       if(opcode===1||opcode===3||opcode>=8)Atomics.notify(header,2);
       if(performance.now()>until)return;
     }
@@ -128,7 +134,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   const timer=typeof Atomics.waitAsync==='function'&&Atomics.load(header,6)>=2?null:setInterval(pump,1);
   if(timer===null)consume().catch(fail);
   return {
-    renderer,
+    renderer,stats,
     async settle() {
       while(!closed && !failure) {
         await pump();views();if((Atomics.load(header,0)>>>0)===(Atomics.load(header,1)>>>0))break;

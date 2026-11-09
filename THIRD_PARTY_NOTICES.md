@@ -25,3 +25,9 @@ code. No game files are included in this repository.
 
 Emscripten/LLVM, Capstone, pefile, Unicorn, and Playwright retain their respective
 licenses. The bootstrap downloads them separately into checkout-local caches.
+
+The optional public release's Showroom profile is adapted from
+[100 % COMPLETED SAVE GAME by BL_WCAM2P](https://www.nfs-cars.com/need-for-speed-porsche-unleashed/3/files/view/13891/)
+(2015). The public packager downloads a hash-pinned archive and changes only
+its profile name and graphics preferences; the original game data and this
+save are not committed to this repository.

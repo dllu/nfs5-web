@@ -71,7 +71,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   const stats = { frames: 0, draws: 0, batches: 0, vertices: 0, submissions: 0 };
   let width = 0, height = 0, color, depth, presentGroup;
   let vertices = new Uint8Array(512 * 1024), indices = new Uint32Array(32768), uniforms = new Float32Array(64 * 1024);
-  let vertexBytes = 0, indexCount = 0, uniformBytes = 0, operations = [];
+  let vertexBytes = 0, indexCount = 0, uniformBytes = 0, operations = [], imageStrip;
   let vertexBuffer, indexBuffer, uniformBuffer, uniformGroup;
   let vertexCapacity = 0, indexCapacity = 0, uniformCapacity = 0;
   const context = canvas.getContext('webgpu');
@@ -168,7 +168,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     }
     pass?.end();
     if (!target) { device.queue.submit([encoder.finish()]); stats.submissions++; }
-    vertexBytes = indexCount = uniformBytes = 0; operations = [];
+    vertexBytes = indexCount = uniformBytes = 0; operations = []; imageStrip=null;
   }
   function resize(w, h) {
     check(); if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > device.limits.maxTextureDimension2D || h > device.limits.maxTextureDimension2D) throw new Error(`Unsupported renderer size ${w}x${h}`);
@@ -205,6 +205,47 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     const count = data.byteLength / 32, n = mesh ? mesh.length : count; if (!n) return;
     const key = state.serial === undefined ? Object.values(state).join(':') : `${state.serial}:${state.primitive}`;
     vertices = grow(vertices, vertexBytes + data.byteLength); vertices.set(data, vertexBytes);
+    // The frontend's rotating picture is sixteen separate, nearly touching
+    // textured strips. Tiny transform differences leave subpixel cracks that
+    // occasionally cover an entire raster row. Weld a shared image edge only
+    // when BOTH endpoints and their texture coordinates already coincide to
+    // within half a screen pixel / one texel. Larger animation gaps stay open.
+    const entry=textures.get(state.texture);
+    const strip=width===640&&height===480&&count===6&&(!mesh||mesh.length===6&&mesh.every((index,i)=>index===i))&&state.texture&&entry&&state.address_u===0&&state.address_v===0&&
+      !state.fog_enable&&state.primitive===0&&state.depth_test&&state.blend_enable;
+    if(strip) {
+      const view=new DataView(vertices.buffer), previous=imageStrip;
+      const point=i=>Array.from({length:4},(_,j)=>view.getFloat32(i*32+j*4,true));
+      const uv=i=>[view.getFloat32(i*32+24,true),view.getFloat32(i*32+28,true)];
+      const offset=vertexBytes/32;
+      // The rotating panel changes winding as it turns. Recover its four
+      // unique corners independently of either triangle's vertex order.
+      const ids=[0,1,2,3,4,5].map(i=>offset+i), p=ids.map(point);
+      const corners=ids.filter((id,i)=>!p.slice(0,i).some(q=>q.every((v,j)=>v===p[i][j])))
+        .sort((a,b)=>p[a-offset][1]-p[b-offset][1]);
+      const top=corners.slice(0,2).sort((a,b)=>p[a-offset][0]-p[b-offset][0]);
+      const bottom=corners.slice(2).sort((a,b)=>p[a-offset][0]-p[b-offset][0]);
+      const panel=corners.length===4&&Math.abs(p[top[0]-offset][1]-p[top[1]-offset][1])<.01&&
+        Math.abs(p[bottom[0]-offset][1]-p[bottom[1]-offset][1])<.01&&
+        p[top[1]-offset][0]-p[top[0]-offset][0]>8*(p[bottom[0]-offset][1]-p[top[0]-offset][1]);
+      if(panel&&previous?.key===key) {
+        const adjacent=(a,b)=>{
+          const x=point(a),y=point(b),u=uv(a),v=uv(b);
+          return Math.hypot(x[0]-y[0],x[1]-y[1])<=.5&&Math.abs(x[2]-y[2])<.0001&&
+            Math.abs(u[0]-v[0])<=1/entry.layout[0].width&&Math.abs(u[1]-v[1])<=1/entry.layout[0].height;
+        };
+        for(const [current,prior] of [[bottom,previous.top],[top,previous.bottom]]) {
+          if(!current.every((a,i)=>adjacent(a,prior[i])))continue;
+          for(let i=0;i<2;i++) {
+            const source=point(prior[i]);
+            for(const id of ids)if(p[id-offset].every((v,j)=>v===p[current[i]-offset][j]))
+              source.forEach((v,j)=>view.setFloat32(id*32+j*4,v,true));
+          }
+          break;
+        }
+      }
+      imageStrip=panel?{key,top,bottom}:null;
+    } else imageStrip=null;
     indices = grow(indices, indexCount + n); const first = indexCount, base = vertexBytes / 32;
     const primitiveSize=state.primitive===0?3:state.primitive===1?2:1;
     for (let i = 0; i < n; i++) {
