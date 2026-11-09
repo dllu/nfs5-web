@@ -12,6 +12,10 @@ const cases = [];
 let seed = 0x506f7273;
 const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
 const source = 0x800000, destination = 0x810000;
+const imageSections=runtime.manifest.sections.map(section=>{
+  const address=runtime.manifest.imageBase+section.virtual_address;
+  return {address,bytes:runtime.module.HEAPU8.slice(runtime.base+address,runtime.base+address+section.raw_size)};
+});
 for (const length of [0, 1, 2, 3, 4, 7, 15, 16, 31, 63, 64, 255, 256, 1023]) {
   for (const entry of [0x42a130, 0x42a160]) {
     const data = Buffer.from(Array.from({ length: 1024 }, () => random() & 255));
@@ -52,6 +56,27 @@ for (let i = 0; i < 32; i++) {
   cases.push({ entry: 0x40ef30, args: [source], float: true,
     memory: [{ address: source, hex: data.toString('hex') }] });
 }
+// Original vertex transform and projection callback. Binary fractions and
+// signed permutation matrices keep intermediate results exactly representable
+// at x87 precision settings while exercising deep stacks and cross-call ST0.
+for(const flags of [0x100,0x102,0x200,0x202,0x300,0x302])for(const count of [1,2,7])for(const rotate of [false,true]) {
+  const vertices=Buffer.alloc(count*16),matrix=Buffer.alloc(64),settings=Buffer.alloc(32),clip=source+0x6000;
+  for(let i=0;i<count;i++)[0.25*(i+1),-0.5*(i+2),i+1,1+i%2].forEach((v,j)=>vertices.writeFloatLE(v,i*16+j*4));
+  if(rotate){matrix.writeFloatLE(1,4);matrix.writeFloatLE(-1,16);}
+  else {matrix.writeFloatLE(1,0);matrix.writeFloatLE(1,20);}
+  matrix.writeFloatLE(1,40);matrix.writeFloatLE(16,56);matrix.writeFloatLE(1,60);
+  settings.writeUInt32LE(source+0x4000,0);settings.writeUInt32LE(16,12);
+  settings.writeUInt32LE(32,16);settings.writeUInt32LE(4,20);
+  settings.writeFloatLE(1,24);settings.writeFloatLE(1000,28);
+  const word=value=>{const b=Buffer.alloc(4);b.writeUInt32LE(value);return b.toString('hex');};
+  cases.push({entry:0x5b0730,args:[flags,count,source,destination],memory:[
+    {address:source,hex:vertices.toString('hex')},{address:source+0x4000,hex:matrix.toString('hex')},
+    {address:0x5dea58,hex:settings.toString('hex')},{address:0x69e0d0,hex:word(clip)},
+    {address:0x5dfc90,hex:word(0x3f800000)},
+    {address:destination,hex:Buffer.alloc(count*32+16,0xa5).toString('hex')},
+    {address:clip,hex:Buffer.alloc(count*4+16,0xa5).toString('hex')}],
+    observe:[{address:destination,size:count*32+16},{address:clip,size:count*4+16}]});
+}
 const oracle = spawnSync(new URL('../.venv/bin/python', import.meta.url).pathname,
   [new URL('./x86_oracle.py', import.meta.url).pathname],
   { input: JSON.stringify({ cases, memorySize: runtime.memorySize }), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
@@ -60,6 +85,7 @@ const expected = JSON.parse(oracle.stdout);
 for (const [index, test] of cases.entries()) {
   // The routines under test have no dependencies on startup's initialized data.
   runtime.module._web_init();
+  for(const section of imageSections)runtime.module.HEAPU8.set(section.bytes,runtime.base+section.address);
   for (const [i, value] of (test.registers ?? Array(8).fill(0)).entries()) runtime.module._web_set_register(i, value);
   for (const memory of test.memory ?? []) runtime.module.HEAPU8.set(Buffer.from(memory.hex, 'hex'), runtime.base + memory.address);
   const result = runtime.call(test.entry, ...test.args ?? []);
@@ -71,5 +97,5 @@ for (const [index, test] of cases.entries()) {
   }
   if (test.float) assert.equal(runtime.module._web_float_result(), expected[index].float, `x87 result in case ${index}`);
 }
-await writeFile(new URL('../build/differential.json', import.meta.url), JSON.stringify({ cases: cases.length, functions: 5, passed: true }) + '\n');
-console.log(`${cases.length} original x86/Wasm comparisons passed (range/x87 copying, alignment/overlap, object initialization, x87 dot product)`);
+await writeFile(new URL('../build/differential.json', import.meta.url), JSON.stringify({ cases: cases.length, functions: 6, passed: true }) + '\n');
+console.log(`${cases.length} original x86/Wasm comparisons passed (copying/alignment/overlap, object initialization, x87 dot product, vertex transformation)`);

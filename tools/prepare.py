@@ -45,6 +45,11 @@ def main():
             function = functions[address]
             function.name = f"sub_{address:08X}"
             source = lifter.lift_function(function)
+            # Keep logical x87 indices independent of the physical stack file.
+            source = re.sub(r'\b_st\[([0-7])\]',r'FP_ST(\1)',source)
+            source = re.sub(r'\bg_st_i64\[([0-7])\]',r'FP_I64(\1)',source)
+            if re.search(r'\b(?:_st|g_st_i64)\[',re.sub(r'/\*.*?\*/','',source,flags=re.S)):
+                parser.error('Unexpected x87 register subscript; review logical indexing')
             if address==0x004DD600 and image_sha=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906':
                 # The supplied nfs5.dll patches 004DD611 to jump to 004DD70B
                 # for NoMovies=1. Keep the same stack/register effects in the
@@ -86,6 +91,7 @@ def main():
     wrappers += ['};']
     (output / "imports.c").write_text("\n".join(wrappers))
     manifest = {"executable": image.name, "sha256": image_sha,"patches":patches,
+                "fpuIndexing": True,
                 "imageBase": info.image_base, "entry": info.image_base + info.entry_point_rva,
                 "sections": [asdict(s) for s in info.sections], "imports": imports,
                 "functions": len(functions), "instructions": sum(r['instructions'] for r in records),

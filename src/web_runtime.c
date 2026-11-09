@@ -680,7 +680,7 @@ uint32_t *web_mapping_stats(void) {
 void web_set_register(uint32_t index, uint32_t value) {
     if (index < 8) cpu.r[index] = value;
 }
-double web_float_result(void) { return cpu.st[0]; }
+double web_float_result(void) { return cpu.st[web_fp_index(cpu.fp_top,0)]; }
 void web_input_key(uint32_t scan, uint32_t down) {
     if (scan >= 256) return;
     machine_acquire();

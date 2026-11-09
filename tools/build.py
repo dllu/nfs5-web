@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--optimize", type=int, choices=(1, 2), default=2,
                         help="Compiler optimization level (default: 2)")
     parser.add_argument("--profile", action="store_true", help="Emit a Wasm CPU-profile symbol map")
+    parser.add_argument("--linear-fpu", action="store_true", help="Use shifted x87 storage for comparisons")
     args = parser.parse_args()
     sdk = ROOT / ".cache/emsdk"
     compiler = sdk / "upstream/emscripten/emcc"
@@ -27,6 +28,8 @@ def main():
     lift = ROOT / "build/lift"
     # Retain separate objects for comparisons without discarding either build.
     objects = ROOT / ("build/obj" if args.optimize == 1 else "build/obj-o2")
+    if not args.linear_fpu:
+        objects = ROOT / f"build/obj-fpu-o{args.optimize}"
     objects.mkdir(parents=True, exist_ok=True)
     runtime = ROOT / "third_party/nfspu-recomp/third_party/pcrecomp/runtime/recomp32"
     # Keep the pinned dependency untouched. The local copy adds an address
@@ -43,6 +46,12 @@ def main():
         parser.error('Pinned rep-movs helper changed; review mapped alias overlap')
     adapted = adapted.replace('uint32_t b = n * esz;', 'if (!n) return;\n    uint32_t b = n * esz;')
     adapted = adapted.replace(overlap, 'if (df > 0 ? ADDR(edi) - ADDR(esi) >= b : ADDR(esi) - ADDR(edi) >= b)')
+    fpu_start = 'static inline void fp_push_impl('
+    fpu_end = '/* fist/fistp round'
+    if adapted.count(fpu_start) != 1 or adapted.count(fpu_end) != 1:
+        parser.error('Pinned x87 helpers changed; review the stack adapter')
+    first_fpu, last_fpu = adapted.index(fpu_start), adapted.index(fpu_end)
+    adapted = adapted[:first_fpu] + '#include "web_fpu.h"\n\n' + adapted[last_fpu:]
     memory_header = includes / 'recomp_types.h'
     if not memory_header.exists() or memory_header.read_text() != adapted:
         memory_header.write_text(adapted)
@@ -52,10 +61,14 @@ def main():
              '-Werror=implicit-function-declaration',
              '-DRECOMP_TRACE', '-DRECOMP_YIELD_EVERY=1024',
              '-I' + str(ROOT / 'src'), '-I' + str(includes), '-I' + str(runtime), '-I' + str(lift)]
+    if not args.linear_fpu:
+        flags.append('-DWEB_FPU_CIRCULAR')
     sources = sorted(lift.glob('*.c')) + [ROOT / 'src/web_runtime.c']
     if not (lift / 'manifest.json').exists():
         parser.error('Run tools/prepare.py with your game executable first')
     metadata=json.loads((lift/'manifest.json').read_text())
+    if not args.linear_fpu and not metadata.get('fpuIndexing'):
+        parser.error('Run tools/prepare.py again to generate logical x87 indices')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'verok-no-movies' not in metadata.get('patches',[]):
         parser.error('Run tools/prepare.py again to generate the opening-movie configuration hook')
     configuration = hashlib.sha256(json.dumps([str(compiler), flags]).encode()).hexdigest()
@@ -63,7 +76,7 @@ def main():
         obj = objects / (source.stem + '.o')
         signature = obj.with_suffix('.flags')
         dependencies = [source, ROOT / 'src/web_runtime.h', ROOT / 'src/web_memory.h', memory_header,
-                        lift / 'functions.h']
+                        ROOT / 'src/web_fpu.h', lift / 'functions.h']
         if source.parent == ROOT / 'src':
             dependencies.extend((ROOT / 'src').glob('*.h'))
         if (obj.exists() and signature.exists() and signature.read_text() == configuration

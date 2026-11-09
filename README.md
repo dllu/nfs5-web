@@ -27,8 +27,9 @@ Current implementation:
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
-  register file. Exact x87 integer shadows are saved with the floating-point
-  registers. Up to seven guest workers can run alongside the primary thread.
+  register file. x87 values and exact integer shadows use a circular eight-slot
+  file, saved together on CPU switches. Up to seven guest workers can run
+  alongside the primary thread.
 - Browser startup runs off the UI thread. The static server supplies the
   cross-origin isolation headers required for shared Wasm memory.
 - Multimedia timers share one sleeping dispatcher and execute the original
@@ -78,13 +79,15 @@ Current implementation:
   framebuffer lock/unlock. The frontend submits original geometry and textures.
   Multitexture, mipmap and broader 3D scene fidelity remain unverified.
 
-Validation includes 165 original-x86/Unicorn versus Wasm comparisons across five
+Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 40 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
 17 lifecycle checks and 10 startup-configuration checks. These include seven-worker
 contention, cancellation in original compute loops and disposal while a worker
 holds the VM in guest code.
+Another 24,000 stack-model transitions check both x87 storage layouts against an
+independent logical model, including special doubles, swaps and all eight slots.
 Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
 file/deletion, mapped-file writeback and registry persistence across fresh pages
@@ -115,9 +118,9 @@ text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
 The 4K/120 Hz gameplay target remains unmet: short Chrome driving samples at
-3840x2160 averaged 63–82 presented frames per second, depending on race workload.
+3840x2160 averaged 80–82 presented frames per second with the current build.
 Sustained performance across tracks remains untested. The optimized Wasm module
-is about 103 MiB and retains tracing and optional execution limits. The x87
+is about 84 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
 approximation of Windows NLS. Full floating-point and binary compatibility are
 unverified.
@@ -146,6 +149,7 @@ its reports and screenshots, including `original-startup.png`, to `build/`.
 resolving Wasm function indices in browser CPU profiles.
 Builds use compiler optimization level 2; `--optimize 1` selects level 1 with
 a separate object cache for comparisons.
+`--linear-fpu` builds the shifted x87 layout in a separate cache for comparisons.
 `npm run test:renderer` opens normal Chrome for GPU pixel checks and writes
 `build/webgpu-renderer.png`, `build/thrash-driver.png` and a JSON report. Headless Vulkan adapter
 initialization is unreliable on this Chrome build; the normal browser works.
