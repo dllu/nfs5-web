@@ -71,16 +71,26 @@ static void machine_abort_check(void) {
     if (atomic_load(&stop_requested))fail(g_cur_func,"Stopped by user");
 }
 
-static void machine_acquire(void) {
+static void machine_lock(void) {
+    /* Shutdown needs ownership without loading a guest CPU. Count it too:
+     * compute-only workers otherwise see no waiter and never yield the VM. */
     atomic_fetch_add(&machine_waiters, 1);
     pthread_mutex_lock(&machine_mutex);
     atomic_fetch_sub(&machine_waiters, 1);
+}
+
+static void machine_unlock(void) {
+    pthread_mutex_unlock(&machine_mutex);
+}
+
+static void machine_acquire(void) {
+    machine_lock();
     cpu_load(); machine_held = 1;
 }
 
 static void machine_release(void) {
     cpu_save(); machine_held = 0;
-    pthread_mutex_unlock(&machine_mutex);
+    machine_unlock();
 }
 
 static void machine_pause(unsigned microseconds) {

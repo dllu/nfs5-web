@@ -21,6 +21,22 @@ for (const length of [0, 1, 2, 3, 4, 7, 15, 16, 31, 63, 64, 255, 256, 1023]) {
       observe: [{ address: destination, size: 1040 }] });
   }
 }
+// Original x87 integer-copy routine. Exercise alignment branches, all block
+// widths and exact 64-bit payloads, including the original order on overlap.
+for (const length of [0, 1, 7, 8, 31, 32, 127, 128, 255, 1023, 4096]) {
+  for (let alignment = 0; alignment < 8; alignment++) {
+    const bytes = Buffer.from(Array.from({length: 8192}, () => random() & 255));
+    cases.push({entry: 0x5b0100, args: [destination + alignment, source + 3, length],
+      memory: [{address: source, hex: bytes.toString('hex')},
+        {address: destination, hex: Buffer.alloc(4112, 0xa5).toString('hex')}],
+      observe: [{address: destination, size: 4112}]});
+  }
+}
+for (const offset of [-129, -33, -8, -1, 0, 1, 8, 33, 129]) {
+  cases.push({entry: 0x5b0100, args: [source + 256 + offset, source + 256, 256],
+    memory: [{address: source, hex: Buffer.from(Array.from({length: 1024}, () => random() & 255)).toString('hex')}],
+    observe: [{address: source, size: 1024}]});
+}
 // A game object initializer touches 201 array entries through ECX (thiscall).
 for (let i = 0; i < 8; i++) {
   cases.push({ entry: 0x4580e0, registers: [0, source, 0, 0x12345678, 0, 0, 0xabcdef01, 0xfedcba98],
@@ -55,5 +71,5 @@ for (const [index, test] of cases.entries()) {
   }
   if (test.float) assert.equal(runtime.module._web_float_result(), expected[index].float, `x87 result in case ${index}`);
 }
-await writeFile(new URL('../build/differential.json', import.meta.url), JSON.stringify({ cases: cases.length, functions: 4, passed: true }) + '\n');
-console.log(`${cases.length} original x86/Wasm comparisons passed (range copying, object initialization, x87 dot product)`);
+await writeFile(new URL('../build/differential.json', import.meta.url), JSON.stringify({ cases: cases.length, functions: 5, passed: true }) + '\n');
+console.log(`${cases.length} original x86/Wasm comparisons passed (range/x87 copying, alignment/overlap, object initialization, x87 dot product)`);

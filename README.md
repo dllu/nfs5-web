@@ -77,11 +77,13 @@ Current implementation:
   framebuffer lock/unlock. The frontend submits original geometry and textures.
   Multitexture, mipmap and broader 3D scene fidelity remain unverified.
 
-Validation includes 68 original-x86/Unicorn versus Wasm comparisons across four
+Validation includes 165 original-x86/Unicorn versus Wasm comparisons across five
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
-24 thread, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
+40 thread, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
-12 lifecycle checks and 10 startup-configuration checks.
+17 lifecycle checks and 10 startup-configuration checks. These include seven-worker
+contention, cancellation in original compute loops and disposal while a worker
+holds the VM in guest code.
 Chrome verifies original startup,
 physical key events, focus loss, native-worker HTTP range reads, and exact binary
 file/deletion, mapped-file writeback and registry persistence across fresh pages
@@ -111,8 +113,8 @@ Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
-The 4K/120 Hz gameplay target remains unmet in the measured scene: short
-Chrome driving samples at 3840x2160 averaged 81–82 presented frames per second.
+The 4K/120 Hz gameplay target remains unmet: short Chrome driving samples at
+3840x2160 averaged 63–82 presented frames per second, depending on race workload.
 Sustained performance across tracks remains untested. The optimized Wasm module
 is about 103 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU

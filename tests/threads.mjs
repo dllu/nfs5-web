@@ -66,7 +66,19 @@ try {
   assert.equal(invoke('WaitForSingleObject', event, 5), 258);
   assert(performance.now() - start >= 4, 'A finite wait must wait for its deadline');
   assert.equal(invoke('CloseHandle', signaler), 1); assert.equal(invoke('CloseHandle', event), 1);
-  console.log(`${calls} thread calls passed (suspended startup, TLS/LastError/register isolation, completion, cross-worker event wait)`);
+  // All seven guest workers repeatedly release/reacquire the machine while
+  // sleeping, then complete one wait-all without changing parent CPU/TLS state.
+  const contenders=[];
+  for(let i=0;i<7;i++) {
+    const handle=invoke('CreateThread',0,0,slot('Sleep'),30,0,output);
+    assert(handle);contenders.push(handle);memory().setUint32(output+0x200+i*4,handle,true);
+  }
+  assert.equal(invoke('WaitForMultipleObjectsEx',7,output+0x200,1,2000,0),0,
+    'Every contending native worker completes');
+  assert.equal(invoke('TlsGetValue',index),0xc0ffee,'Parent TLS survives seven contenders');
+  assert.equal(module._web_float_result(),68,'Parent x87 state survives repeated contended handoffs');
+  for(const handle of contenders)assert.equal(invoke('CloseHandle',handle),1);
+  console.log(`${calls} thread calls passed (suspended startup, TLS/LastError/register isolation, completion, event waits, seven-worker contention)`);
 } finally {
   runtime.dispose();
 }

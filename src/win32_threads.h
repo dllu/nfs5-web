@@ -107,7 +107,7 @@ static uint32_t create_guest_thread(uint32_t entry, uint32_t parameter, uint32_t
 }
 
 static void stop_guest_workers(void) {
-    pthread_mutex_lock(&machine_mutex); cancel_workers = 1; wake_timers(); pthread_mutex_unlock(&machine_mutex);
+    machine_lock(); cancel_workers = 1; wake_timers(); machine_unlock();
     for (unsigned i = 1; i < 8; i++) {
         guest_thread *thread = &guest_threads[i];
         if (thread->started && !thread->joined) {
