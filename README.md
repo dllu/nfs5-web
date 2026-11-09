@@ -36,6 +36,10 @@ Current implementation:
   alongside the primary thread.
 - Browser startup runs off the UI thread. The static server supplies the
   cross-origin isolation headers required for shared Wasm memory.
+  During play the canvas fills the browser viewport, stretching the original
+  640×480 menus and the selected race mode. Mouse movement, buttons and wheel
+  coordinates follow that scaling across window resizes. Stop returns to the
+  launcher and its final frame.
   Original `ExitProcess` calls end the guest, wake blocked workers and report
   the unsigned game exit code separately from Stop and runtime errors.
 - Multimedia timers share one sleeping dispatcher and execute the original
@@ -108,7 +112,9 @@ and Wasm instances. A known PCM
 signal reaches the running browser audio graph with its expected amplitude.
 An additional 15-second original-code run verifies advancing video, visible
 pixels, timer callbacks and nonzero game PCM.
-Chrome also verifies unbounded Run game, cooperative Stop and a fresh restart.
+Chrome also verifies viewport fill at two window sizes, mouse/button/wheel
+coordinates through stretched menus, unbounded Run game, cooperative Stop and
+a fresh restart.
 27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
 an OffscreenCanvas rendered in a dedicated Worker. Another 47 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring

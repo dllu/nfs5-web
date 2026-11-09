@@ -302,20 +302,49 @@ try {
   await writeFile('build/original-startup.json',JSON.stringify(movie.result,null,2)+'\n');
   console.log(`Original intro: ${movie.result.rendering[3]} presented frames, ${movie.result.lit} visible pixels and game PCM peak ${movie.result.audio.peak.toFixed(3)}`);
   await page.reload();
+  await page.evaluate(()=>{
+    window.viewportInputs=[];
+    const post=Worker.prototype.postMessage;
+    Worker.prototype.postMessage=function(message,...rest){
+      if(message.type==='input')window.viewportInputs.push({...message});
+      return post.call(this,message,...rest);
+    };
+  });
   await page.getByRole('button',{name:'Run game',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('#stop').disabled===false,null,{timeout:30000});
+  await page.waitForFunction(()=>document.body.classList.contains('playing')&&!document.querySelector('#stop').disabled,null,{timeout:30000});
+  for(const size of [{width:1440,height:1000},{width:1100,height:700}]) {
+    await page.setViewportSize(size);
+    const bounds=await page.locator('#game').boundingBox();
+    assert.deepEqual(bounds,{x:0,y:0,...size},'Live game fills the browser viewport at either aspect ratio');
+    const x=size.width/4,y=size.height*3/4;
+    await page.mouse.move(x,y);
+    let input=await page.evaluate(()=>window.viewportInputs.filter(e=>'x' in e).at(-1));
+    assert.deepEqual([input.x,input.y],[160,360],'Mouse movement maps through the stretched 640×480 canvas');
+    await page.evaluate(({x,y})=>{
+      const canvas=document.querySelector('#game');
+      for(const type of ['mousedown','mouseup'])canvas.dispatchEvent(new MouseEvent(type,{bubbles:true,clientX:x,clientY:y,buttons:type==='mousedown'?1:0}));
+      canvas.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,clientX:x,clientY:y,deltaY:1}));
+    },{x:size.width*3/4,y:size.height/4});
+    const pointers=await page.evaluate(()=>window.viewportInputs.filter(e=>'x' in e).slice(-3));
+    assert.deepEqual(pointers.map(e=>[e.x,e.y,e.buttons,e.dz]),[[480,120,1,0],[480,120,0,0],[480,120,0,-120]],
+      'Buttons and wheel refresh cursor position without requiring a preceding move');
+  }
+  await page.screenshot({path:'build/viewport-game.png'});
   await page.getByRole('button',{name:'Stop',exact:true}).click();
   await page.waitForFunction(()=>window.nfs5Result,null,{timeout:10000});
   const stopped=await page.evaluate(()=>window.nfs5Result);
   assert.equal(stopped.stopped,true);assert.equal(stopped.error,'Stopped by user');
   assert.equal(await page.getByRole('button',{name:'Run game',exact:true}).isEnabled(),true);
   assert.equal(await page.locator('#stop').isHidden(),true);
+  assert.equal(await page.evaluate(()=>document.body.classList.contains('playing')),false);
+  await page.setViewportSize({width:1440,height:1000});
   // A new instance must start after all native workers and GPU resources close.
   await page.getByRole('button',{name:'Run original startup',exact:true}).click();
   await page.waitForFunction(()=>window.nfs5Result,null,{timeout:30000});
   assert.equal((await page.evaluate(()=>window.nfs5Result)).stopped,false);
+  assert.equal(await page.evaluate(()=>document.body.classList.contains('playing')),false);
   assert.deepEqual(errors,[]);
-  console.log('Chrome unbounded Run game/Stop/restart lifecycle verified');
+  console.log('Chrome viewport fill/resize, stretched mouse/button/wheel coordinates and Run game/Stop/restart lifecycle verified');
 } finally {
   await browser.close();
 }

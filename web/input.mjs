@@ -40,11 +40,11 @@ export function attachInput(target, send) {
   listen('focus', () => send({ type: 'input', focus: true }));
   listen('mousemove', event => send({ type: 'input', dx: event.movementX, dy: event.movementY, dz: 0, buttons: event.buttons, x: event.clientX, y: event.clientY }));
   for (const type of ['mousedown', 'mouseup']) listen(type, event => {
-    send({ type: 'input', dx: 0, dy: 0, dz: 0, buttons: event.buttons });
+    send({ type: 'input', dx: 0, dy: 0, dz: 0, buttons: event.buttons, x: event.clientX, y: event.clientY });
   });
   listen('wheel', event => {
     event.preventDefault();
-    send({ type: 'input', dx: 0, dy: 0, dz: -Math.sign(event.deltaY) * 120, buttons: event.buttons });
+    send({ type: 'input', dx: 0, dy: 0, dz: -Math.sign(event.deltaY) * 120, buttons: event.buttons, x: event.clientX, y: event.clientY });
   }, { passive: false });
   listen('contextmenu', event => event.preventDefault());
   return () => { handlers.forEach(remove => remove()); send({ type: 'input', focus: false }); };

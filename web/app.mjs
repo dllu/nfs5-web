@@ -48,7 +48,10 @@ async function start(milliseconds) {
             worker.postMessage(event);
           });
         }
-        if(data.type==='screen'){screenSize=data;canvas.hidden=false;canvas.style.aspectRatio=`${data.width}/${data.height}`;}
+        if(data.type==='screen'){
+          screenSize=data;canvas.hidden=false;canvas.style.aspectRatio=`${data.width}/${data.height}`;
+          document.body.classList.add('playing');
+        }
         if (data.type === 'result') {
           if(data.frame){
             const still=document.createElement('canvas');still.id='game';still.width=data.frame.width;still.height=data.frame.height;still.setAttribute('aria-label','Game output');
@@ -71,6 +74,7 @@ async function start(milliseconds) {
     status.textContent = 'Unable to start the runtime';
     write(error.stack || String(error));
   } finally {
+    document.body.classList.remove('playing');
     detachInput?.();
     worker?.terminate();
     await audio?.close();
