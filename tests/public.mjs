@@ -23,7 +23,7 @@ async function open() {
 async function colors(points) {
   return JSON.parse(execFileSync('python3',['-c',
     "import io,json,sys; from PIL import Image; im=Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGB'); print(json.dumps([im.getpixel((round(x*im.width/640),round(y*im.height/480))) for x,y in json.loads(sys.argv[1])]))",JSON.stringify(points)],
-    {input:await page.screenshot(),maxBuffer:1024*1024}).toString());
+    {input:await page.locator('#game').screenshot(),maxBuffer:1024*1024}).toString());
 }
 async function ready() {
   await page.goto(url);
@@ -76,6 +76,18 @@ try {
   assert.equal(await page.locator('#retry').isVisible(),false);
   assert.equal(await page.locator('#game').evaluate(c=>getComputedStyle(c).cursor),'none');
   assert.equal(await page.evaluate(()=>crossOriginIsolated),true);
+  for(const size of [{width:1920,height:1080},{width:900,height:1600}]) {
+    await page.setViewportSize(size);
+    const box=await page.locator('#game').boundingBox();
+    const scale=Math.min(size.width/640,size.height/480);
+    assert(Math.abs(box.width-640*scale)<.01&&Math.abs(box.height-480*scale)<.01,'Menu keeps its original 4:3 aspect');
+    assert(Math.abs(box.x-(size.width-box.width)/2)<.01&&Math.abs(box.y-(size.height-box.height)/2)<.01,'Menu is centered inside its black bars');
+    await page.screenshot({path:`build/public-menu-${size.width}x${size.height}.png`});
+  }
+  // Create a profile with a horizontal letterbox offset, exercising the same
+  // bounding-box input mapping used in normal play.
+  await page.setViewportSize({width:1920,height:1080});
+
   const seed=await page.evaluate(async()=>{
     const index=await(await fetch('./assets.json')).json(),e=index.entries.find(e=>e.path==='SaveData/8Showroom.sav');
     const b=new Uint8Array(await(await fetch(e.url)).arrayBuffer()),text=new TextDecoder('windows-1252').decode(b);

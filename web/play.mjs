@@ -3,7 +3,7 @@ import {openAudio} from './audio.mjs';
 
 const loading=document.querySelector('#loading'), status=document.querySelector('#status');
 const retry=document.querySelector('#retry'), failure=document.querySelector('#failure');
-const sound=document.querySelector('#sound');
+const sound=document.querySelector('#sound'),performanceNotice=document.querySelector('#performance');
 retry.onclick=()=>location.reload();
 let worker,audio,detach,screen,logs=[],finished=false;
 const resume=()=>audio?.resume().then(()=>{sound.hidden=audio.stats().state==='running';}).catch(()=>{});
@@ -12,7 +12,7 @@ window.addEventListener('keydown',resume,{capture:true});
 async function finish(message,error) {
   if(finished)return;finished=true;
   detach?.();worker?.terminate();await audio?.close();
-  sound.hidden=true;loading.hidden=false;status.textContent=message;retry.hidden=false;
+  sound.hidden=performanceNotice.hidden=true;loading.hidden=false;status.textContent=message;retry.hidden=false;
   if(error){failure.hidden=false;document.querySelector('#error').textContent=error+'\n\n'+logs.slice(-12).join('\n');}
 }
 try {
@@ -30,6 +30,10 @@ try {
     }
     if(data.type==='error')finish('Unable to run the game',data.error);
     if(data.type==='loaded') {
+      if(data.graphics?.software){
+        performanceNotice.textContent=data.reducedResolution?'Software rendering detected. A lower default race resolution is enabled. Enable hardware acceleration or try another browser for full resolution.':'Software rendering detected. Enable hardware acceleration or try another browser for better performance.';
+        performanceNotice.hidden=false;setTimeout(()=>{performanceNotice.hidden=true;},20000);
+      }
       detach=attachInput(window,event=>{
         if(screen){
           const box=canvas.getBoundingClientRect();
@@ -39,7 +43,7 @@ try {
         worker.postMessage(event);
       });
     }
-    if(data.type==='screen'){screen=data;loading.hidden=true;canvas.focus({preventScroll:true});}
+    if(data.type==='screen'){screen=data;canvas.style.setProperty('--game-aspect',data.width/data.height);loading.hidden=true;canvas.focus({preventScroll:true});}
     if(data.type==='save-error'){sound.hidden=false;sound.textContent='Local save failed. Keep this tab open and free some browser storage.';}
     if(data.type==='result'){
       data.frame?.close();
@@ -48,7 +52,7 @@ try {
     }
   };
   const offscreen=canvas.transferControlToOffscreen();
-  worker.postMessage({type:'start',milliseconds:0,intro:false,audio:audio.configuration,
+  worker.postMessage({type:'start',milliseconds:0,intro:false,softwarePixelLimit:1280*720,audio:audio.configuration,
     display:{width:Math.round(innerWidth*devicePixelRatio),height:Math.round(innerHeight*devicePixelRatio)},canvas:offscreen},[offscreen]);
   // Flush files already serialized by the game when the tab is backgrounded.
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&!finished)worker.postMessage({type:'checkpoint'});});

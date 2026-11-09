@@ -13,6 +13,7 @@ stopButton.addEventListener('click',()=>{stopButton.disabled=true;status.textCon
 
 async function start(milliseconds) {
   button.disabled=playButton.disabled=true;stopButton.hidden=false;stopButton.disabled=true;
+  document.querySelector('#viewport-style').media='all';
   output.textContent = '';
   status.textContent = 'Loading translated engine…';
   delete window.nfs5Result;
@@ -49,7 +50,7 @@ async function start(milliseconds) {
           });
         }
         if(data.type==='screen'){
-          screenSize=data;canvas.hidden=false;canvas.style.aspectRatio=`${data.width}/${data.height}`;
+          screenSize=data;canvas.hidden=false;canvas.style.setProperty('--game-aspect',data.width/data.height);
           document.body.classList.add('playing');
         }
         if (data.type === 'result') {
@@ -77,6 +78,7 @@ async function start(milliseconds) {
     write(error.stack || String(error));
   } finally {
     document.body.classList.remove('playing');
+    document.querySelector('#viewport-style').media='not all';
     detachInput?.();
     worker?.terminate();
     await audio?.close();

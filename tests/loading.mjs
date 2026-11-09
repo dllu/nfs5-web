@@ -24,6 +24,7 @@ try {
   page.on('pageerror',error=>errors.push(String(error)));
   for(const [width,height] of [[1600,900],[900,1600],[3840,2160]]) {
     stage=`${width}x${height} adapter selection`;await saveReport({passed:false});
+    await page.setViewportSize({width,height});
     await page.goto(process.env.NFS5_TEST_URL??'http://127.0.0.1:8000');
     const adapter=await page.evaluate(async()=>{
       const a=await Promise.race([navigator.gpu.requestAdapter(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('WebGPU adapter request timed out')),10000))]);
@@ -35,8 +36,9 @@ try {
     let captureTimer;
     const report=await Promise.race([page.evaluate(async({width,height})=>{
       const {loadRuntime}=await import('./runtime.mjs');
-      const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;document.body.prepend(canvas);
-      const runtime=await loadRuntime({canvas,persist:false,intro:false,display:{width,height}});
+      const canvas=document.createElement('canvas');canvas.id='game';canvas.width=640;canvas.height=480;document.body.prepend(canvas);
+      document.querySelector('#viewport-style').media='all';
+      const runtime=await loadRuntime({canvas,persist:false,intro:false,display:{width,height},onResize:(w,h)=>canvas.style.setProperty('--game-aspect',w/h)});
       const args=`debugmode=0 fe=0 track_name=coastal linear_track=1 numcars=1 numplayerracecars=1 numopponentracecars=0 car[0].class=human width=${width} height=${height} depth=32 texturedetail=4 cardetail=4`;
       runtime.module.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\nfs5.exe '+args+'\0'),runtime.base+0xb000);
       const renderer=runtime.graphics.renderer,draw=renderer.draw,present=renderer.present,textureCreate=renderer.textureCreate;
@@ -70,7 +72,10 @@ try {
           if(colored<10000)return;
           const still=document.createElement('canvas');still.width=width;still.height=height;
           still.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels),width,height),0,0);
-          captures.push({frame,upload:lastUpload,colored,outside,bounds,logical,blit,url:still.toDataURL()});
+          const box=canvas.getBoundingClientRect();
+          captures.push({frame,upload:lastUpload,colored,outside,bounds,logical,blit,
+            box:{x:box.x,y:box.y,width:box.width,height:box.height},
+            artworkAspect:(bounds[2]-bounds[0])*box.width/width/((bounds[3]-bounds[1])*box.height/height),url:still.toDataURL()});
           if(captures.length===4)finish();
         }).catch(fail).finally(()=>busy=false);
       };
@@ -93,6 +98,8 @@ try {
     await saveReport({passed:false});
     assert.equal(report.stopped,true);assert.deepEqual(report.errors,[]);
     for(const frame of report.captures){
+      assert(Math.abs(frame.artworkAspect-4/3)<.002,'Displayed loading artwork retains 4:3');
+      assert(Math.abs(frame.box.width-width)<.01&&Math.abs(frame.box.height-height)<.01,'Race-sized canvas fills the viewport');
       assert.equal(frame.outside,0,`${width}×${height} software update ${frame.upload} repeats artwork into its margins`);
       assert(Math.abs(frame.blit.right-width)<.01&&Math.abs(frame.blit.bottom-height)<.01,'Software upload covers the viewport exactly once');
       assert.deepEqual(frame.blit.texture,frame.logical,'Loading software surface uses logical dimensions');

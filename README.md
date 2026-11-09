@@ -19,10 +19,20 @@ the tab is hidden. Clearing site data deletes local progress; closing abruptly
 can lose unsaved changes. Deleting a supplied profile is persistent too.
 
 A browser with WebGPU and shared-memory Wasm is required. Chrome on the NVIDIA
-GB10 is tested; other browsers and GPUs need verification. New profiles and
-Showroom use maximum exposed quality and a 32-bit viewport-sized race mode.
-Menus render at 640×480 and fill the viewport; race HUD and controls scale
-independently of the 3D scene. The system cursor is hidden over the game.
+GB10 is tested. Firefox with WebGPU enabled also runs; the isolated Linux
+Firefox check selects the llvmpipe software adapter. Other systems and Firefox
+hardware adapters need verification. New profiles and Showroom use maximum
+exposed quality and a 32-bit viewport-sized race mode. Menus and loading artwork
+keep their original 4:3 aspect, centered with black bars when needed. Races keep
+the selected resolution’s aspect, including a widescreen browser-sized mode.
+Mouse coordinates follow the fitted canvas. The system cursor is hidden over
+the game.
+
+When WebGPU reports a software adapter, the public page reduces the default
+race mode to about 720p worth of pixels, preserving aspect and the minimum
+640×480 mode, and briefly explains that hardware acceleration is preferable.
+Explicit saved resolution choices remain available. Hardware adapters retain
+the full viewport resolution.
 
 ## Current state
 
@@ -76,7 +86,9 @@ npm run test:renderer
 
 Tests cover original-code comparisons, services, threads, input, audio,
 persistence, lifecycle and GPU pixels/transport, including 4K output and
-picture-strip seams. Reports and screenshots go to ignored `build/` files.
+picture-strip seams. Public checks cover wide/portrait menu fitting and
+clicks with black-bar offsets; loading checks verify 4:3 artwork and the
+full-width race canvas at wide, portrait and 4K sizes. Reports and screenshots go to ignored `build/` files.
 `NFS5_GPU_SOFTWARE=1 npm run test:loading` selects SwiftShader explicitly.
 `python3 tools/build.py --profile` emits a Wasm symbol map.
 

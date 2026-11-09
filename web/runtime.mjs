@@ -2,12 +2,12 @@ import createEngine from './engine.js';
 import { openStorage } from './storage.mjs';
 import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
-import {openingMovies,verokImage} from './config.mjs';
+import {openingMovies,verokImage,softwareViewport} from './config.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, softwarePixelLimit=0 } = {}) {
   const [module, manifest, response] = await Promise.all([
     createEngine({ print: log, printErr: log }),
     read('./manifest.json').then(checked).then(r => r.json()),
@@ -133,6 +133,12 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   let graphics;
   try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace}):null; }
   catch(error) {clearInterval(storageTimer);detachAudio?.();storage?.close();module.PThread.terminateAllThreads();throw error;}
+  const originalDisplay=display;
+  if(graphics?.renderer.info.software&&softwarePixelLimit&&display) {
+    display=softwareViewport(display,softwarePixelLimit);
+    module._web_display_size(display.width,display.height);
+  }
+  const reducedResolution=!!(display&&originalDisplay&&(display.width!==originalDisplay.width||display.height!==originalDisplay.height));
   function snapshot(status) {
     const registers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8));
     const count = module._web_trace_count();
@@ -163,7 +169,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     const status=module._web_async_finish();await graphics?.settle();const result=snapshot(status);
     await checkpoint();return result;
   }
-  return { module, manifest, base, memorySize, graphics,
+  return { module, manifest, base, memorySize, graphics, display, reducedResolution,
     mount,
     checkpoint,
     input(event) {

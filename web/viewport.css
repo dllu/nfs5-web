@@ -1,0 +1,14 @@
+/* Fit the game's native display aspect. The frontend is 640×480; race modes
+   retain their selected aspect, including the browser-sized widescreen mode. */
+#game {
+  --game-aspect: 1.3333333333333333;
+  position: fixed;
+  inset: auto;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(100vw, calc(100dvh * var(--game-aspect)));
+  height: min(100dvh, calc(100vw / var(--game-aspect)));
+  background: #000;
+  cursor: none;
+}

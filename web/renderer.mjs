@@ -305,7 +305,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   textureCreate(0,1,1,Uint8Array.of(255,255,255,255)); resize(canvas.width || 640, canvas.height || 480);
   return {
     resize, clear, draw, present, flush, textureCreate, textureUpdate, textureDestroy, readPixels, reset, stats, errors,
-    info: { vendor:adapter.info.vendor,maxTextureSize:device.limits.maxTextureDimension2D,depthFormat },
+    info: { vendor:adapter.info.vendor,software:Boolean(adapter.info.isFallbackAdapter??adapter.isFallbackAdapter),maxTextureSize:device.limits.maxTextureDimension2D,depthFormat },
     get width() { return width; }, get height() { return height; },
     async validate() { await device.queue.onSubmittedWorkDone(); check(); },
     close() { if (closed) return; closed = true; for (const entry of textures.values()) entry.texture.destroy(); color.destroy(); depth.destroy(); vertexBuffer?.destroy(); indexBuffer?.destroy(); uniformBuffer?.destroy(); context.unconfigure(); device.destroy(); },

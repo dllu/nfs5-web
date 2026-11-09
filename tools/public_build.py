@@ -123,7 +123,7 @@ def main():
     static = ['engine.js', 'engine.wasm', 'manifest.json', 'game.exe']
     for name in static:
         shutil.copyfile(source / name, destination / name)
-    for name in ['play.mjs', 'play.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'config.mjs',
+    for name in ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'config.mjs',
                  'input.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']:
         shutil.copyfile(ROOT / 'web' / name, destination / name)
     shutil.copyfile(ROOT / 'web/play.html', destination / 'index.html')

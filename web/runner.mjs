@@ -8,8 +8,9 @@ self.onmessage = async ({ data }) => {
   if (data.type !== 'start' || runtime) return;
   try {
     runtime = await loadRuntime({ log: text => self.postMessage({ type: 'log', text }), audio: data.audio, display: data.display,
-      intro:data.intro,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
-    self.postMessage({ type: 'loaded', manifest: runtime.manifest });
+      intro:data.intro,softwarePixelLimit:data.softwarePixelLimit,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
+    self.postMessage({ type: 'loaded', manifest: runtime.manifest, graphics:runtime.graphics?.renderer.info,
+      display:runtime.display,reducedResolution:runtime.reducedResolution });
     const result = await runtime.runAsync(data.milliseconds??0);
     // Keep the diagnostic's final frame visible after releasing its GPU device.
     let frame;
