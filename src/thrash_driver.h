@@ -3,6 +3,7 @@
  * The browser transport replaces its native SDL backend and input plumbing. */
 #ifndef NFS5_THRASH_DRIVER_H
 #define NFS5_THRASH_DRIVER_H
+#include "thrash_config.h"
 #define THRASH_MODULE 0x7A000001u
 #define MAX_TEXTURES 8192
 static const uint32_t mode_sizes[][2]={{640,480},{800,600},{1024,768},{1280,720},{1280,960},{1600,1200},{1920,1080},{960,720},{1600,900},{2560,1440},{3840,2160},{5120,2880},{6144,3456},{320,240}};
@@ -50,6 +51,8 @@ static texture_slot *find_texture(uint32_t va) {
 }
 static void make_descriptor(void) {
     if(descriptor)return;
+    /* Native about/init both enter the guarded option reader 10002440. */
+    thrash_load_configuration();
     descriptor=hle_va(hle_alloc(0xD0));modes=hle_va(hle_alloc(40*(MODE_COUNT+1)));
     lockdesc=hle_va(hle_alloc(20));
     surface_info=hle_va(hle_alloc(20));
@@ -177,6 +180,12 @@ static void submit(const nfspu_gpu_vertex *v,uint32_t n,const uint32_t *idx,uint
         }v=adjusted;
     }
     nfspu_gpu_state s=render_state;s.primitive=primitive;
+    /* Native 10008ADA: OGL_TEXFILTER 1 forces bilinear/trilinear, 2 forces
+     * nearest spatial/mip sampling. Zero keeps the raw states 7 and 11. */
+    if(s.texture&&thrash_texture_filter){
+        s.filter_linear=thrash_texture_filter==1;
+        if(s.mip_filter)s.mip_filter=thrash_texture_filter==1?2:1;
+    }
     if(expanded)s.cull=1; /* Native line/point rasterization has no face culling. */
     if(!gpu->draw(v,n,idx,ni,&s))hle_fatal("WebGPU draw: %s",gpu_error);
     free(adjusted);
@@ -327,9 +336,9 @@ static void r_state(void) {
     case 7:render_state.filter_linear=v!=0;break;
     case 8:render_state.mip_lod_bias=as_float(v);break;
     case 11:render_state.mip_filter=v==0?0:v==1?1:2;break;
-    case 13:render_state.address_u=render_state.address_v=v;render_state.address_wrap=v==1;break;
-    case 65:render_state.address_u=v;break;
-    case 66:render_state.address_v=v;break;
+    case 13:if(previous!=v){render_state.address_u=render_state.address_v=v;render_state.address_wrap=v==1;}break;
+    case 65:if(previous!=v)render_state.address_u=v;break;
+    case 66:if(previous!=v)render_state.address_v=v;break;
     /* Native 10005FB7: v0/v1 disable blending for ABI >=107; v2/v3
      * enable blending and alpha > reference. Older ABIs enable v1 too.
      * State 36 changes only the reference, including the valid value zero. */
@@ -506,6 +515,7 @@ static void thrash_reset(void) {
     descriptor=modes=formats=framebuffer=framebuffer_capacity=lockdesc=surface_info=callbacks=0;
     width=640;height=480;color_bits=16;window_color_clear=1;opened=trace=0;thrash_version=107;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
+    thrash_configuration_loaded=thrash_environment_loaded=0;thrash_texture_filter=0;
     frames=draws=uploads=software_frames=partial_clears=thrash_calls=0;vertex_stride=sprite_stride=32;
     render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.depth_write=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1,.alpha_func=4,
         .stencil_func=7,.stencil_ref=2,.stencil_read_mask=255,.stencil_write_mask=255,.color_write=1};

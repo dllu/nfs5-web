@@ -314,7 +314,24 @@ try {
       const {loadRuntime}=await import('./runtime.mjs');
       const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;document.body.prepend(canvas);
       runtime=await loadRuntime({canvas,persist:false,intro:false});
-      const renderer=runtime.graphics.renderer,present=renderer.present;
+      const {module}=runtime;
+      // Exercise the startup patch's driver [ENV] loader, not a test-side
+      // SetEnvironmentVariable call. These files belong to this isolated run.
+      const fixture=new TextEncoder().encode('[THRASH]\nFile=opengl3z.dll\nType=opengl\n[ENV]\nOGL_TEXFILTER=1\nBROWSER_ENV_CHECK=loaded-before-renderer\n');
+      const id=runtime.mount('C:\\nfs5\\Drivers\\opengl3\\thrash.ini'),pointer=module._malloc(fixture.length);
+      try{module.HEAPU8.set(fixture,pointer);if(!module._web_fs_store(id,pointer,fixture.length))throw new Error('Driver environment fixture failed');}
+      finally{module._free(pointer);}
+      const renderer=runtime.graphics.renderer,present=renderer.present,draw=renderer.draw;
+      const filtering={textured:0,nearestSpatial:0,nearestMip:0,framebufferCopies:0};
+      renderer.draw=(...args)=>{
+        const state=args[2];if(state?.texture){
+          // Synthetic framebuffer copies disable diffuse-alpha modulation
+          // and keep point sampling, independently of native geometry state.
+          if(!state.alpha_modulate)filtering.framebufferCopies++;
+          else{filtering.textured++;filtering.nearestSpatial+=Number(!state.filter_linear);filtering.nearestMip+=Number(state.mip_filter===1);}
+        }
+        return draw(...args);
+      };
       let capture,busy=false,last=0,resolveFrame;
       const frame=new Promise(resolve=>resolveFrame=resolve);
       renderer.present=()=>{
@@ -338,7 +355,20 @@ try {
       const run=runtime.runAsync(0);
       await Promise.race([frame,run.then(result=>{throw new Error(`Original menu did not produce its gradient: ${result.error}`);})]);
       runtime.stop();const result=await run;
-      const {module,base}=runtime;
+      renderer.draw=draw;renderer.present=present;
+      const {base}=runtime;
+      // The game and its workers have stopped before invoking the snapshot API.
+      const environmentSlot=runtime.manifest.imports.find(i=>i.name==='GetEnvironmentStringsW').slot;
+      const environmentResult=await runtime.invokeAsync(environmentSlot);
+      if(environmentResult.status)throw new Error(environmentResult.error);
+      const environmentBlock=environmentResult.registers[0],environmentView=new DataView(module.HEAPU8.buffer,base);
+      const environment=[];let at=environmentBlock;
+      while(environmentView.getUint16(at,true)){
+        let entry='';for(let c;(c=environmentView.getUint16(at,true));at+=2)entry+=String.fromCharCode(c);
+        environment.push(entry);at+=2;
+      }
+      const freeSlot=runtime.manifest.imports.find(i=>i.name==='FreeEnvironmentStringsW').slot;
+      const freed=await runtime.invokeAsync(freeSlot,[environmentBlock]);if(freed.status||freed.registers[0]!==1)throw new Error('Driver environment snapshot release failed');
       if(module.HEAPU8[base+0x6197aa]!==1||!runtime.seen(0x4d96b0))throw new Error('Original frontend did not enable and execute Gouraud UI geometry');
       // The original caller must convert the selected built-in portrait and
       // produce its browser-local FSH, as well as painting the face on screen.
@@ -364,10 +394,11 @@ try {
       const viewportMode=[Math.max(640,Math.round(innerWidth*devicePixelRatio)),Math.max(480,Math.round(innerHeight*devicePixelRatio)),32];
       const still=document.createElement('canvas');still.width=640;still.height=480;still.id='menu-frame';
       still.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(capture.pixels),640,480),0,0);canvas.replaceWith(still);
-      return {top:capture.top,middle:capture.middle,bottom:capture.bottom,graphics,raceMode,viewportMode,
+      return {top:capture.top,middle:capture.middle,bottom:capture.bottom,graphics,raceMode,viewportMode,filtering,environment,
         portraitColors:capture.portraitColors,portraitSize,mmx:view.getUint32(0x5deb18,true),stopped:result.stopped,gpuErrors:renderer.errors};
     }finally{clearTimeout(watchdog);runtime?.stop();runtime?.dispose();}
   });
+  await writeFile('build/original-menu-gradients.json',JSON.stringify(menu,null,2)+'\n');
   assert.equal(menu.stopped,true);assert.deepEqual(menu.gpuErrors,[]);assert.deepEqual(errors,[]);
   assert.deepEqual(menu.graphics,{Resolutions:26,CarChrome:2,CarDetail:4,SpecialFX:3,ViewDistance:3,
     Headlights:1,LensFlare:1,TextureDetail:4,SkyRendering:2},'Original frontend initializes maximum quality and the viewport race mode');
@@ -375,8 +406,10 @@ try {
   assert.equal(menu.mmx,1,'Original CPU detection enables the MMX capability required by flare initialization');
   assert(menu.portraitColors>200,'Original player chooser paints its built-in portrait');
   assert.equal(menu.portraitSize,6960,'Original portrait converter writes its browser-local FSH');
+  assert(menu.environment.includes('BROWSER_ENV_CHECK=loaded-before-renderer'),'Verok startup copies the selected driver ENV section');
+  assert(menu.filtering.textured>0&&menu.filtering.nearestSpatial===0&&menu.filtering.nearestMip===0,
+    'Original frontend honors the driver bilinear/trilinear override');
   await page.locator('#menu-frame').screenshot({path:'build/original-menu-gradients.png'});
-  await writeFile('build/original-menu-gradients.json',JSON.stringify(menu,null,2)+'\n');
   console.log(`Original menu gradient verified: top ${menu.top}, middle ${menu.middle}, bottom ${menu.bottom}`);
   await page.reload();
   await page.evaluate(()=>{

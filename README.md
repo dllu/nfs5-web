@@ -28,9 +28,10 @@ incomplete.** Visual fidelity takes priority over further performance work.
 - A WebGPU Thrash replacement implements the game's geometry/texture submission,
   perspective UVs, flat/Gouraud diffuse and specular shading, blending, alpha
   tests, depth/stencil, vertex fog with ARGB strength, supplied mipmaps,
-  filtering/address modes and framebuffer transfers. An OffscreenCanvas consumer
-  receives ordered commands through a bounded shared-memory queue. Broader
-  scene/effect fidelity remains under audit.
+  filtering/address modes and framebuffer transfers. The supplied
+  `OGL_TEXFILTER=1` override forces bilinear/trilinear texture filtering.
+  An OffscreenCanvas consumer receives ordered commands through a bounded
+  shared-memory queue. Broader scene/effect fidelity remains under audit.
 - A browser-local file overlay persists saves and registry changes in IndexedDB
   per origin/executable, checkpointing every second and when play stops.
   Creating players and purchasing the first Evolution car survive a full
@@ -66,6 +67,8 @@ Côte d'Azur's pink sunset matches the native scene; its sky mesh also produces
 its gradient in an isolated WebGPU pass. The live sun object initializes its
 visibility samples and keeps sampling during driving. Visible flare artwork,
 weather, other effects and stencil-dependent scenes still need comparisons.
+Côte d'Azur currently submits only base texture levels; native mipmap submission
+still needs comparison.
 Menu clicks can require retries, and one menu-return memory fault remains
 unexplained. Custom photo import/resizing, full keyboard-layout handling and
 many unused Windows APIs are unsupported. An abrupt close can lose changes
@@ -79,10 +82,10 @@ need verification. The renderer has a core depth/stencil fallback when optional
 
 Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
-visibility. Fog state handlers are compared against the original x86 OpenGL
-driver. GPU pixels are compared against its embedded GLSL for fog, depth clipping,
-texture projection and flat/smooth color. All nine portrait pixel planes match
-native GIMME conversion.
+visibility. Fog uniforms and sampler parameters are compared against the original
+x86 OpenGL driver. GPU pixels are compared against its embedded GLSL for fog,
+depth clipping, texture projection and flat/smooth color. All nine portrait
+pixel planes match native GIMME conversion.
 The checks also exercise Windows services, threads, x87 state, storage,
 audio, input and lifecycle behavior. Real Chrome checks cover intro/audio,
 menu gradients and portraits, maximum defaults, viewport/input scaling,

@@ -483,7 +483,12 @@ try {
       await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
       expect(await pixel(8,8),color,'native independent U/V texture addressing');
     }
-    await method('_THRASH_setstate@8',13,1);await method('_THRASH_setstate@8',47,0);await method('_THRASH_setstate@8',48,0);
+    await method('_THRASH_setstate@8',13,1);
+    await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    expect(await pixel(8,8),0xff00ff00,'native repeated both-axis state retains independently selected mirror modes');
+    // State 13 is still cached as 1; change it before restoring repeat mode.
+    await method('_THRASH_setstate@8',13,0);await method('_THRASH_setstate@8',13,1);
+    await method('_THRASH_setstate@8',47,0);await method('_THRASH_setstate@8',48,0);
     await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
     expect(await pixel(8,8),0xff0000ff,'stencil states do not overwrite repeat texture addressing');
     await method('_THRASH_tfree@4',texture);

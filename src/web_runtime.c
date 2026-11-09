@@ -609,6 +609,9 @@ static int run_guest(uint32_t entry, uint32_t milliseconds) {
     deadline = milliseconds?emscripten_get_now()+milliseconds:INFINITY;
     int stopped = setjmp(stop);
     if (!stopped) {
+        /* Verok's 005A2DF4 startup trampoline loads driver [ENV] before CRT
+         * environment snapshots. This image enters that CRT at 005A2D1A. */
+        if(entry==0x005A2D1Au)thrash_load_environment();
         recomp_func_t fn = recomp_lookup(entry);
         if (!fn) fn = recomp_lookup_manual(entry);
         if (!fn) fn = web_import_lookup(entry);
