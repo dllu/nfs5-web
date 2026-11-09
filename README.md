@@ -142,8 +142,12 @@ campaign advancement remain untested.
 Visual fidelity takes priority over further performance work. The active Chrome
 test profile has maximum texture, car, lighting, world and distance controls,
 projected headlights, lens flare and high sky detail selected at 6144×3456×32.
+Those choices survive a browser restart; a Normandie race renders at that mode,
+accepts keyboard acceleration and reaches second gear without WebGPU errors.
 The supplied new-player template still defaults to medium textures; highest
 quality defaults and complete rendering of the selected effects need work.
+One menu-return memory fault remains unexplained; it did not recur in a fresh
+run with a verified asset server.
 Custom portrait conversion
 is unavailable; the original caller uses its optional-converter failure path.
 Other native-patch settings are not fully ported. Window APIs and
