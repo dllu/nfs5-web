@@ -10,6 +10,7 @@ static const uint32_t mode_sizes[][2]={{640,480},{800,600},{1024,768},{1280,720}
 enum {MODE_RESOLUTIONS=sizeof mode_sizes/sizeof mode_sizes[0],VIEWPORT_MODE=MODE_RESOLUTIONS*2+1,MODE_COUNT=VIEWPORT_MODE+1};
 static const __typeof__(web_gpu_api) *gpu=&web_gpu_api;
 static uint32_t descriptor,modes,formats,framebuffer,framebuffer_capacity,lockdesc,surface_info,callbacks;
+static uint32_t framebuffer_width,framebuffer_height,framebuffer_ui;
 static uint32_t width=640,height=480,color_bits=16;
 static uint32_t window_color_clear=1;
 static int opened,trace;
@@ -111,6 +112,7 @@ static void r_mode(void) {
     make_descriptor();uint32_t i=A32(0);
     if(!i||i>MODE_COUNT||!MEM32(modes+i*40+16))RET(0,3);
     width=MEM32(modes+i*40);height=MEM32(modes+i*40+4);
+    framebuffer_width=width;framebuffer_height=height;framebuffer_ui=0;
     uint32_t bits=A32(2);color_bits=bits==2||bits==32?32:16;
     if(color_bits>MEM32(modes+i*40+8))color_bits=16;
     if(opened){if(!gpu->resize(width,height))RET(0,3);}else if(!open_gpu())RET(0,3);
@@ -403,15 +405,25 @@ static void r_state(void) {
 static void r_lock(void) {
     if(!open_gpu())RET(0,0);
     if(!lockdesc)lockdesc=hle_va(hle_alloc(32));
-    uint32_t required=width*height*color_bits/8;
+    /* A scaled software interface must also read back in logical units.
+     * Reading physical pixels and enlarging them again at Unlock recursively
+     * copies the previous loading image into its otherwise black margins. */
+    uint32_t w=ui_draw_depth?ui_size[0]:width,h=ui_draw_depth?ui_size[1]:height;
+    uint32_t required=w*h*color_bits/8;
     if(required>framebuffer_capacity){if(framebuffer)hle_free(hle_ptr(framebuffer));framebuffer=hle_va(hle_alloc(required));framebuffer_capacity=required;}
     uint8_t *rgba=malloc((size_t)width*height*4);if(!rgba)RET(0,0);
     int ok=gpu->read_pixels(rgba,width,height);
-    if(ok)for(uint32_t i=0;i<width*height;i++) {
-        if(color_bits==16)MEM16(framebuffer+i*2)=((rgba[i*4]>>3)<<11)|((rgba[i*4+1]>>2)<<5)|(rgba[i*4+2]>>3);
-        else MEM32(framebuffer+i*4)=0xFF000000u|rgba[i*4]<<16|rgba[i*4+1]<<8|rgba[i*4+2];
+    if(ok)for(uint32_t y=0;y<h;y++) {
+        uint32_t sy=h==height?y:(uint64_t)(2*y+1)*height/(2*h);
+        for(uint32_t x=0;x<w;x++) {
+            uint32_t sx=w==width?x:(uint64_t)(2*x+1)*width/(2*w);
+            uint32_t i=y*w+x;const uint8_t *s=rgba+((size_t)sy*width+sx)*4;
+            if(color_bits==16)MEM16(framebuffer+i*2)=((s[0]>>3)<<11)|((s[1]>>2)<<5)|(s[2]>>3);
+            else MEM32(framebuffer+i*4)=0xFF000000u|s[0]<<16|s[1]<<8|s[2];
+        }
     }
-    free(rgba);MEM32(lockdesc)=framebuffer;MEM32(lockdesc+4)=width*color_bits/8;MEM32(lockdesc+8)=color_bits==16?4:6;MEM32(lockdesc+12)=width;MEM32(lockdesc+16)=height;
+    free(rgba);framebuffer_width=w;framebuffer_height=h;framebuffer_ui=ui_draw_depth!=0;
+    MEM32(lockdesc)=framebuffer;MEM32(lockdesc+4)=w*color_bits/8;MEM32(lockdesc+8)=color_bits==16?4:6;MEM32(lockdesc+12)=w;MEM32(lockdesc+16)=h;
     RET(ok?lockdesc:0,0);
 }
 static uint8_t *decode_window_pixels(uint32_t p,uint32_t w,uint32_t h) {
@@ -424,18 +436,18 @@ static uint8_t *decode_window_pixels(uint32_t p,uint32_t w,uint32_t h) {
         rgba[i*4]=r;rgba[i*4+1]=g;rgba[i*4+2]=b;rgba[i*4+3]=255;
     }return rgba;
 }
-static int blit_pixels(uint32_t p,uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
+static int blit_pixels(uint32_t p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,int logical) {
     if(!open_gpu())return 0;
     uint8_t *rgba=decode_window_pixels(p,w,h);if(!rgba)return 0;
     uint32_t tex=gpu->texture_create(w,h,rgba,1);free(rgba);if(!tex)return 0;
     nfspu_gpu_vertex v[4]={{x,y,0,1,0xFFFFFFFF,0,0,0},{x+w,y,0,1,0xFFFFFFFF,0,1,0},{x+w,y+h,0,1,0xFFFFFFFF,0,1,1},{x,y+h,0,1,0xFFFFFFFF,0,0,1}};
-    if(ui_draw_depth)for(unsigned i=0;i<4;i++){v[i].x*=ui_scale[0];v[i].y*=ui_scale[1];}
+    if(logical)for(unsigned i=0;i<4;i++){v[i].x*=ui_scale[0];v[i].y*=ui_scale[1];}
     const uint32_t idx[]={0,1,2,0,2,3};nfspu_gpu_state s={.texture=tex,.src_blend=2,.dst_blend=1,.cull=1,.color_write=1};
     int ok=gpu->draw(v,4,idx,6,&s);gpu->texture_destroy(tex);return ok;
 }
 static void r_unlock(void){
     uint32_t p=A32(0)?MEM32(A32(0)):framebuffer;
-    int ok=blit_pixels(p,0,0,width,height);
+    int ok=blit_pixels(p,0,0,framebuffer_width,framebuffer_height,framebuffer_ui);
     /* Software movie playback writes the front buffer directly and never
      * calls pageflip. The original surface Unlock made those writes visible. */
     if(ok)ok=gpu->present();
@@ -454,7 +466,7 @@ static void r_readrect(void){
         else MEM32(p+n*4)=0xFF000000u|s[0]<<16|s[1]<<8|s[2];
     }free(rgba);RET(ok,5);
 }
-static void r_writerect(void){RET(blit_pixels(A32(4),A32(0),A32(1),A32(2),A32(3)),5);}
+static void r_writerect(void){RET(blit_pixels(A32(4),A32(0),A32(1),A32(2),A32(3),ui_draw_depth!=0),5);}
 
 /* nfs5.dll:10003320 guards four original readback call sites. Preserve the
  * native signed comparisons, wrapping arithmetic and one-pixel edge margin. */
@@ -515,6 +527,7 @@ static void thrash_reset(void) {
     for(unsigned i=0;i<MAX_TEXTURES;i++){free(textures[i].pixels);free(textures[i].palette);}
     memset(textures,0,sizeof textures);memset(state_values,0,sizeof state_values);
     descriptor=modes=formats=framebuffer=framebuffer_capacity=lockdesc=surface_info=callbacks=0;
+    framebuffer_width=640;framebuffer_height=480;framebuffer_ui=0;
     width=640;height=480;color_bits=16;window_color_clear=1;opened=trace=0;thrash_version=107;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
     thrash_configuration_loaded=thrash_environment_loaded=0;thrash_texture_filter=0;

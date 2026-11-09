@@ -48,6 +48,7 @@ def main():
         ui = UiHooks()
         patches.append('browser-ui-layout')
         patches.append('browser-scaled-ui')
+        patches.append('browser-logical-framebuffer')
     functions = discover_functions(data, info, iat)
     lifter = Lifter(iat_map=iat, lifted=set(functions))
     unsupported = Counter()

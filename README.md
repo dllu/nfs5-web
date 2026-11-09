@@ -17,7 +17,8 @@ incomplete.** Visual fidelity takes priority over further performance work.
   New profiles default to a 32-bit mode at the viewport's physical-pixel size.
   Mouse coordinates follow the scaling across resizes. HUD text, gauges,
   minimap strokes, loading artwork and pause controls scale independently of
-  scene resolution and remain readable at 4K/6K.
+  scene resolution and remain readable at 4K/6K. Loading-screen locks use the
+  same logical dimensions as their uploads, preserving the black margins.
 - New profiles use the highest exposed graphics settings: Very High textures,
   car detail, world quality and distance; High car lighting and sky; projected
   headlights and lens flare. Existing profiles retain their preferences;
@@ -108,8 +109,12 @@ audio, input and lifecycle behavior. Real Chrome checks cover intro/audio,
 menu gradients and portraits, maximum defaults, viewport/input scaling,
 persistence and Stop/restart. A separate navigation check exercises the running
 frontend at three viewport sizes using normal mouse clicks and rendered-screen
-readiness checks. GPU pixel tests cover native shading, blend/alpha/depth/stencil
-semantics, mipmaps, addressing, scaled UI and framebuffer transfers, including
+readiness checks. Twelve original loading updates pass in SwiftShader at wide,
+tall and 4K sizes. A fresh GB10 loading check and broader browser/renderer
+rechecks are pending after a display-driver stall during a native reference
+run; subsequent Chrome requests report no adapter or time out. GPU pixel tests
+cover native shading, blend/alpha/depth/stencil semantics, mipmaps, addressing,
+scaled UI and framebuffer transfers, including
 4K output. These checks do not measure gameplay FPS. Detailed evidence and
 limitations are recorded in the [progress diary](diary/).
 
@@ -136,11 +141,14 @@ With the server running:
 ```sh
 npm run test:browser
 npm run test:navigation
+npm run test:loading
 npm run test:renderer
 ```
 
 Reports and screenshots go to `build/`. Renderer checks use normal Chrome;
 headless Vulkan initialization is unreliable on this machine.
+`NFS5_GPU_SOFTWARE=1 npm run test:loading` explicitly selects SwiftShader for
+loading-screen checks; it does not measure hardware performance.
 `python3 tools/build.py --profile` emits a Wasm symbol map.
 `--optimize 1` and `--linear-fpu` use separate object caches for compiler and
 x87-layout comparisons; the default build uses optimization level 2.

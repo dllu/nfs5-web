@@ -11,7 +11,7 @@ HEIGHT_READS = '''417AA7 417AC3 41AE3D 41B113 41B7BC 41BA53 41BCE3
 41CB32 41CB4D 41DE5A 421906 42446D 427B06 427B2C 4289E4 428A4C
 428B38 42A4A6 42DF21 42E0B0 432971 432BD9 432CB0 432CFF 4345A4
 43463A 434811 43497E 436DFD 437373 4374A8'''.split()
-DIRECT_DRAWS = ['419C28', '431369', '432C57', '432CDA', '432D68', '4A53A2', '4A53AA']
+DIRECT_DRAWS = ['419C28', '431369', '432C57', '432CDA', '432D68', '4A5371', '4A53A2', '4A53AA']
 MOUSE_READS = ['41B376', '425288', '425873', '425F10', '42607D',
                '42D4F3', '42F2F0', '430E35']
 
@@ -39,7 +39,8 @@ class UiHooks:
                 instruction(pc, size)
         # The race-loading screen paints its original 640x480 bitmap first,
         # then centers/presents it separately from the interface command queue.
-        # Scope both the tiled draw and software-surface unlock/upload.
+        # Scope the software-surface lock, tiled draw and unlock/upload so
+        # readback and drawing use the same logical coordinate space.
         instruction('4A5376', lambda line: line.replace('MEM32(0x5DEACC)', 'web_ui_extent(1)'))
         instruction('4A537B', lambda line: line.replace('MEM32(0x5DEAC8)', 'web_ui_extent(0)'))
         # HUD records are keyed by their logical dimensions. The original
