@@ -27,7 +27,8 @@ Current implementation:
 - Mutex/event/semaphore handles, recursive ownership, named references, and
   blocking waits are implemented. Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
-  register file. Up to seven guest workers can run alongside the primary thread.
+  register file. Exact x87 integer shadows are saved with the floating-point
+  registers. Up to seven guest workers can run alongside the primary thread.
 - Browser startup runs off the UI thread. The static server supplies the
   cross-origin isolation headers required for shared Wasm memory.
 - Multimedia timers share one sleeping dispatcher and execute the original
@@ -79,7 +80,7 @@ Current implementation:
 
 Validation includes 165 original-x86/Unicorn versus Wasm comparisons across five
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
-40 thread, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
+40 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
 17 lifecycle checks and 10 startup-configuration checks. These include seven-worker
 contention, cancellation in original compute loops and disposal while a worker

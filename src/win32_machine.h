@@ -8,6 +8,7 @@
 typedef struct {
     uint32_t r[8], flags[4], fs, gs, es, mxcsr, function, backedges, import[10];
     double st[8];
+    int64_t st_i64[8];
     int fp_top;
     uint16_t cw, segments[6];
     uint64_t mm[8];
@@ -46,6 +47,7 @@ static void cpu_save(void) {
     memcpy(cpu.r, r, sizeof r); memcpy(cpu.flags, flags, sizeof flags);
     memcpy(cpu.segments, segments, sizeof segments);
     memcpy(cpu.st, g_st, sizeof g_st); memcpy(cpu.mm, g_mm, sizeof g_mm); memcpy(cpu.xmm, g_xmm, sizeof g_xmm);
+    memcpy(cpu.st_i64,g_st_i64,sizeof g_st_i64);
     memcpy(cpu.import, import_info, sizeof import_info);
     cpu.fp_top = g_fp_top; cpu.cw = g_fpu_cw; cpu.mxcsr = g_mxcsr;
     cpu.fs = g_fs_base; cpu.gs = g_gs_base; cpu.es = g_es_base;
@@ -59,6 +61,7 @@ static void cpu_load(void) {
     g_seg_cs = cpu.segments[0]; g_seg_ds = cpu.segments[1]; g_seg_es = cpu.segments[2];
     g_seg_fs = cpu.segments[3]; g_seg_gs = cpu.segments[4]; g_seg_ss = cpu.segments[5];
     memcpy(g_st, cpu.st, sizeof g_st); memcpy(g_mm, cpu.mm, sizeof g_mm); memcpy(g_xmm, cpu.xmm, sizeof g_xmm);
+    memcpy(g_st_i64,cpu.st_i64,sizeof g_st_i64);
     memcpy(import_info, cpu.import, sizeof import_info);
     g_fp_top = cpu.fp_top; g_fpu_cw = cpu.cw; g_mxcsr = cpu.mxcsr;
     g_fs_base = cpu.fs; g_gs_base = cpu.gs; g_es_base = cpu.es;

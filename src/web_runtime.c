@@ -560,6 +560,7 @@ uint32_t web_init(void) {
     next_thread_id = 2; cancel_workers = fatal_pending = 0; atomic_store(&stop_requested,0);error_thread = 0;
     g_flag_k = g_flag_a = g_flag_b = g_flag_cf = 0;
     memset(g_st, 0, sizeof g_st);
+    memset(g_st_i64,0,sizeof g_st_i64);
     g_fp_top = 0; g_fpu_cw = 0x37F;
     error[0] = 0; last_pc = first_pc = 0;
     memset(import_info, 0, sizeof import_info); import_info[0] = 0xFFFFFFFF;
