@@ -5,9 +5,10 @@
   "scripts": {
     "build": "python3 tools/build.py",
     "serve": "python3 tools/serve.py",
-    "test": "node tests/config.mjs && node tests/fpu-core.mjs && node tests/startup.mjs && node tests/differential.mjs && node tests/services.mjs && node tests/memory.mjs && node tests/synchronization.mjs && node tests/threads.mjs && node tests/fpu-state.mjs && node tests/timers.mjs && node tests/dinput.mjs && node tests/files.mjs && node tests/copy-files.mjs && node tests/mapping.mjs && node tests/dsound.mjs && node tests/registry.mjs && node tests/windows.mjs && node tests/thrash.mjs && node tests/lifecycle.mjs",
+    "test": "node tests/config.mjs && node tests/fpu-core.mjs && node tests/startup.mjs && node tests/differential.mjs && node tests/services.mjs && node tests/memory.mjs && node tests/synchronization.mjs && node tests/threads.mjs && node tests/fpu-state.mjs && node tests/timers.mjs && node tests/dinput.mjs && node tests/files.mjs && node tests/copy-files.mjs && node tests/mapping.mjs && node tests/dsound.mjs && node tests/registry.mjs && node tests/windows.mjs && node tests/thrash.mjs && node tests/gpu-transport.mjs && node tests/lifecycle.mjs",
     "test:browser": "node tests/browser.mjs",
-    "test:renderer": "node tests/renderer.mjs"
+    "test:renderer": "node tests/renderer.mjs",
+    "test:transport": "node tests/gpu-transport.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.58.2"

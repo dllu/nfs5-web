@@ -160,6 +160,16 @@ try {
     vertex(vertices,0,0,0xffff0000);vertex(vertices+32,64,0,0xffff0000);vertex(vertices+64,0,64,0xffff0000);
     await method('_THRASH_setstate@8',4,1);await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
     expect(await pixel(8,8),0xffff0000,'native triangle');
+    const flushAddress=await invoke('GetProcAddress',library,text('_THRASH_flushwindow@0'));
+    // Keep the JS consumer idle until both guest calls return. Flush must not
+    // wait for this thread; queued draws own their vertex bytes at publication.
+    for(let i=0;i<3;i++)put(vertices+i*32+16,0xff00ff00);
+    for(const [address,args] of [[functions.get('_THRASH_drawtri@12'),[vertices,vertices+32,vertices+64]],[flushAddress,[]]]) {
+      const result=runtime.call(address,...args);calls++;
+      expect(result.status,0,'synchronous graphics producer');expect(result.registers[0],1,'queued draw/flush return');
+    }
+    for(let i=0;i<3;i++)put(vertices+i*32+16,0xff0000ff);
+    expect(await pixel(8,8),0xff00ff00,'draw snapshot and readback after asynchronous flush');
     const texture=await method('_THRASH_talloc@20',2,2,4,0,0),pixels=data+8192;
     [0xf800,0x07e0,0x001f,0xffff].forEach((v,i)=>view.setUint16(pixels+i*2,v,true));
     expect(await method('_THRASH_tupdate@12',texture,pixels,0),texture,'RGB565 upload');

@@ -84,7 +84,11 @@ static void gpu_clear(uint32_t color,float depth) {
     uint32_t args[2] = {color,0}; memcpy(args+1,&depth,4); gpu_send(GPU_CLEAR,args,8,NULL,0,NULL,0);
 }
 static int gpu_present(void) { gpu_wait(gpu_send(GPU_PRESENT,NULL,0,NULL,0,NULL,0)); return 1; }
-static int gpu_flush(void) { gpu_wait(gpu_send(GPU_FLUSH,NULL,0,NULL,0,NULL,0)); return 1; }
+/* Verok's _THRASH_flushwindow (10008690) submits its batch and calls glFlush
+ * through 1000C068; glFinish uses the separate 1000C038 slot. Publish in order
+ * without an acknowledgement round trip. Payloads already belong to the queue;
+ * backpressure and subsequent present/readback/resize/reset barriers still wait. */
+static int gpu_flush(void) { gpu_send(GPU_FLUSH,NULL,0,NULL,0,NULL,0); return 1; }
 static int gpu_texture_write(uint32_t id,const uint8_t *rgba) {
     unsigned slot;
     for(slot=0;slot<8192;slot++)if(gpu_textures[slot].id==id)break;

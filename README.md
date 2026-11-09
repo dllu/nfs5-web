@@ -75,7 +75,9 @@ Current implementation:
   bounded shared-memory queue, with chunked texture uploads, framebuffer
   reads/writes and mode changes. Queue writes, free space and completed barriers
   wake their consumers/producers through shared-memory notifications; older
-  engines retain polling. The original video decoder presents through
+  engines retain polling. Flush queues an ordered submission without waiting
+  for a consumer acknowledgement; presentation, readback, resize and reset
+  retain their barriers. The original video decoder presents through
   framebuffer lock/unlock. The frontend submits original geometry and textures.
   Multitexture, mipmap and broader 3D scene fidelity remain unverified.
 
@@ -83,7 +85,7 @@ Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 40 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
-17 lifecycle checks and 10 startup-configuration checks. These include seven-worker
+26 graphics-transport, 17 lifecycle and 10 startup-configuration checks. These include seven-worker
 contention, cancellation in original compute loops and disposal while a worker
 holds the VM in guest code.
 Another 24,000 stack-model transitions check both x87 storage layouts against an
@@ -97,9 +99,10 @@ An additional 15-second original-code run verifies advancing video, visible
 pixels, timer callbacks and nonzero game PCM.
 Chrome also verifies unbounded Run game, cooperative Stop and a fresh restart.
 27 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
-an OffscreenCanvas rendered in a dedicated Worker. Another 41 checks exercise
+an OffscreenCanvas rendered in a dedicated Worker. Another 47 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
-wrapping under texture-upload backpressure. A legacy polling check also covers
+wrapping under texture-upload backpressure, asynchronous flush and reuse of
+guest vertex memory before consumer execution. A legacy polling check also covers
 commands arriving after idle. These checks do not measure game FPS.
 
 Manual Chrome navigation reaches quick-race setup and renders the Côte d'Azur
@@ -118,7 +121,7 @@ text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
 The 4K/120 Hz gameplay target remains unmet: short Chrome driving samples at
-3840x2160 averaged 80–82 presented frames per second with the current build.
+3840x2160 averaged 81–85 presented frames per second with the current build.
 Sustained performance across tracks remains untested. The optimized Wasm module
 is about 84 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
