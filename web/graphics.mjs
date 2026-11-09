@@ -5,7 +5,13 @@ const stateFields = ['texture','depth_test','depth_write','blend_enable','src_bl
   'scissor_enable','scissor_x','scissor_y','scissor_w','scissor_h','alpha_modulate','fog_mode','fog_density','shade_mode',
   'mip_filter','address_u','address_v','mip_lod_bias','alpha_func',
   'stencil_enable','stencil_func','stencil_fail','stencil_depth_fail','stencil_pass',
-  'stencil_ref','stencil_read_mask','stencil_write_mask','color_write'];
+  'stencil_ref','stencil_read_mask','stencil_write_mask','color_write','gamma'];
+
+export function decodeGraphicsState(words) {
+  const state={},floats=new Float32Array(words.buffer,words.byteOffset,words.length);
+  for(let i=0;i<words.length;i++)state[stateFields[i]]=[13,14,24,29,40].includes(i)?floats[i]:words[i];
+  return state;
+}
 
 export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true } = {}) {
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
@@ -16,8 +22,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
     const version=Atomics.load(header,6);
-    if(![1,2,3,4,5,6].includes(version))throw new Error('Unsupported graphics transport version');
-    stateSize=version>=6?40:version>=5?31:version>=4?30:version>=3?26:25;
+    if(![1,2,3,4,5,6,7].includes(version))throw new Error('Unsupported graphics transport version');
+    stateSize=version>=7?41:version>=6?40:version>=5?31:version>=4?30:version>=3?26:25;
     const size=Atomics.load(header,5)>>>0;
     if(!size || (size&(size-1)))throw new Error('Invalid graphics queue size');
     ring=new Uint32Array(module.HEAPU8.buffer,pointer+32,size);
@@ -37,9 +43,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   }
   function state(data) {
     if(!stateWords || stateWords.some((v,i)=>v!==data[i])) {
-      stateWords=data.slice(0,stateSize);stateCache={serial:++serial};
-      const floats=new Float32Array(stateWords.buffer);
-      for(let i=0;i<stateSize;i++)stateCache[stateFields[i]]=i===13||i===14||i===24||i===29?floats[i]:stateWords[i];
+      stateWords=data.slice(0,stateSize);stateCache={...decodeGraphicsState(stateWords),serial:++serial};
     }
     return stateCache;
   }

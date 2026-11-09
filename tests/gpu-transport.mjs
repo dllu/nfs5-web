@@ -73,7 +73,7 @@ try {
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
-  assert.equal(Atomics.load(header,6),6,'Stencil state and aspect clears use transport v6');checks++;
+  assert.equal(Atomics.load(header,6),7,'Gamma state uses transport v7');checks++;
   for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000],[10,3],[36,128],[47,1],[48,5],[52,3],[53,4],[54,6]])assert.equal(await call(methods.setstate,[state,value]),1);
   assert.equal(await call(methods.window,[3]),1);
   const vertex=data+256;
@@ -84,14 +84,15 @@ try {
   for(const mode of [0,2,1]) {
     assert.equal(await call(methods.setstate,[6,mode]),1);
     assert.equal(await call(methods.drawtri,[vertex,vertex+32,vertex+64]),1);
-    const draw=await packet(4),state=draw.words.subarray(3,43);
+    const draw=await packet(4),state=draw.words.subarray(3,44);
     assert.equal(state[25],mode,'Shading mode survives queued state snapshot');
     assert.equal(state[22],1,'Native texture alpha modulation is enabled');
     assert.deepEqual(Array.from(state.slice(26,31)),[2,1,2,0xbf800000,4],'Sampling state and strict greater alpha comparison');
-    assert.deepEqual(Array.from(state.slice(31)),[1,5,3,4,6,2,255,255,1],'Stencil compare/operations and fixed reference/masks');
+    assert.deepEqual(Array.from(state.slice(31,40)),[1,5,3,4,6,2,255,255,1],'Stencil compare/operations and fixed reference/masks');
+    assert.equal(state[40],0x3f800000,'Default gamma does not alter colors');
     assert.deepEqual([state[3],state[9],state[10]],[1,1,128],'Blend mode and independent alpha reference');
-    assert.deepEqual(Array.from(draw.words.slice(43,45)),[3,0],'Extended-state vertex/index counts');
-    assert.equal(draw.words[49],0x80402010);assert.equal(draw.words[50],0x40203040);checks++;
+    assert.deepEqual(Array.from(draw.words.slice(44,46)),[3,0],'Extended-state vertex/index counts');
+    assert.equal(draw.words[50],0x80402010);assert.equal(draw.words[51],0x40203040);checks++;
     acknowledge(draw);
   }
   assert.equal(await call(methods.clip,[10,20,30,40]),1);

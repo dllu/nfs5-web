@@ -7,6 +7,7 @@
 static int thrash_configuration_loaded;
 static int thrash_environment_loaded;
 static uint32_t thrash_texture_filter;
+static float thrash_gamma_factor=1;
 static int thrash_environment_value(const char *name,char value[12]) {
     uint16_t key[128];unsigned n=0;
     while(name[n]&&n<127){key[n]=cp1252_decode((uint8_t)name[n]);n++;}key[n]=0;
@@ -119,5 +120,9 @@ static void thrash_load_configuration(void) {
     thrash_configuration_loaded=1;
     thrash_texture_filter=thrash_option("TEXFILTER",0);
     if(thrash_texture_filter>2)thrash_texture_filter=0;
+    /* Native 10002612..1000267B uses unsigned conversion and double
+     * arithmetic, then rounds to float before checking the allowed range. */
+    thrash_gamma_factor=(float)(thrash_option("GAMMA",5)*0.10000000149011612+0.5);
+    if(thrash_gamma_factor<0.5f||thrash_gamma_factor>1.5f)thrash_gamma_factor=1;
 }
 #endif

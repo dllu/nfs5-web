@@ -30,9 +30,11 @@ incomplete.** Visual fidelity takes priority over further performance work.
   use the original detailed frontend path.
 - A WebGPU Thrash replacement implements the game's geometry/texture submission,
   perspective UVs, flat/Gouraud diffuse and specular shading, blending, alpha
-  tests, depth/stencil, vertex fog with ARGB strength, supplied mipmaps,
-  filtering/address modes and framebuffer transfers. The supplied
+  tests, depth/stencil, vertex fog with ARGB strength, gamma correction,
+  supplied mipmaps, filtering/address modes and framebuffer transfers. The supplied
   `OGL_TEXFILTER=1` override forces bilinear/trilinear texture filtering.
+  The game's gamma preference and Verok's `OGL_GAMMA` scale affect fragment
+  shading and clear colors; the supplied default leaves colors unchanged.
   An OffscreenCanvas consumer receives ordered commands through a bounded
   shared-memory queue. Broader scene/effect fidelity remains under audit.
 - A browser-local file overlay persists saves and registry changes in IndexedDB
@@ -101,6 +103,10 @@ Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
 visibility and weather curves. Hardware/texture capability flags, fog uniforms
 and sampler parameters are compared against the original x86 OpenGL driver.
+Another 161 x86 comparisons check gamma configuration, aliases, stage caches
+and full/scissored clear colors, including delivery to the fragment uniform.
+The updated WGSL passes offline parsing/semantic validation; its 64 new native
+GLSL gamma pixel comparisons remain pending while browser graphics is unavailable.
 An offline x86 comparison checks 656,210 generated test texels across the five
 advertised formats, exhaustive 16-bit inputs, supplied mips and texture updates.
 Alpha and 8-bit channels match exactly; 5/6-bit colors are within one RGBA8 step

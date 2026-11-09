@@ -13,16 +13,24 @@ assert.equal(createHash('sha256').update(dll).digest('hex'),'5a57e6c244ea40ea90d
 // declarations change for WebGL2; projection, clipping and shading stay intact.
 const sources=Array.from(dll.toString('latin1').matchAll(/#version 130[^\0]+/g),m=>m[0].replace('#version 130','#version 300 es\nprecision highp float;\nprecision highp int;'));
 assert.equal(sources.length,2);
-const browser=await chromium.launchPersistentContext(resolve('.cache/chrome-native-shader-test'),{
-  executablePath:'/usr/bin/google-chrome',headless:false,viewport:{width:800,height:700},
-  args:['--no-sandbox','--disable-dev-shm-usage','--disable-breakpad','--crash-dumps-dir='+resolve('.cache/crashes')],
-});
+const validation={observedAt:new Date().toISOString(),engineSha256:createHash('sha256').update(await readFile('dist/engine.wasm')).digest('hex'),stage:'browser launch',passed:false};
+const saveValidation=()=>writeFile('build/native-shader-validation.json',JSON.stringify(validation,null,2)+'\n');
+await saveValidation();
+let browser;
 try{
+  browser=await chromium.launchPersistentContext(resolve('.cache/chrome-native-shader-test'),{
+    executablePath:'/usr/bin/google-chrome',headless:false,viewport:{width:800,height:700},
+    timeout:30000,
+    args:['--no-sandbox','--disable-dev-shm-usage','--disable-breakpad','--crash-dumps-dir='+resolve('.cache/crashes')],
+  });
   const page=await browser.newPage(),session=await browser.newCDPSession(page);
+  validation.stage='page startup';await saveValidation();
   await session.send('Network.enable');
   await session.send('Network.setCacheDisabled',{cacheDisabled:true});
   await page.goto('http://127.0.0.1:8000');
-  const report=await page.evaluate(async sources=>{
+  validation.stage='adapter and pixel comparison';await saveValidation();
+  let timer;
+  const report=await Promise.race([page.evaluate(async sources=>{
     const {createRenderer}=await import('./renderer.mjs');
     const canvas=document.createElement('canvas');canvas.width=canvas.height=64;document.body.prepend(canvas);
     const renderer=await createRenderer(canvas),reference=document.createElement('canvas');reference.width=reference.height=64;
@@ -63,7 +71,7 @@ try{
       }
       return {largest,errors};
     }
-    const results=[],geometry=[];
+    const results=[],geometry=[],gamma=[];
     try{
       for(const [index,c]of cases.entries()){
         const vertices=new Uint8Array(128),view=new DataView(vertices.buffer);
@@ -91,6 +99,28 @@ try{
       gl.uniform1i(location('tex01'),0);renderer.textureCreate(1,8,8,pixels);
       gl.uniform1ui(location('fogMode'),0);gl.uniform1i(location('specularEnabled'),0);
       gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
+      // Gamma is the final fragment operation, after fog/specular and before
+      // framebuffer blending. Compare it directly with the embedded shader.
+      for(const correction of [.25,.5,.75,1,1.1,1.5,2,4])for(const textured of [false,true])for(const mode of [0,2,4,8]){
+        const vertices=new Uint8Array(128),view=new DataView(vertices.buffer);
+        for(let i=0;i<4;i++){
+          [i===1||i===2?64:0,i>=2?64:0,.5,[1,.125,.25,2][i]].forEach((x,j)=>view.setFloat32(i*32+j*4,x,true));
+          view.setUint32(i*32+16,0x80402010,true);view.setUint32(i*32+20,0x10201008,true);
+          view.setFloat32(i*32+24,Number(i===1||i===2),true);view.setFloat32(i*32+28,Number(i>=2),true);
+        }
+        gl.uniform1f(location('gamma'),correction);gl.uniform1i(location('texEnabled'),Number(textured));
+        gl.uniform1ui(location('fogMode'),mode);gl.uniform4f(location('fogColor'),32/255,80/255,192/255,128/255);
+        gl.uniform1f(location('fogStart'),1);gl.uniform1f(location('fogEnd'),6);gl.uniform1f(location('fogDensity'),.35);
+        gl.uniform1i(location('specularEnabled'),1);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STREAM_DRAW);
+        gl.clearColor(0,0,0,0);gl.clearDepth(1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+        gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_INT,0);
+        renderer.clear(0);renderer.draw(vertices,mesh,{texture:Number(textured),filter_linear:1,address_wrap:0,
+          alpha_modulate:1,shade_mode:2,gamma:correction,fog_enable:Number(mode!==0),fog_color:0x802050c0,
+          fog_mode:{2:1,4:2,8:3}[mode]??0,fog_near:1,fog_far:6,fog_density:.35,depth_test:1,depth_write:1});
+        const result={correction,textured,mode,...await compare()};gamma.push(result);
+        if(result.errors)throw new Error(`Native gamma pixels differ: ${JSON.stringify(result)}`);
+      }
+      gl.uniform1f(location('gamma'),1);gl.uniform1ui(location('fogMode'),0);gl.uniform1i(location('specularEnabled'),0);
       function quad({z=[.5,.5,.5,.5],rhw=[1,1,1,1],colors=[0xffc06030],inset=0,invalidUV=false}={}){
         const bytes=new Uint8Array(128),view=new DataView(bytes.buffer);
         for(let i=0;i<4;i++){
@@ -135,13 +165,17 @@ try{
         draw(quad(parameters),parameters);geometry.push({...c,...await compare()});
       }
       gl.deleteTexture(texture);
-      await renderer.validate();return {cases:results,geometry,gpuErrors:renderer.errors};
+      await renderer.validate();return {cases:results,geometry,gamma,gpuErrors:renderer.errors};
     }finally{renderer.close();gl.getExtension('WEBGL_lose_context')?.loseContext();}
-  },sources);
+  },sources),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Native shader pixel comparison timed out after 55 seconds')),55000);})]).finally(()=>clearTimeout(timer));
   assert.deepEqual(report.gpuErrors,[]);
   await writeFile('build/native-fog-renderer.json',JSON.stringify(report,null,2)+'\n');
   console.log(`${report.cases.length} native GLSL fog pixel comparisons passed (interpolation, ARGB strength, linear/exp/exp2, density and zero RHW)`);
   await writeFile('build/native-geometry-renderer.json',JSON.stringify(report.geometry,null,2)+'\n');
   assert.deepEqual(report.geometry.filter(c=>c.errors),[],'Native GLSL geometry pixel differences');
   console.log(`${report.geometry.length} native GLSL geometry comparisons passed (depth/clipping, projected UV, signed/zero/small RHW and flat/smooth color)`);
-}finally{await browser.close();}
+  await writeFile('build/native-gamma-renderer.json',JSON.stringify(report.gamma,null,2)+'\n');
+  console.log(`${report.gamma.length} native GLSL gamma comparisons passed (fog, specular, texture modulation and alpha)`);
+  Object.assign(validation,{stage:'complete',passed:true,fogCases:report.cases.length,geometryCases:report.geometry.length,gammaCases:report.gamma.length});await saveValidation();
+}catch(error){validation.error=String(error);await saveValidation();throw error;}
+finally{await browser?.close();}

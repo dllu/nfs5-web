@@ -671,7 +671,7 @@ try {
   assert.deepEqual(result.fallback.errors,[]);
   result.legacyDraws=await page.evaluate(async()=>{
     const {attachGraphics}=await import('./graphics.mjs'),results=[];
-    for(const version of [1,2,3,4,5]) {
+    for(const version of [1,2,3,4,5,6]) {
       // Older state layouts still decode geometry/textures and retain their
       // alpha >= reference comparison without the v5 alpha-function field.
       const memory=new SharedArrayBuffer(32768),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
@@ -687,10 +687,11 @@ try {
       }
       try {
         send(1,Uint32Array.of(64,64));
-        const stateSize=version>=5?31:version>=4?30:version>=3?26:25,start=stateSize+2,end=start+24;
+        const stateSize=version>=6?40:version>=5?31:version>=4?30:version>=3?26:25,start=stateSize+2,end=start+24;
         const draw=new Uint32Array(end+3),floats=new Float32Array(draw.buffer);
         draw[6]=draw[7]=draw[8]=draw[22]=1;draw[16]=4;floats[14]=floats[24]=1;
         if(version>=3)draw[25]=1;
+        if(version>=6){draw[32]=7;draw[36]=2;draw[37]=draw[38]=255;draw[39]=1;}
         draw[stateSize]=draw[stateSize+1]=3;
         [[0,0,1,0xffff0000],[64,0,.25,0xff00ff00],[0,64,.5,0xff0000ff]].forEach(([x,y,rhw,color],i)=>{
           const at=start+i*8;floats[at]=x;floats[at+1]=y;floats[at+2]=.5;floats[at+3]=rhw;draw[at+4]=color;draw[at+5]=0xffffffff;

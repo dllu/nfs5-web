@@ -54,6 +54,7 @@ static void make_descriptor(void) {
     if(descriptor)return;
     /* Native about/init both enter the guarded option reader 10002440. */
     thrash_load_configuration();
+    render_state.gamma=thrash_gamma_factor;
     descriptor=hle_va(hle_alloc(0xD0));modes=hle_va(hle_alloc(40*(MODE_COUNT+1)));
     lockdesc=hle_va(hle_alloc(20));
     surface_info=hle_va(hle_alloc(20));
@@ -129,16 +130,29 @@ static int clip_is_partial(void){
     return render_state.scissor_enable && (render_state.scissor_x!=0||render_state.scissor_y!=0||
         render_state.scissor_w!=width||render_state.scissor_h!=height);
 }
+static uint32_t gamma_clear_color(void){
+    if(render_state.gamma==1)return clear_color;
+    /* Native 1000682D applies the float reciprocal to RGB with _CIpow;
+     * alpha is unaffected. Encode its glClearColor result in our RGBA8 target. */
+    float reciprocal=1.0f/render_state.gamma;
+    uint32_t color=clear_color&0xFF000000u;
+    for(unsigned shift=0;shift<24;shift+=8){
+        double component=pow(((clear_color>>shift)&255)/255.0,reciprocal);
+        color|=(uint32_t)round(fmin(1,fmax(0,component))*255)<<shift;
+    }
+    return color;
+}
 static void r_clear(void){
     if(open_gpu()){
         /* Native 10008650 selects enabled aspects; glClear also respects the
          * depth-write mask and scissor. Stencil's native clear value is zero. */
         uint32_t mask=(window_color_clear?1:0)|
             (render_state.depth_test&&render_state.depth_write?2:0)|(render_state.stencil_enable?4:0);
+        uint32_t color=gamma_clear_color();
         if(clip_is_partial()){
             partial_clears++;
-            gpu->clear(clear_color,clear_depth,mask,0,render_state.scissor_x,render_state.scissor_y,render_state.scissor_w,render_state.scissor_h);
-        }else gpu->clear(clear_color,clear_depth,mask,0,0,0,width,height);
+            gpu->clear(color,clear_depth,mask,0,render_state.scissor_x,render_state.scissor_y,render_state.scissor_w,render_state.scissor_h);
+        }else gpu->clear(color,clear_depth,mask,0,0,0,width,height);
     }
     RET(1,0);
 }
@@ -378,6 +392,9 @@ static void r_state(void) {
      * by diffuse RGBA; it does not select alpha or disable the texture here. */
     case 41:break;
     case 42:if(v<=1)vertex_stride=v?40:32;break;
+    /* Aliases and texture stages keep separate raw caches, but update one
+     * uniform in the native driver. Repeating a cached value is a no-op. */
+    case 46:case 101:if(previous!=v)render_state.gamma=as_float(v)*thrash_gamma_factor;break;
     /* Native 10006428..100065FD: stencil compare/reference mask and ops. */
     case 47:render_state.stencil_enable=v!=0;break;
     case 48:render_state.stencil_func=v;break;
@@ -442,7 +459,9 @@ static int blit_pixels(uint32_t p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,in
     uint32_t tex=gpu->texture_create(w,h,rgba,1);free(rgba);if(!tex)return 0;
     nfspu_gpu_vertex v[4]={{x,y,0,1,0xFFFFFFFF,0,0,0},{x+w,y,0,1,0xFFFFFFFF,0,1,0},{x+w,y+h,0,1,0xFFFFFFFF,0,1,1},{x,y+h,0,1,0xFFFFFFFF,0,0,1}};
     if(logical)for(unsigned i=0;i<4;i++){v[i].x*=ui_scale[0];v[i].y*=ui_scale[1];}
-    const uint32_t idx[]={0,1,2,0,2,3};nfspu_gpu_state s={.texture=tex,.src_blend=2,.dst_blend=1,.cull=1,.color_write=1};
+    /* Native 10008090/10003DC0 override eight draw states for framebuffer
+     * transfers, but retain the current shader gamma. */
+    const uint32_t idx[]={0,1,2,0,2,3};nfspu_gpu_state s={.texture=tex,.src_blend=2,.dst_blend=1,.cull=1,.color_write=1,.gamma=render_state.gamma};
     int ok=gpu->draw(v,4,idx,6,&s);gpu->texture_destroy(tex);return ok;
 }
 static void r_unlock(void){
@@ -530,10 +549,10 @@ static void thrash_reset(void) {
     framebuffer_width=640;framebuffer_height=480;framebuffer_ui=0;
     width=640;height=480;color_bits=16;window_color_clear=1;opened=trace=0;thrash_version=107;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
-    thrash_configuration_loaded=thrash_environment_loaded=0;thrash_texture_filter=0;
+    thrash_configuration_loaded=thrash_environment_loaded=0;thrash_texture_filter=0;thrash_gamma_factor=1;
     frames=draws=uploads=software_frames=partial_clears=thrash_calls=0;vertex_stride=sprite_stride=32;
     render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.depth_write=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1,.alpha_func=4,
-        .stencil_func=7,.stencil_ref=2,.stencil_read_mask=255,.stencil_write_mask=255,.color_write=1};
+        .stencil_func=7,.stencil_ref=2,.stencil_read_mask=255,.stencil_write_mask=255,.color_write=1,.gamma=1};
     state_values[0][48]=7;
     state_values[0][6]=state_values[0][7]=state_values[0][11]=1;
     state_values[0][404]=2;state_values[0][405]=3;

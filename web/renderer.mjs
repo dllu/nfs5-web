@@ -8,7 +8,7 @@ const defaults = {
   alpha_modulate: 0, fog_mode: 0, fog_density: 1, shade_mode: 1,
   mip_filter: 0, address_u: null, address_v: null, mip_lod_bias: 0, alpha_func: 6,
   stencil_enable: 0, stencil_func: 7, stencil_fail: 0, stencil_depth_fail: 0, stencil_pass: 0,
-  stencil_ref: 2, stencil_read_mask: 255, stencil_write_mask: 255, color_write: 1,
+  stencil_ref: 2, stencil_read_mask: 255, stencil_write_mask: 255, color_write: 1, gamma: 1,
 };
 export function mipLayout(width,height,levels=1) {
   if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||
@@ -21,6 +21,14 @@ export function mipLayout(width,height,levels=1) {
   return {layout,size:offset};
 }
 const rgba = value => [(value >>> 16 & 255) / 255, (value >>> 8 & 255) / 255, (value & 255) / 255, (value >>> 24) / 255];
+export function effectUniforms(width,height,state) {
+  state={...defaults,...state};
+  // effects.w: bit 0 modulates diffuse alpha, bit 1 enables texturing.
+  const textureFlags=state.texture?2+Number(Boolean(state.alpha_modulate)):1;
+  return [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,
+    ...rgba(state.fog_color),state.alpha_test?state.alpha_func:7,state.alpha_ref/255,state.fog_enable,textureFlags,
+    state.fog_mode,state.fog_density,state.fog_near,state.fog_far,state.gamma,0,0,0];
+}
 const blendFactors = ['one','zero','one','src','one-minus-src','src-alpha','one-minus-src-alpha','dst-alpha','one-minus-dst-alpha','dst','one-minus-dst','src-alpha-saturated'];
 const compares = ['less-equal','never','less','equal','less-equal','greater','not-equal','greater-equal','always'];
 const stencilCompares=['never','less','equal','less-equal','greater','not-equal','greater-equal','always'];
@@ -53,7 +61,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   const compilation = await shader.getCompilationInfo();
   const failures = compilation.messages.filter(item => item.type === 'error');
   if (failures.length) { device.destroy(); throw new Error(failures.map(item => item.message).join('\n')); }
-  const uniformLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 64 } }] });
+  const uniformLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 80 } }] });
   const textureLayout = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
     { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
@@ -137,7 +145,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
       [indexBuffer, indexCapacity] = gpuBuffer(indexBuffer, indexCapacity, indexCount * 4, GPUBufferUsage.INDEX);
       const previous = uniformBuffer;
       [uniformBuffer, uniformCapacity] = gpuBuffer(uniformBuffer, uniformCapacity, uniformBytes, GPUBufferUsage.UNIFORM);
-      if (previous !== uniformBuffer) uniformGroup = device.createBindGroup({ layout: uniformLayout, entries: [{ binding: 0, resource: { buffer: uniformBuffer, size: 64 } }] });
+      if (previous !== uniformBuffer) uniformGroup = device.createBindGroup({ layout: uniformLayout, entries: [{ binding: 0, resource: { buffer: uniformBuffer, size: 80 } }] });
       device.queue.writeBuffer(vertexBuffer, 0, vertices, 0, vertexBytes);
       device.queue.writeBuffer(indexBuffer, 0, indices, 0, indexCount);
       device.queue.writeBuffer(uniformBuffer, 0, uniforms, 0, uniformBytes / 4);
@@ -211,10 +219,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     if (last?.type === 'draw' && last.key === key) last.count += n;
     else {
       uniforms = grow(uniforms, (uniformBytes + 256) / 4);
-      // effects.w: bit 0 modulates diffuse alpha, bit 1 enables texturing.
-      const textureFlags=state.texture?2+Number(Boolean(state.alpha_modulate)):1;
-      const values = [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,...rgba(state.fog_color),state.alpha_test?state.alpha_func:7,state.alpha_ref/255,state.fog_enable,textureFlags,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
-      uniforms.set(values, uniformBytes / 4);
+      uniforms.set(effectUniforms(width,height,state), uniformBytes / 4);
       operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: uniformBytes }); uniformBytes += 256;
     }
     vertexBytes += data.byteLength; stats.draws++; stats.vertices += count;

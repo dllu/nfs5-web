@@ -24,7 +24,7 @@ let lastState,lastSpecular,failure;
 const timer=setInterval(()=>{try{
   while(Atomics.load(header,1)!==Atomics.load(header,0)){
     const at=Atomics.load(header,1)>>>0,count=ring[at%ring.length],packet=Uint32Array.from({length:count},(_,i)=>ring[(at+i)%ring.length]);
-    if(packet[1]===4){lastState=packet.slice(3,43);lastSpecular=packet[3+42+5];}
+    if(packet[1]===4){lastState=packet.slice(3,44);lastSpecular=packet[3+43+5];}
     else assert.equal(packet[1],1,'Unexpected fog-test command');
     Atomics.store(header,1,(at+count)|0);Atomics.store(header,2,packet[2]|0);Atomics.notify(header,1);Atomics.notify(header,2);
   }

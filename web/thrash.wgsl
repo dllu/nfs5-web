@@ -6,6 +6,7 @@ struct Effects {
     fog_color: vec4f,
     effects: vec4f,
     fog_params: vec4f,
+    gamma: vec4f,
 };
 @group(0) @binding(0) var<uniform> fx: Effects;
 @group(1) @binding(0) var image: texture_2d<f32>;
@@ -69,6 +70,9 @@ struct VertexOutput {
     }
     if fx.effects.z > 0.5 {
         color = vec4f(mix(color.rgb, fx.fog_color.rgb, clamp(input.fog_amount, 0.0, 1.0)), color.a);
+    }
+    if fx.gamma.x != 1.0 {
+        color = vec4f(pow(color.rgb, vec3f(1.0 / fx.gamma.x)), color.a);
     }
     return color;
 }
