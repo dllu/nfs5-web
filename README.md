@@ -64,9 +64,12 @@ ratios prevent a pixel-identical comparison. The existing arkTest profile
 exposes the same eight tracks in both versions.
 
 Côte d'Azur's pink sunset matches the native scene; its sky mesh also produces
-its gradient in an isolated WebGPU pass. The live sun object initializes its
-visibility samples and keeps sampling during driving. Visible flare artwork,
-other effects and stencil-dependent scenes still need comparisons.
+its gradient in an isolated WebGPU pass. Normandie renders the sunburst and
+lens-flare sprites in both versions; unobstructed views each report visibility
+and 16 matched samples. Both use maximum texture/car tiers and matching texture
+metadata (285 allocations). Camera positions differ, so this is an effect
+comparison, not a pixel-identical scene check. Other effects and
+stencil-dependent scenes still need comparisons.
 Native and browser snapshots of the checked Côte d'Azur race have identical
 texture dimension/format/mip-count multisets (312 allocations), with texture/car
 tiers both 4. Both use base levels only in that scene; supplied mipmaps remain
@@ -178,6 +181,10 @@ the image are separate observations, not an atomic frame capture.
 Pass the same `--reference-dir` here when inspecting another reference copy.
 Add `--weather` to include the live sky's position, weather-key intervals,
 rain/snow keyframes and ranges. A frontend without a sky reports null weather.
+`python3 tools/sky_inventory.py build/sky-inventory.json` inventories the staged
+sun definitions and revision-9 precipitation ranges. Six tracks enable a sun:
+Castle, Coastal, Farmland, Industrial, Skidpad and Alps. A bright sky texture
+alone does not imply a sun/flare effect.
 The optional [texture reader](tools/native_textures.c) snapshots the tested
 OpenGL3 driver's live texture list and filter metadata. The host's read-only
 `web_thrash_textures` export supplies matching browser metadata without invoking
