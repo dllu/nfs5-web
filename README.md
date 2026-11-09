@@ -111,10 +111,10 @@ Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
-The 4K/120 Hz gameplay target remains unverified. Short Chrome samples at
-6144x3456 delivered about 81 presented frames per second while driving and 160
-while paused. Sustained performance across tracks remains untested. The current diagnostic
-Wasm module is about 126 MiB and retains tracing and optional execution limits. The x87
+The 4K/120 Hz gameplay target remains unmet in the measured scene: short
+Chrome driving samples at 3840x2160 averaged 81–82 presented frames per second.
+Sustained performance across tracks remains untested. The optimized Wasm module
+is about 103 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
 approximation of Windows NLS. Full floating-point and binary compatibility are
 unverified.
@@ -141,6 +141,8 @@ frame and lists recent original functions.
 its reports and screenshots, including `original-startup.png`, to `build/`.
 `python3 tools/build.py --profile` also writes `dist/engine.js.symbols` for
 resolving Wasm function indices in browser CPU profiles.
+Builds use compiler optimization level 2; `--optimize 1` selects level 1 with
+a separate object cache for comparisons.
 `npm run test:renderer` opens normal Chrome for GPU pixel checks and writes
 `build/webgpu-renderer.png`, `build/thrash-driver.png` and a JSON report. Headless Vulkan adapter
 initialization is unreliable on this Chrome build; the normal browser works.

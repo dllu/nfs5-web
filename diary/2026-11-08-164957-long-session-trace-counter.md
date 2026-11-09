@@ -15,4 +15,7 @@ JavaScript retains exact integer totals through 2^53 entries.
 Rebuilt the engine and passed the full Node and Chrome browser suites,
 including original startup counts/first entry, differential execution,
 native threads, original video/audio and Run/Stop/restart. These routine checks
-exercise the new return ABI; a new multi-billion-entry run was not performed.
+exercise the new return ABI. A subsequent live driving/restart session reached
+4,894,619,600 entries before Stop, retaining the correct first entry (005A2D1A)
+and all 1024 recent trace entries across both the signed and unsigned 32-bit
+boundaries. Its raw snapshot is in build/trace-count-above-u32.json.

@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--optimize", type=int, choices=(1, 2), default=2,
+                        help="Compiler optimization level (default: 2)")
     parser.add_argument("--profile", action="store_true", help="Emit a Wasm CPU-profile symbol map")
     args = parser.parse_args()
     sdk = ROOT / ".cache/emsdk"
@@ -23,7 +25,8 @@ def main():
                EM_CONFIG=str(sdk / ".emscripten"), TMPDIR=str(ROOT / ".cache/tmp"))
     Path(env['TMPDIR']).mkdir(parents=True, exist_ok=True)
     lift = ROOT / "build/lift"
-    objects = ROOT / "build/obj"
+    # Retain separate objects for comparisons without discarding either build.
+    objects = ROOT / ("build/obj" if args.optimize == 1 else "build/obj-o2")
     objects.mkdir(parents=True, exist_ok=True)
     runtime = ROOT / "third_party/nfspu-recomp/third_party/pcrecomp/runtime/recomp32"
     # Keep the pinned dependency untouched. The local copy adds an address
@@ -43,7 +46,8 @@ def main():
     memory_header = includes / 'recomp_types.h'
     if not memory_header.exists() or memory_header.read_text() != adapted:
         memory_header.write_text(adapted)
-    flags = ['-O1', '-pthread', '-fno-strict-aliasing', '-fwrapv', '-Wno-unused-label',
+    optimization = f'-O{args.optimize}'
+    flags = [optimization, '-pthread', '-fno-strict-aliasing', '-fwrapv', '-Wno-unused-label',
              '-Wno-unused-variable', '-Wno-tautological-compare', '-Wno-parentheses-equality',
              '-Werror=implicit-function-declaration',
              '-DRECOMP_TRACE', '-DRECOMP_YIELD_EVERY=1024',
@@ -87,7 +91,7 @@ def main():
     profile_flags = ['--emit-symbol-map'] if args.profile else []
     if not args.profile:
         (ROOT / 'dist/engine.js.symbols').unlink(missing_ok=True)
-    subprocess.run([str(compiler), *map(str, compiled), '-O1', '-pthread', *profile_flags, '-o', str(ROOT / 'dist/engine.js'),
+    subprocess.run([str(compiler), *map(str, compiled), optimization, '-pthread', *profile_flags, '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=536870912',
                     '-sSTACK_SIZE=8388608', '-sEXPORTED_FUNCTIONS=' + json.dumps(exports),
