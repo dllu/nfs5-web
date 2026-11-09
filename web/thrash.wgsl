@@ -42,7 +42,16 @@ struct VertexOutput {
     var color = vec4f(texel.rgb * diffuse.rgb, texel.a);
     if fx.effects.w > 0.5 { color.a *= diffuse.a; }
     if fx.view.z > 1.5 { color += input.specular; }
-    if fx.effects.x > 0.5 && color.a < fx.effects.y { discard; }
+    switch u32(fx.effects.x) {
+        case 0u: { discard; }
+        case 1u: { if color.a >= fx.effects.y { discard; } }
+        case 2u: { if color.a != fx.effects.y { discard; } }
+        case 3u: { if color.a > fx.effects.y { discard; } }
+        case 4u: { if color.a <= fx.effects.y { discard; } }
+        case 5u: { if color.a == fx.effects.y { discard; } }
+        case 6u: { if color.a < fx.effects.y { discard; } }
+        default: {}
+    }
     if fx.effects.z > 0.5 {
         var visibility = clamp(input.fog, 0.0, 1.0);
         let depth = max(input.eye_depth, 0.0);

@@ -15,9 +15,10 @@ typedef struct {
     uint32_t shade_mode;
     uint32_t mip_filter,address_u,address_v;
     float mip_lod_bias;
+    uint32_t alpha_func;
 } nfspu_gpu_state;
 _Static_assert(sizeof(nfspu_gpu_vertex) == 32, "Thrash vertex ABI");
-_Static_assert(sizeof(nfspu_gpu_state) == 120, "GPU state ABI");
+_Static_assert(sizeof(nfspu_gpu_state) == 124, "GPU state ABI");
 enum { GPU_RESIZE=1, GPU_CLEAR, GPU_PRESENT, GPU_DRAW, GPU_TEXTURE_CREATE, GPU_TEXTURE_WRITE,
        GPU_TEXTURE_DESTROY, GPU_READ_PIXELS, GPU_FLUSH, GPU_RESET };
 static struct {
@@ -141,7 +142,7 @@ static const struct {
     int(*read_pixels)(uint8_t*,uint32_t,uint32_t);
 } web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels};
 static void gpu_reset(void) {
-    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=4;
+    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=5;
     memset(gpu_textures,0,sizeof gpu_textures);gpu_width=gpu_height=gpu_next_texture=0;gpu_error[0]=0;
 }
 #endif

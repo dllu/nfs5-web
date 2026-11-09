@@ -6,7 +6,7 @@ const defaults = {
   fog_enable: 0, fog_color: 0, fog_near: 0, fog_far: 1, primitive: 0, depth_func: 4,
   scissor_enable: 0, scissor_x: 0, scissor_y: 0, scissor_w: 0, scissor_h: 0,
   alpha_modulate: 0, fog_mode: 0, fog_density: 1, shade_mode: 1,
-  mip_filter: 0, address_u: null, address_v: null, mip_lod_bias: 0,
+  mip_filter: 0, address_u: null, address_v: null, mip_lod_bias: 0, alpha_func: 6,
 };
 export function mipLayout(width,height,levels=1) {
   if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||
@@ -185,7 +185,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     if (last?.type === 'draw' && last.key === key) last.count += n;
     else {
       uniforms = grow(uniforms, (uniformBytes + 256) / 4);
-      const values = [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,...rgba(state.fog_color),state.alpha_test,state.alpha_ref/255,state.fog_enable,state.texture ? state.alpha_modulate : 1,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
+      const values = [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,...rgba(state.fog_color),state.alpha_test?state.alpha_func:7,state.alpha_ref/255,state.fog_enable,state.texture ? state.alpha_modulate : 1,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
       uniforms.set(values, uniformBytes / 4);
       operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: uniformBytes }); uniformBytes += 256;
     }

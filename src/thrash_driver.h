@@ -19,6 +19,11 @@ static uint8_t fog_visibility[256];
 static nfspu_gpu_state render_state;
 static unsigned frames,draws,uploads,software_frames,partial_clears;
 static uint32_t vertex_stride=32,sprite_stride=32,thrash_calls;
+static uint32_t thrash_version=107;
+/* Native states 404/405 use a compact enum, unlike the backend's blend enum:
+ * ONE, ZERO, SRC_ALPHA, 1-SRC_ALPHA, DST_ALPHA, 1-DST_ALPHA,
+ * SRC_COLOR, DST_COLOR, 1-SRC_COLOR, 1-DST_COLOR. */
+static const uint32_t native_blend_factors[]={2,1,5,6,7,8,3,9,4,10};
 typedef struct {uint32_t va,gpu_id,width,height,format,mip_levels;uint8_t *pixels;uint32_t *palette;} texture_slot;
 static texture_slot textures[MAX_TEXTURES];
 static float as_float(uint32_t value){float f;memcpy(&f,&value,4);return f;}
@@ -293,8 +298,10 @@ static void r_state(void) {
     /* State 37 is an optional timer hook. Advertising it installs a callback
      * that must be implemented, not an innocuous successful no-op. */
     if(!known_state(s)||!s||s==12||s==16||s==17||s==29||s==34||s==37||s==38||
-       (s>=43&&s<=45)||(s>=49&&s<=51)||(s>=68&&s<=100)||s>=107)RET(0,2);
-    if(s==10&&v!=0&&v!=2)RET(0,2);
+       (s>=43&&s<=45)||(s>=49&&s<=51)||(s>=68&&s<=100)||(s>=107&&s!=404&&s!=405))RET(0,2);
+    if(s==10&&v>(thrash_version>=107?3u:2u))RET(0,2);
+    if((s==404||s==405)&&v>9)RET(0,2);
+    if((s==56||s==104)&&v>3)RET(0,2);
     if(s==2&&v>2)RET(0,2);
     if(s==6&&v>2)RET(0,2);
     if((s==13||s==65||s==66)&&v>2)RET(0,2);
@@ -318,7 +325,13 @@ static void r_state(void) {
     case 13:render_state.address_u=render_state.address_v=v;render_state.address_wrap=v==1;break;
     case 65:render_state.address_u=v;break;
     case 66:render_state.address_v=v;break;
-    case 10:render_state.blend_enable=v==2;break;
+    /* Native 10005FB7: v0/v1 disable blending for ABI >=107; v2/v3
+     * enable blending and alpha > reference. Older ABIs enable v1 too.
+     * State 36 changes only the reference, including the valid value zero. */
+    case 10:
+        render_state.blend_enable=thrash_version>=107?v>=2:v!=0;
+        render_state.alpha_test=render_state.blend_enable;
+        render_state.alpha_func=render_state.alpha_test?4:7;break;
     case 14:{float density=v>0&&v<4096?1.0f/v:as_float(v);render_state.fog_density=isfinite(density)&&density>=0?density:0;break;}
     case 15:render_state.fog_color=v&0x00FFFFFFu;break;
     case 19:callbacks=v;break;
@@ -331,17 +344,21 @@ static void r_state(void) {
         break;
     case 24:case 102:vertex_depth_bias=(float)(int32_t)v/32768.0f;break;
     case 30:sprite_stride=v;break;
-    case 36:render_state.alpha_test=v!=0;render_state.alpha_ref=v&255;break;
+    case 31:thrash_version=v;break;
+    case 36:render_state.alpha_ref=v;break;
     case 40:render_state.depth_func=v+1;break;
     /* Verok retains state 41 but its shader always multiplies texture RGBA
      * by diffuse RGBA; it does not select alpha or disable the texture here. */
     case 41:break;
     case 42:if(v<=1)vertex_stride=v?40:32;break;
     case 56:case 104:
-        if(v==0){render_state.src_blend=5;render_state.dst_blend=6;}
-        else if(v==1){render_state.src_blend=5;render_state.dst_blend=2;}
-        else if(v==2){render_state.src_blend=1;render_state.dst_blend=6;}
-        else if(v==3){render_state.src_blend=9;render_state.dst_blend=1;}
+        {const uint32_t src[]={2,2,1,7},dst[]={3,0,3,1};
+        state_values[stage][404]=src[v];state_values[stage][405]=dst[v];
+        render_state.src_blend=native_blend_factors[src[v]];render_state.dst_blend=native_blend_factors[dst[v]];}
+        break;
+    case 404:case 405:
+        if(s==404)render_state.src_blend=native_blend_factors[v];else render_state.dst_blend=native_blend_factors[v];
+        state_values[stage][56]=state_values[stage][104]=4;
         break;
     case 57:case 106:render_state.depth_write=v!=0;break;
     case 3:clear_color=v;break;
@@ -450,10 +467,11 @@ static void thrash_reset(void) {
     for(unsigned i=0;i<MAX_TEXTURES;i++){free(textures[i].pixels);free(textures[i].palette);}
     memset(textures,0,sizeof textures);memset(state_values,0,sizeof state_values);
     descriptor=modes=formats=framebuffer=framebuffer_capacity=lockdesc=surface_info=callbacks=0;
-    width=640;height=480;color_bits=16;opened=trace=software_fog=fog_table_valid=0;
+    width=640;height=480;color_bits=16;opened=trace=software_fog=fog_table_valid=0;thrash_version=107;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
     frames=draws=uploads=software_frames=partial_clears=thrash_calls=0;vertex_stride=sprite_stride=32;
-    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1};
+    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1,.alpha_func=4};
     state_values[0][6]=state_values[0][7]=state_values[0][11]=1;
+    state_values[0][404]=2;state_values[0][405]=3;
 }
 #endif

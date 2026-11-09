@@ -47,6 +47,27 @@ try {
     assert.equal(await method('_THRASH_setstate@8',state,3),0,'Invalid texture addressing is rejected');
     assert.equal(await method('_THRASH_getstate@4',state),2,'Invalid addressing preserves retained state');
   }
+  for(const [preset,src,dst] of [[0,2,3],[1,2,0],[2,1,3],[3,7,1]]) {
+    assert.equal(await method('_THRASH_setstate@8',56,preset),1);
+    assert.equal(await method('_THRASH_getstate@4',404),src,'Preset retains native source factor');
+    assert.equal(await method('_THRASH_getstate@4',405),dst,'Preset retains native destination factor');
+  }
+  assert.equal(await method('_THRASH_setstate@8',404,9),1);
+  assert.equal(await method('_THRASH_setstate@8',405,8),1);
+  assert.equal(await method('_THRASH_getstate@4',56),4,'Custom factors mark the blend preset custom');
+  assert.equal(await method('_THRASH_getstate@4',104),4,'Custom factors mark the legacy preset alias custom');
+  assert.equal(await method('_THRASH_setstate@8',404,10),0);
+  assert.equal(await method('_THRASH_getstate@4',404),9,'Rejected source factor preserves state');
+  assert.equal(await method('_THRASH_setstate@8',405,10),0);
+  assert.equal(await method('_THRASH_getstate@4',405),8,'Rejected destination factor preserves state');
+  assert.equal(await method('_THRASH_setstate@8',56,4),0,'Custom sentinel is not a selectable preset');
+  assert.equal(await method('_THRASH_setstate@8',56,0),1);
+  for(const mode of [0,1,2,3])assert.equal(await method('_THRASH_setstate@8',10,mode),1,'ABI 107 accepts all four blend modes');
+  assert.equal(await method('_THRASH_setstate@8',10,4),0);
+  assert.equal(await method('_THRASH_setstate@8',31,106),1);
+  assert.equal(await method('_THRASH_setstate@8',10,3),0,'Older ABI rejects blend mode three');
+  assert.equal(await method('_THRASH_setstate@8',10,1),1,'Older ABI accepts blend mode one');
+  await method('_THRASH_setstate@8',31,107);await method('_THRASH_setstate@8',10,0);
   assert.equal(await method('_THRASH_selectdisplay@4',0),1);assert.equal(await method('_THRASH_selectdisplay@4',1),0);
   assert.equal(await method('_THRASH_window@4',1),1);assert.equal(await method('_THRASH_window@4',3),0);
   assert.equal(await method('_THRASH_setstate@8',37,1),0,'Optional timer callbacks are not falsely advertised');

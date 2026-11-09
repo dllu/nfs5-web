@@ -59,6 +59,13 @@ try {
     const transparent = texels.slice(); transparent[3] = 0; renderer.textureUpdate(1,transparent); renderer.clear(0xff0000ff);
     renderer.draw(quad(0,0,64,64),mesh,{...textured,alpha_test:1,alpha_ref:128}); pixels = await renderer.readPixels();
     expect(pixel(pixels,16,16),[0,0,255,255],'alpha test discard'); expect(pixel(pixels,48,16),[0,255,0,255],'alpha test pass');
+    for(const alpha of [64,128]) {
+      const passes=alpha===64?[false,true,false,true,false,true,false,true]:[false,false,true,true,false,false,true,true];
+      for(let func=0;func<8;func++) {
+        renderer.clear(0xff0000ff);renderer.draw(quad(0,0,64,64,(alpha*0x1000000+0xff0000)>>>0),mesh,{alpha_test:1,alpha_ref:128,alpha_func:func});
+        expect(pixel(await renderer.readPixels(),16,16),passes[func]?[255,0,0,alpha]:[0,0,255,255],`alpha comparison ${func}, input ${alpha}`);
+      }
+    }
     renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000),mesh,{scissor_enable:1,scissor_x:16,scissor_y:16,scissor_w:16,scissor_h:16});
     pixels = await renderer.readPixels(); expect(pixel(pixels,20,20),[255,0,0,255],'inside clip'); expect(pixel(pixels,8,8),[0,0,0,255],'outside clip');
     renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000,{specular:0}),mesh,{fog_enable:1,fog_color:0x00808080});
@@ -249,6 +256,49 @@ try {
     }
     for(let i=0;i<3;i++)put(vertices+i*32+16,0xff0000ff);
     expect(await pixel(8,8),0xff00ff00,'draw snapshot and readback after asynchronous flush');
+    // Native 404/405 factors apply independently to source and destination,
+    // including the color factors used by the original doubled-modulate helper.
+    const source=[64,128,192,128],destination=[192,128,64,128];
+    const factors=[()=>1,()=>0,()=>source[3]/255,()=>1-source[3]/255,
+      ()=>destination[3]/255,()=>1-destination[3]/255,c=>source[c]/255,c=>destination[c]/255,
+      c=>1-source[c]/255,c=>1-destination[c]/255];
+    const argb=rgb=>(0xff000000|rgb[0]<<16|rgb[1]<<8|rgb[2])>>>0;
+    for(let i=0;i<3;i++)put(vertices+i*32+16,0x804080c0);
+    await method('_THRASH_setstate@8',36,0);await method('_THRASH_setstate@8',10,2);
+    await method('_THRASH_setstate@8',3,0x80c08040);
+    for(let factor=0;factor<10;factor++) {
+      for(const src of [true,false]) {
+        await method('_THRASH_setstate@8',404,src?factor:1);await method('_THRASH_setstate@8',405,src?1:factor);
+        await method('_THRASH_clearwindow@0');await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+        const input=src?source:destination,wanted=argb(input.slice(0,3).map((v,c)=>Math.round(v*factors[factor](c))));
+        expect(await pixel(8,8),wanted,`native ${src?'source':'destination'} blend factor ${factor}`,1);
+      }
+    }
+    put(0x6bd97c,functions.get('_THRASH_setstate@8'));
+    const originalBlend=await runtime.invokeAsync(0x540550,[404,0xffffffff]);calls++;
+    if(originalBlend.status)throw new Error(originalBlend.error);
+    await method('_THRASH_clearwindow@0');await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    expect(await pixel(8,8),0xff608160,'original doubled-modulate blend helper reaches native custom factors',1);
+    await method('_THRASH_setstate@8',56,0);await method('_THRASH_setstate@8',3,0xff0000ff);
+    for(let i=0;i<3;i++)put(vertices+i*32+16,0x80ff0000);
+    for(const [mode,reference,color] of [[0,255,0xffff0000],[1,255,0xffff0000],
+      [2,128,0xff0000ff],[3,128,0xff0000ff],[2,127,0xff80007f],[3,127,0xff80007f],[2,256,0xff0000ff]]) {
+      await method('_THRASH_setstate@8',10,mode);await method('_THRASH_setstate@8',36,reference);
+      await method('_THRASH_clearwindow@0');await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+      expect(await pixel(8,8),color,'native blend mode and independent full alpha reference',1);
+    }
+    await method('_THRASH_setstate@8',31,106);await method('_THRASH_setstate@8',10,1);await method('_THRASH_setstate@8',36,127);
+    await method('_THRASH_clearwindow@0');await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    expect(await pixel(8,8),0xff80007f,'older Thrash ABI enables blending in mode one',1);
+    await method('_THRASH_setstate@8',31,107);
+    await method('_THRASH_setstate@8',10,2);await method('_THRASH_setstate@8',36,0);
+    await method('_THRASH_clearwindow@0');
+    for(let i=0;i<3;i++)put(vertices+i*32+16,0x00ff0000);
+    await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    await method('_THRASH_setstate@8',10,0);
+    for(let i=0;i<3;i++){put(vertices+i*32+16,0xff00ff00);view.setFloat32(vertices+i*32+8,.5,true);}
+    await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    expect(await pixel(8,8),0xff00ff00,'zero-alpha fragments do not occlude geometry behind them');
     await method('_THRASH_setstate@8',6,0);
     vertex(vertices,0,0,0xffff0000);vertex(vertices+32,64,0,0xff00ff00);
     vertex(vertices+64,64,64,0xff0000ff);vertex(vertices+96,0,64,0xffffffff);
@@ -381,9 +431,9 @@ try {
   assert.deepEqual(result.fallback.errors,[]);
   result.legacyDraws=await page.evaluate(async()=>{
     const {attachGraphics}=await import('./graphics.mjs'),results=[];
-    for(const version of [1,2,3]) {
-      // Original 25-word and v3 26-word states still decode indexed and
-      // unindexed vertices without acquiring the new sampler controls.
+    for(const version of [1,2,3,4]) {
+      // Older state layouts still decode geometry/textures and retain their
+      // alpha >= reference comparison without the v5 alpha-function field.
       const memory=new SharedArrayBuffer(32768),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
       header[5]=ring.length;header[6]=version;let sequence=0;
       const module={HEAPU8:heap,_web_gpu_transport:()=>0,_web_gpu_attach:()=>{header[3]=1;},
@@ -397,10 +447,10 @@ try {
       }
       try {
         send(1,Uint32Array.of(64,64));
-        const stateSize=version===3?26:25,start=stateSize+2,end=start+24;
+        const stateSize=version>=4?30:version>=3?26:25,start=stateSize+2,end=start+24;
         const draw=new Uint32Array(end+3),floats=new Float32Array(draw.buffer);
         draw[6]=draw[7]=draw[8]=draw[22]=1;draw[16]=4;floats[14]=floats[24]=1;
-        if(version===3)draw[25]=1;
+        if(version>=3)draw[25]=1;
         draw[stateSize]=draw[stateSize+1]=3;
         [[0,0,1,0xffff0000],[64,0,.25,0xff00ff00],[0,64,.5,0xff0000ff]].forEach(([x,y,rhw,color],i)=>{
           const at=start+i*8;floats[at]=x;floats[at+1]=y;floats[at+2]=.5;floats[at+3]=rhw;draw[at+4]=color;draw[at+5]=0xffffffff;
@@ -420,7 +470,8 @@ try {
         await graphics.settle();
         const unindexed=sample(await graphics.renderer.readPixels());
         if(unindexed.join()!=='0,255,0,255')throw new Error(`Legacy v${version} unindexed draw: ${unindexed}`);
-        send(5,Uint32Array.of(7,1,1));send(6,Uint32Array.of(7,0,4,4,0xff0000ff));
+        send(5,version>=4?Uint32Array.of(7,1,1,1):Uint32Array.of(7,1,1));send(6,Uint32Array.of(7,0,4,4,0xff0000ff));
+        draw[9]=1;draw[10]=255; // Legacy comparison remains alpha >= reference.
         draw[0]=7;for(let i=0;i<3;i++)draw[start+i*8+4]=0xffffffff;
         send(4,draw.subarray(0,end));await graphics.settle();
         const textured=sample(await graphics.renderer.readPixels());
