@@ -11,7 +11,7 @@ HEIGHT_READS = '''417AA7 417AC3 41AE3D 41B113 41B7BC 41BA53 41BCE3
 41CB32 41CB4D 41DE5A 421906 42446D 427B06 427B2C 4289E4 428A4C
 428B38 42A4A6 42DF21 42E0B0 432971 432BD9 432CB0 432CFF 4345A4
 43463A 434811 43497E 436DFD 437373 4374A8'''.split()
-DIRECT_DRAWS = ['419C28', '431369', '432C57', '432CDA', '432D68']
+DIRECT_DRAWS = ['419C28', '431369', '432C57', '432CDA', '432D68', '4A53A2', '4A53AA']
 MOUSE_READS = ['41B376', '425288', '425873', '425F10', '42607D',
                '42D4F3', '42F2F0', '430E35']
 
@@ -37,6 +37,11 @@ class UiHooks:
                         raise ValueError('UI size operand changed: ' + line)
                     return line.replace(operand, f'web_ui_extent({axis})')
                 instruction(pc, size)
+        # The race-loading screen paints its original 640x480 bitmap first,
+        # then centers/presents it separately from the interface command queue.
+        # Scope both the tiled draw and software-surface unlock/upload.
+        instruction('4A5376', lambda line: line.replace('MEM32(0x5DEACC)', 'web_ui_extent(1)'))
+        instruction('4A537B', lambda line: line.replace('MEM32(0x5DEAC8)', 'web_ui_extent(0)'))
         # HUD records are keyed by their logical dimensions. The original
         # anchoring, custom layout editor and serialization use those same units.
         instruction('41E174', lambda line: line + '''
@@ -62,9 +67,14 @@ class UiHooks:
         # scopes and obtains its physical viewport from normalized HUD anchors.
         for pc in DIRECT_DRAWS:
             instruction(pc, lambda line: '    web_ui_begin();\n' + line + '\n    web_ui_end();')
+        # The minimap is a camera pass. Its projected vertices are already in
+        # physical pixels, so enlarge strokes without scaling their positions.
+        if '/* 0x00432B04:' in source:
+            instruction('432B04', lambda line: '    web_ui_strokes(1);\n' + line + '\n    web_ui_strokes(0);')
+            source = 'void web_ui_strokes(uint32_t active);\n' + source
         return source
 
     def validate(self):
-        for pc in WIDTH_READS + HEIGHT_READS + DIRECT_DRAWS + MOUSE_READS + ['41E174', '41E4A2', '435420', '435428', '41A330', '41A4FA', '41A504']:
+        for pc in WIDTH_READS + HEIGHT_READS + DIRECT_DRAWS + MOUSE_READS + ['432B04', '4A5376', '4A537B', '41E174', '41E4A2', '435420', '435428', '41A330', '41A4FA', '41A504']:
             if not self.counts.get(pc):
                 raise ValueError('Missing browser UI hook at ' + pc)

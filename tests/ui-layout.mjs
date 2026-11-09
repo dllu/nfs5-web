@@ -8,6 +8,7 @@ const m=runtime.module,v=new DataView(m.HEAPU8.buffer,runtime.base);
 let checks=0;
 try{
   assert(runtime.manifest.patches.includes('browser-ui-layout'));
+  assert(runtime.manifest.patches.includes('browser-scaled-ui'));
   const modes=[[320,240,320,240],[640,480,640,480],[800,600,640,480],
     [1024,768,640,480],[1280,720,853,480],[3840,2160,853,480],
     [6144,3456,853,480],[6144,3162,933,480],[3440,1440,1147,480],

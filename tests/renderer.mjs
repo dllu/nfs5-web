@@ -530,12 +530,73 @@ try {
     expect(get(0x610a70),1920,'UI event getter preserves native message coordinates');
     expect(get(0x610a6c),0,'original UI event remains one-shot');
     await invoke('DeleteCriticalSection',critical);put(0x610a88,0);
+    // Exercise the production UI line/point expansion using the active 4K
+    // scale, then rasterize its triangles on the small independent target.
+    const {createRenderer}=await import('./renderer.mjs');
+    const uiCanvas=document.createElement('canvas');uiCanvas.width=uiCanvas.height=64;document.body.append(uiCanvas);
+    const uiRenderer=await createRenderer(uiCanvas);
+    const uiInput=module._malloc(4*32),uiIndices=module._malloc(4*4),uiOutput=module._malloc(24*32);
+    const uiView=new DataView(module.HEAPU8.buffer),background=0xff010203,ink=0xffc04020;
+    const expanded=(primitive,points,indices=null,flat=0,physical=0)=>{
+      for(const [i,[x,y,color=ink,z=.2,rhw=1,specular=0xff000000,u=0,v=0]]of points.entries()){
+        [x,y,z,rhw].forEach((value,j)=>uiView.setFloat32(uiInput+i*32+j*4,value,true));
+        uiView.setUint32(uiInput+i*32+16,color,true);uiView.setUint32(uiInput+i*32+20,specular,true);
+        uiView.setFloat32(uiInput+i*32+24,u,true);uiView.setFloat32(uiInput+i*32+28,v,true);
+      }
+      if(indices)indices.forEach((value,i)=>uiView.setUint32(uiIndices+i*4,value,true));
+      const before=module.HEAPU8.slice(uiInput,uiInput+points.length*32);
+      const n=module._web_ui_expand(primitive,uiInput,points.length,indices?uiIndices:0,indices?.length??0,uiOutput,flat,physical);
+      expect(Number(before.every((value,i)=>value===module.HEAPU8[uiInput+i])),1,'UI expansion preserves source vertices');
+      return n;
+    };
+    async function raster(primitive,points,indices=null,flat=0,physical=0){
+      const n=expanded(primitive,points,indices,flat,physical);expect(n,6,'UI primitive becomes two triangles');
+      uiRenderer.clear(background);uiRenderer.draw(module.HEAPU8.slice(uiOutput,uiOutput+n*32),null,{shade_mode:flat?0:1});
+      return await uiRenderer.readPixels();
+    }
+    function uiPixel(bytes,x,y){const at=(y*64+x)*4;return ((bytes[at+3]<<24)|(bytes[at]<<16)|(bytes[at+1]<<8)|bytes[at+2])>>>0;}
+    try{
+      let pixels=await raster(1,[[4,6],[12,6]]);
+      for(const y of [25,28])expect(uiPixel(pixels,36,y),ink,'horizontal UI stroke follows 4K scale');
+      for(const y of [24,30])expect(uiPixel(pixels,36,y),background,'horizontal UI stroke has bounded thickness');
+      pixels=await raster(1,[[18,27],[54,27]],null,0,1);
+      expect(uiPixel(pixels,36,25),ink,'projected minimap line gets UI thickness');
+      expect(uiPixel(pixels,36,28),ink,'projected minimap line covers both sides of its center');
+      expect(uiPixel(pixels,60,27),background,'projected minimap line keeps its physical endpoints');
+      pixels=await raster(1,[[4,4],[4,12]]);
+      for(const x of [16,19])expect(uiPixel(pixels,x,36),ink,'vertical UI stroke follows 4K scale');
+      for(const x of [15,21])expect(uiPixel(pixels,x,36),background,'vertical UI stroke has bounded thickness');
+      pixels=await raster(1,[[4,4],[12,12]]);
+      expect(uiPixel(pixels,29,27),ink,'diagonal UI stroke has consistent perpendicular thickness');
+      expect(uiPixel(pixels,31,27),background,'diagonal UI stroke excludes outside pixels');
+      pixels=await raster(1,[[4,6,0xffff0000],[12,6,0xff00ff00]]);
+      expect(uiPixel(pixels,36,27),0xff808000,'expanded line preserves Gouraud endpoint colors',5);
+      pixels=await raster(1,[[4,6,0xffff0000],[12,6,0xff00ff00]],[1,0],1);
+      expect(uiPixel(pixels,36,27),0xffff0000,'indexed flat line uses its final source vertex color');
+      pixels=await raster(2,[[8,8]]);
+      for(const [x,y]of [[34,34],[37,37]])expect(uiPixel(pixels,x,y),ink,'UI point follows 4K scale');
+      expect(uiPixel(pixels,33,36),background,'expanded UI point has bounded size');
+      expect(expanded(1,[[8,8],[8,8]]),0,'degenerate UI line produces no triangles');
+      expect(expanded(1,[[NaN,8],[12,8]]),0,'nonfinite UI line produces no triangles');
+      expect(expanded(1,[[4,6],[12,6]],[0,2]),0,'invalid UI index is rejected');
+      expanded(1,[[4,6,ink,.25,.5,0x7f123456,.125,.25],[12,6,ink,.75,2,0x9f234567,.75,.875]]);
+      for(const [o,wanted]of [[8,.25],[12,.5],[24,.125],[28,.25],[2*32+8,.75],[2*32+12,2],[2*32+24,.75],[2*32+28,.875]])
+        expect(uiView.getFloat32(uiOutput+o,true),wanted,'UI expansion preserves depth, RHW and UVs');
+      expect(uiView.getUint32(uiOutput+20,true),0x7f123456,'UI expansion preserves first-endpoint specular/fog');
+      expect(uiView.getUint32(uiOutput+2*32+20,true),0x9f234567,'UI expansion preserves last-endpoint specular/fog');
+      await uiRenderer.validate();if(uiRenderer.errors.length)throw new Error(uiRenderer.errors.join('\n'));
+    }finally{module._free(uiInput);module._free(uiIndices);module._free(uiOutput);uiRenderer.close();uiCanvas.remove();}
     expect(await method('_THRASH_setvideomode@12',0,0,2),0,'rejected mode');
     expect(projection()[2],0x42369df5,'rejected mode preserves projection');
     expect(module._web_ui_extent(0),853,'rejected mode preserves UI layout');
     await invoke('GetClientRect',hwnd,out);expect(get(out+8),3840,'4K client width');expect(get(out+12),2160,'4K client height');
     await invoke('GetMessageA',out,hwnd,5,5);expect(get(out+12),(2160<<16)|3840,'4K WM_SIZE');
     await method('_THRASH_setstate@8',3,0xff203040);await method('_THRASH_clearwindow@0');
+    vertex(vertices,18,27,0xffc04020);vertex(vertices+32,54,27,0xffc04020);
+    await method('_THRASH_drawline@8',vertices,vertices+32);
+    await method('_THRASH_readrect@20',36,24,1,7,out);
+    expect(Array.from({length:7},(_,i)=>get(out+i*4)).filter(color=>color===0xffc04020).length,1,'native scene line remains one physical pixel at 4K');
+    await method('_THRASH_clearwindow@0');
     vertex(vertices,3832,2152,0xffff0000);vertex(vertices+32,3840,2152,0xffff0000);vertex(vertices+64,3832,2160,0xffff0000);
     await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
     expect(await pixel(3834,2154),0xffff0000,'native 4K triangle');expect(await pixel(0,0),0xff203040,'native 4K clear');

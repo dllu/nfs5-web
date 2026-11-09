@@ -77,6 +77,8 @@ def main():
         parser.error('Run tools/prepare.py again to generate the Verok projection hooks')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'browser-ui-layout' not in metadata.get('patches',[]):
         parser.error('Run tools/prepare.py again to generate the browser UI layout hooks')
+    if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'browser-scaled-ui' not in metadata.get('patches',[]):
+        parser.error('Run tools/prepare.py again to generate the browser loading-screen and minimap hooks')
     configuration = hashlib.sha256(json.dumps([str(compiler), flags]).encode()).hexdigest()
     def compile(source):
         obj = objects / (source.stem + '.o')
@@ -108,6 +110,7 @@ def main():
     exports.append('_web_display_size')
     exports.extend(['_web_projection_update','_web_projection_state'])
     exports.extend(['_web_ui_layout','_web_ui_extent','_web_ui_coordinate','_web_ui_mouse'])
+    exports.append('_web_ui_expand')
     exports.extend(['_web_gpu_transport', '_web_gpu_attach', '_web_gpu_fail', '_web_gpu_stats'])
     exports.extend(['_web_pointer','_web_mapping_stats'])
     exports.extend(['_web_intro_config','_web_intro_skipped'])

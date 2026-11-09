@@ -157,11 +157,24 @@ static void r_clip(void){
 static void submit(const nfspu_gpu_vertex *v,uint32_t n,const uint32_t *idx,uint32_t ni,uint32_t primitive) {
     if(!n || !open_gpu())return;
     nfspu_gpu_vertex *adjusted=NULL;
+    int expanded=(ui_draw_depth||ui_stroke_depth)&&primitive&&(ui_scale[0]!=1||ui_scale[1]!=1);
+    if(expanded){
+        uint32_t count=idx?ni:n,step=primitive==1?2:1;
+        if(count>2000000)hle_fatal("Thrash invalid UI primitive count %u",count);
+        if(count<step)return;
+        adjusted=malloc((size_t)(count/step)*6*sizeof *adjusted);
+        if(!adjusted)hle_fatal("Thrash UI primitives allocation");
+        n=web_ui_expand(primitive,v,n,idx,ni,adjusted,render_state.shade_mode==0,!ui_draw_depth);
+        if(!n){free(adjusted);return;}
+        v=adjusted;idx=NULL;ni=0;primitive=0;
+    }
     if(ui_draw_depth||vertex_depth_bias!=0||(software_fog&&fog_table_valid)){
-        adjusted=malloc((size_t)n*sizeof *adjusted);if(!adjusted)hle_fatal("Thrash adjusted vertices allocation");
-        memcpy(adjusted,v,(size_t)n*sizeof *adjusted);
+        if(!adjusted){
+            adjusted=malloc((size_t)n*sizeof *adjusted);if(!adjusted)hle_fatal("Thrash adjusted vertices allocation");
+            memcpy(adjusted,v,(size_t)n*sizeof *adjusted);
+        }
         for(uint32_t i=0;i<n;i++){
-            if(ui_draw_depth){adjusted[i].x*=ui_scale[0];adjusted[i].y*=ui_scale[1];}
+            if(ui_draw_depth&&!expanded){adjusted[i].x*=ui_scale[0];adjusted[i].y*=ui_scale[1];}
             adjusted[i].z+=vertex_depth_bias;
             if(software_fog&&fog_table_valid){
                 float sample=adjusted[i].z*255.0f;
@@ -172,6 +185,7 @@ static void submit(const nfspu_gpu_vertex *v,uint32_t n,const uint32_t *idx,uint
         }v=adjusted;
     }
     nfspu_gpu_state s=render_state;s.primitive=primitive;
+    if(expanded)s.cull=1; /* Native line/point rasterization has no face culling. */
     if(!gpu->draw(v,n,idx,ni,&s))hle_fatal("WebGPU draw: %s",gpu_error);
     free(adjusted);
     draws++;
@@ -415,6 +429,7 @@ static int blit_pixels(uint32_t p,uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     uint8_t *rgba=decode_window_pixels(p,w,h);if(!rgba)return 0;
     uint32_t tex=gpu->texture_create(w,h,rgba,1);free(rgba);if(!tex)return 0;
     nfspu_gpu_vertex v[4]={{x,y,0,1,0xFFFFFFFF,0,0,0},{x+w,y,0,1,0xFFFFFFFF,0,1,0},{x+w,y+h,0,1,0xFFFFFFFF,0,1,1},{x,y+h,0,1,0xFFFFFFFF,0,0,1}};
+    if(ui_draw_depth)for(unsigned i=0;i<4;i++){v[i].x*=ui_scale[0];v[i].y*=ui_scale[1];}
     const uint32_t idx[]={0,1,2,0,2,3};nfspu_gpu_state s={.texture=tex,.src_blend=2,.dst_blend=1,.cull=1,.color_write=1};
     int ok=gpu->draw(v,4,idx,6,&s);gpu->texture_destroy(tex);return ok;
 }

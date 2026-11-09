@@ -235,6 +235,7 @@ static uint32_t module_handle(const char *name) {
 #include "win32_collation.h"
 #include "win32_time.h"
 #include "web_gpu.h"
+#include "web_ui_primitives.h"
 #include "thrash_driver.h"
 
 static void thread_exit_code_import(void) {
@@ -542,7 +543,7 @@ uint32_t web_init(void) {
     else memset((void *)g_mem_base, 0, GUEST_SIZE);
     if (!g_mem_base) return 0;
     web_projection_update(640,480);
-    web_ui_update(640,480);ui_draw_depth=ui_mouse_buffer=0;
+    web_ui_update(640,480);ui_draw_depth=ui_stroke_depth=ui_mouse_buffer=0;
     entered_low = recomp_dispatch_table[0].address;
     entered_span = recomp_dispatch_table[recomp_dispatch_count - 1].address - entered_low + 1;
     if (!entered) entered = calloc(1, (entered_span + 7) / 8);
@@ -596,7 +597,7 @@ uint32_t web_init(void) {
 
 static int run_guest(uint32_t entry, uint32_t milliseconds) {
     machine_acquire();
-    ui_draw_depth=0;
+    ui_draw_depth=ui_stroke_depth=0;
     if (!current_thread) {
         error[0] = 0; fatal_pending = 0; cancel_workers = 0;
         process_exited = process_exit_code = 0;
@@ -630,7 +631,7 @@ static struct {
 
 static void *asynchronous_main(void *unused) {
     (void)unused;
-    ui_draw_depth=0;
+    ui_draw_depth=ui_stroke_depth=0;
     current_thread = 0; cpu = asynchronous_run.initial; last_error = asynchronous_run.initial_error;
     int status = run_guest(asynchronous_run.entry, asynchronous_run.milliseconds);
     stop_guest_workers();

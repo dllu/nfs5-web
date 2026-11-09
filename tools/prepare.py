@@ -46,6 +46,7 @@ def main():
         patches.append('verok-projection')
         ui = UiHooks()
         patches.append('browser-ui-layout')
+        patches.append('browser-scaled-ui')
     functions = discover_functions(data, info, iat)
     lifter = Lifter(iat_map=iat, lifted=set(functions))
     unsupported = Counter()
