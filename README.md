@@ -22,6 +22,8 @@ incomplete.** Visual fidelity takes priority over further performance work.
   car detail, world quality and distance; High car lighting and sky; projected
   headlights and lens flare. Existing profiles retain their preferences;
   16-bit modes cap the active texture tier even when Very High is selected.
+  Upgrading an existing profile through the menus survives a browser restart;
+  the checked restored race uses texture/car tiers 4 and the current viewport mode.
   Verok's quality, car-mesh, aspect/camera and guarded visibility hooks are
   translated from the supplied patch. Menu gradients, highlights and shadows
   use the original detailed frontend path.
@@ -83,10 +85,10 @@ texture descriptors also match. Different positions and animation timing
 prevent a pixel-identical weather comparison.
 Pyrénées' matching keys specify zero precipitation. Original rain/snow
 interpolation is checked against x86 execution using Autobahn and Alps data.
-Menu clicks can require retries, and one menu-return memory fault remains
-unexplained. Custom photo import/resizing, full keyboard-layout handling and
-many unused Windows APIs are unsupported. An abrupt close can lose changes
-since the last checkpoint.
+Some dropdown interactions still require another click, and one menu-return
+memory fault remains unexplained. Custom photo import/resizing, full keyboard
+layout handling and many unused Windows APIs are unsupported. An abrupt close can
+lose changes since the last checkpoint.
 
 **The 4K/120 Hz target remains unmet.** Sustained performance across tracks,
 full gameplay and maximum-quality visual equivalence are not established.
@@ -104,7 +106,9 @@ pixel planes match native GIMME conversion.
 The checks also exercise Windows services, threads, x87 state, storage,
 audio, input and lifecycle behavior. Real Chrome checks cover intro/audio,
 menu gradients and portraits, maximum defaults, viewport/input scaling,
-persistence and Stop/restart. GPU pixel tests cover native shading, blend/alpha/depth/stencil
+persistence and Stop/restart. A separate navigation check exercises the running
+frontend at three viewport sizes using normal mouse clicks and rendered-screen
+readiness checks. GPU pixel tests cover native shading, blend/alpha/depth/stencil
 semantics, mipmaps, addressing, scaled UI and framebuffer transfers, including
 4K output. These checks do not measure gameplay FPS. Detailed evidence and
 limitations are recorded in the [progress diary](diary/).
@@ -131,6 +135,7 @@ With the server running:
 
 ```sh
 npm run test:browser
+npm run test:navigation
 npm run test:renderer
 ```
 
