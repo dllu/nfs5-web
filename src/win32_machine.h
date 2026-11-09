@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <stdatomic.h>
+#include <emscripten/threading.h>
 
 typedef struct {
     uint32_t r[8], flags[4], fs, gs, es, mxcsr, function, backedges, import[10];
@@ -37,6 +38,8 @@ static uint32_t create_guest_thread(uint32_t entry, uint32_t parameter, uint32_t
 static int threads_import(const char *name);
 static void timer_dispatch(void);
 static void wake_timers(void);
+static void notify_timer_waiters(void);
+static void wake_sync_waiters(void);
 
 static uint32_t guest_tid(void) { return guest_threads[current_thread].id; }
 
@@ -100,6 +103,26 @@ static void machine_pause(unsigned microseconds) {
     machine_release();
     usleep(microseconds ? microseconds : 50);
     machine_acquire(); machine_abort_check();
+}
+
+static void machine_budget_check(void) {
+    if (deadline != INFINITY && emscripten_get_now() >= deadline)
+        fail(g_cur_func, "Execution budget reached at %08X", g_cur_func);
+}
+
+/* The epoch must be sampled while holding the machine lock. A notification
+ * between unlock and park then changes the expected value instead of being
+ * lost. Diagnostic budgets also bound otherwise infinite host waits. */
+static void machine_wait(_Atomic uint32_t *epoch, uint32_t expected, double milliseconds) {
+    machine_abort_check();
+    if (deadline != INFINITY) {
+        double remaining = deadline - emscripten_get_now();
+        if (remaining <= 0) fail(g_cur_func, "Execution budget reached at %08X", g_cur_func);
+        if (milliseconds > remaining) milliseconds = remaining;
+    }
+    machine_release();
+    emscripten_futex_wait(epoch, expected, milliseconds);
+    machine_acquire(); machine_abort_check(); machine_budget_check();
 }
 
 static void machine_yield(void) {

@@ -77,6 +77,7 @@ static void fail(uint32_t pc, const char *format, ...) {
         vsnprintf(error, sizeof error, format, ap);
         va_end(ap);
         fatal_pending = 1;
+        wake_sync_waiters();notify_timer_waiters();
     }
     longjmp(stop, 1);
 }
@@ -626,7 +627,7 @@ int web_start(uint32_t entry, uint32_t milliseconds) {
 int web_async_status(void) { return atomic_load(&asynchronous_run.status); }
 int web_stop(void) {
     if(atomic_load(&asynchronous_run.status)!=1)return 0;
-    atomic_store(&stop_requested,1);gpu_wake_waiters();return 1;
+    atomic_store(&stop_requested,1);wake_sync_waiters();notify_timer_waiters();gpu_wake_waiters();return 1;
 }
 
 int web_async_finish(void) {

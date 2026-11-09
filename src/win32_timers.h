@@ -14,10 +14,15 @@ static uint32_t next_timer_id = 1, timer_worker;
 static _Atomic uint32_t timer_epoch;
 static uint32_t timer_created, timer_fired, timer_callbacks, timer_killed;
 
-static void wake_timers(void) {
-    if (cancel_workers) for (unsigned i = 0; i < 64; i++) memset(&timers[i], 0, sizeof timers[i]);
+/* This notification also runs from Stop without entering the guest machine. */
+static void notify_timer_waiters(void) {
     atomic_fetch_add(&timer_epoch, 1);
     emscripten_futex_wake((void *)&timer_epoch, INT_MAX);
+}
+
+static void wake_timers(void) {
+    if (cancel_workers) for (unsigned i = 0; i < 64; i++) memset(&timers[i], 0, sizeof timers[i]);
+    notify_timer_waiters();
 }
 
 static void timer_dispatch(void) {
@@ -30,9 +35,7 @@ static void timer_dispatch(void) {
         }
         if (!timer || due > now) {
             uint32_t epoch = atomic_load(&timer_epoch);
-            machine_release();
-            emscripten_futex_wait((void *)&timer_epoch, epoch, timer ? due - now : INFINITY);
-            machine_acquire();
+            machine_wait(&timer_epoch, epoch, timer ? due - now : INFINITY);
             continue;
         }
         uint32_t id = timer->id, callback = timer->callback, user = timer->user, flags = timer->flags;

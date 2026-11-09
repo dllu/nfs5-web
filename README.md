@@ -20,13 +20,16 @@ Current implementation:
   the original intro video and streams its PCM through the browser audio graph.
   The launcher can run until Stop; startup checks use a wall-clock limit.
   Unbounded play skips function/graphics deadline clock reads while retaining
-  Stop checks and renderer-failure handling. Finite diagnostic runs retain limits.
+  Stop checks and renderer-failure handling. Finite diagnostic budgets also
+  bound kernel-object waits, Sleep and an idle timer dispatcher.
   Node startup has no GPU attached.
 - The opening-movie part of `nfs5.ini`'s `NoMovies` setting is honored through
   the supplied patch's original jump point in the static translation.
   Development runs can force playback with `loadRuntime({intro:true})`.
 - Mutex/event/semaphore handles, recursive ownership, named references, and
-  blocking waits are implemented. Native Wasm workers have separate CPU/FPU
+  blocking waits are implemented. Object completions notify parked workers
+  through shared-memory epochs; Stop, shutdown and errors wake object/timer waits.
+  Native Wasm workers have separate CPU/FPU
   state, 4 MiB guest stacks, TLS and LastError; a lock serializes the lifted
   register file. x87 values and exact integer shadows use a circular eight-slot
   file, saved together on CPU switches. Up to seven guest workers can run
@@ -86,7 +89,9 @@ Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
-27 graphics-transport, 17 lifecycle and 10 startup-configuration checks. These
+27 graphics-transport, 18 lifecycle and 10 startup-configuration checks. Another
+43 blocked-wait checks cover signal races, seven parked workers, finite budgets,
+normal completion, Stop and worker-error delivery. The execution checks also
 cover seven-worker sleep and original compute-loop contention, finite graphics
 deadlines, cancellation in compute loops and disposal while a worker holds the VM.
 Another 24,000 stack-model transitions check both x87 storage layouts against an
@@ -122,7 +127,7 @@ text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
 The 4K/120 Hz gameplay target remains unmet: the latest eight-second Chrome
-driving check at 3840x2160 averaged about 86 presented frames per second.
+driving check at 3840x2160 averaged about 85 presented frames per second.
 Sustained performance across tracks remains untested. The optimized Wasm module
 is about 84 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU

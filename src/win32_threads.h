@@ -107,7 +107,7 @@ static uint32_t create_guest_thread(uint32_t entry, uint32_t parameter, uint32_t
 }
 
 static void stop_guest_workers(void) {
-    machine_lock(); cancel_workers = 1; wake_timers(); machine_unlock();
+    machine_lock(); cancel_workers = 1; wake_timers(); wake_sync_waiters(); machine_unlock();
     for (unsigned i = 1; i < 8; i++) {
         guest_thread *thread = &guest_threads[i];
         if (thread->started && !thread->joined) {
@@ -142,8 +142,9 @@ static int threads_import(const char *name) {
     if (!strcmp(name, "Sleep") || !strcmp(name, "SleepEx")) {
         uint32_t delay = argument(0);
         double start = emscripten_get_now();
-        do { machine_pause(delay ? 1000 : 50); }
+        do { machine_budget_check(); machine_pause(delay ? 1000 : 50); }
         while (delay == 0xFFFFFFFF || emscripten_get_now() - start < delay);
+        machine_budget_check();
         result(0, !strcmp(name, "SleepEx") ? 2 : 1); return 1;
     }
     return 0;

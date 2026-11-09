@@ -2,6 +2,7 @@
  * their completions so an event reset cannot revoke a delivered signal. */
 #ifndef NFS5_WIN32_SYNC_H
 #define NFS5_WIN32_SYNC_H
+#include <limits.h>
 
 enum { SYNC_MUTEX = 1, SYNC_EVENT, SYNC_SEMAPHORE, SYNC_THREAD };
 typedef struct {
@@ -12,6 +13,12 @@ typedef struct {
 typedef struct { uint32_t generation, object; } sync_handle;
 static sync_object sync_objects[256];
 static sync_handle sync_handles[512];
+static _Atomic uint32_t sync_epoch;
+
+static void wake_sync_waiters(void) {
+    atomic_fetch_add(&sync_epoch, 1);
+    emscripten_futex_wake(&sync_epoch, INT_MAX);
+}
 
 static sync_object *sync_get(uint32_t handle) {
     uint32_t slot = (handle & 0xFFF) / 4, generation = (handle >> 12) & 0xFFF;
@@ -98,6 +105,7 @@ static uint32_t sync_try_wait(sync_waiter *waiter, sync_object *pulse) {
 }
 
 static void sync_complete_waiters(sync_object *changed, int pulse) {
+    int completed = 0;
     for (unsigned i = 0; i < 64; i++) {
         sync_waiter *waiter = &sync_waiters[i];
         if (!waiter->owner || waiter->completed) continue;
@@ -107,8 +115,10 @@ static void sync_complete_waiters(sync_object *changed, int pulse) {
         uint32_t result = sync_try_wait(waiter, pulse ? changed : NULL);
         if (result == 0xFFFFFFFF) continue;
         waiter->result = result; waiter->completed = 1;
+        completed = 1;
         if (pulse && !changed->manual) break;
     }
+    if (completed) wake_sync_waiters();
 }
 
 static void sync_signal_event(sync_object *event, int pulse) {
@@ -137,11 +147,13 @@ static uint32_t sync_wait(uint32_t count, const uint32_t *handles, int all, uint
     for (unsigned i = 0; i < 64; i++) if (!sync_waiters[i].owner) { waiter = &sync_waiters[i]; break; }
     if (!waiter) { last_error = 8; return 0xFFFFFFFF; }
     *waiter = pending;
-    double start = emscripten_get_now();
+    double due = timeout == 0xFFFFFFFF ? INFINITY : emscripten_get_now() + timeout;
     for (;;) {
         if (waiter->completed) { ready = waiter->result; waiter->owner = 0; return ready; }
-        if (timeout != 0xFFFFFFFF && emscripten_get_now() - start >= timeout) { waiter->owner = 0; return 258; }
-        machine_pause(1000);
+        double remaining = due == INFINITY ? INFINITY : due - emscripten_get_now();
+        if (remaining <= 0) { waiter->owner = 0; return 258; }
+        uint32_t epoch = atomic_load(&sync_epoch);
+        machine_wait(&sync_epoch, epoch, remaining);
     }
 }
 

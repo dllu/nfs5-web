@@ -61,5 +61,9 @@ try {
     {encoding:'utf8',timeout:15000});
   assert.equal(shutdown.status,0,shutdown.error?.message||shutdown.stderr);
   assert.match(shutdown.stdout,/Original compute worker stopped/);checks++;
+  const waits=spawnSync(process.execPath,[new URL('./wait-notifications.mjs',import.meta.url).pathname],
+    {encoding:'utf8',timeout:15000});
+  assert.equal(waits.status,0,waits.error?.message||waits.stderr);
+  assert.match(waits.stdout,/43 blocked-wait checks passed/);console.log(waits.stdout.trim());checks++;
   console.log(`${checks} lifecycle checks passed (unbounded runs, message/sleep/loop/GPU cancellation, compute-worker shutdown, timer wakeup, stop/restart)`);
 }finally{runtime.dispose();}
