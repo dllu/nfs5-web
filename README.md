@@ -146,7 +146,10 @@ program in the same prefix. The optional 32-bit
 code/data without modifying its process. On Sway, focus the Porsche container
 before sending X11 input; activating only its X11 window can leave it unfocused.
 The reader accepts a direct address or `@address` to follow a stored 32-bit
-pointer before taking the snapshot.
+pointer before taking the snapshot. With the reader built and reference running,
+`python3 tools/native_sun.py build/native-sun` records display/sun data as JSON
+and raw snapshots; `--window <X11-ID>` also captures its image. Live reads and
+the image are separate observations, not an atomic frame capture.
 
 `src/` contains the browser host, `web/` the launcher/backend, `tools/` the
 build pipeline and `tests/` the execution checks. See
