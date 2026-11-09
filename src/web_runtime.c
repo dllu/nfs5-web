@@ -31,7 +31,8 @@ void (*recomp_mode_hook)(uint32_t caller, uint32_t entry_esp);
 
 static __thread jmp_buf stop;
 static char error[512];
-static uint32_t last_pc, first_pc, calls, heap_next, next_tls, exception_filter;
+static uint32_t last_pc, first_pc, heap_next, next_tls, exception_filter;
+static uint64_t calls;
 static __thread uint32_t last_error;
 static double deadline;
 static double win_clock_origin;
@@ -649,7 +650,11 @@ uint32_t *web_registers(void) {
     return registers;
 }
 uint32_t *web_trace(void) { return g_enter_trace; }
-uint32_t web_trace_count(void) { return g_enter_idx; }
+double web_trace_count(void) {
+    /* Preserve a JS Number across long runs; exported i32 counters become
+     * negative at 2^31 entries and the ring cursor itself wraps at 2^32. */
+    machine_acquire();double count=(double)calls;machine_release();return count;
+}
 const char *web_error(void) { return error; }
 uint32_t web_last_pc(void) { return last_pc; }
 uint32_t web_first_pc(void) { return first_pc; }
