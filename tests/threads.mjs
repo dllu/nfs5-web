@@ -78,7 +78,30 @@ try {
   assert.equal(invoke('TlsGetValue',index),0xc0ffee,'Parent TLS survives seven contenders');
   assert.equal(module._web_float_result(),68,'Parent x87 state survives repeated contended handoffs');
   for(const handle of contenders)assert.equal(invoke('CloseHandle',handle),1);
-  console.log(`${calls} thread calls passed (suspended startup, TLS/LastError/register isolation, completion, event waits, seven-worker contention)`);
+  // Seven original compute-only searches must share the VM without an API
+  // sleep inside their loops. A cyclic non-sentinel node keeps every search
+  // active until the host publishes the value being sought.
+  const root=data+0x400,node=data+0x440,sentinel=data+0x420;
+  for(const [at,value] of [[0x69cae4,root],[root,sentinel],[sentinel,node],[node,node],[node+8,0]])memory().setUint32(at,value,true);
+  const spinners=[];
+  for(let i=0;i<7;i++) {
+    const handle=invoke('CreateThread',0,0,0x5292d0,1,0,output);
+    assert(handle);spinners.push(handle);memory().setUint32(output+0x200+i*4,handle,true);
+  }
+  await new Promise(resolve=>setTimeout(resolve,20));
+  for(const handle of spinners) {
+    assert.equal(callAt(getExit,[handle,output+4]),1);
+    assert.equal(memory().getUint32(output+4,true),259,'Compute worker remains active before its value is published');
+  }
+  Atomics.store(new Uint32Array(module.HEAPU8.buffer),(base+node+8)/4,1);
+  assert.equal(invoke('WaitForMultipleObjectsEx',7,output+0x200,1,2000,0),0,'Every original compute worker makes progress');
+  for(const handle of spinners) {
+    assert.equal(callAt(getExit,[handle,output+4]),1);
+    assert.equal(memory().getUint32(output+4,true),node,'Each worker retains its own search registers');
+    assert.equal(invoke('CloseHandle',handle),1);
+  }
+  assert.equal(invoke('TlsGetValue',index),0xc0ffee);assert.equal(module._web_float_result(),68);
+  console.log(`${calls} thread calls passed (suspended startup, TLS/LastError/register isolation, completion, event waits, seven-worker sleep/compute contention)`);
 } finally {
   runtime.dispose();
 }

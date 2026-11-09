@@ -40,7 +40,7 @@ static void gpu_park(_Atomic uint32_t *word,uint32_t value) {
 static void gpu_check(void) {
     if (atomic_load(&gpu_transport.failed)) fail(g_cur_func, "WebGPU: %s", gpu_error);
     if (!atomic_load(&gpu_transport.attached)) fail(g_cur_func, "WebGPU renderer is not attached");
-    if (emscripten_get_now() > deadline) fail(g_cur_func, "Graphics wait budget reached at %08X", g_cur_func);
+    if (deadline != INFINITY && emscripten_get_now() > deadline) fail(g_cur_func, "Graphics wait budget reached at %08X", g_cur_func);
 }
 static void gpu_wait(uint32_t sequence) {
     for(;;) {

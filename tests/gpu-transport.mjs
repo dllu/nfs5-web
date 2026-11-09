@@ -82,5 +82,7 @@ try {
   assert.equal(view.getUint16(data+128,true),0x1546,'RGB565 readback is copied only after completion');checks++;
   const reset=await barrier(methods.restore,[],10);acknowledge(reset);assert.equal(await finish(),1);
   assert.equal(Atomics.load(header,0),Atomics.load(header,1));checks++;
-  console.log(`${checks} graphics-transport checks passed (asynchronous flush, ordered resize, present/readback/reset barriers)`);
+  const timed=await runtime.invokeAsync(methods.setvideomode,[1,0,2],30);
+  assert.equal(timed.status,1);assert.match(timed.error,/Graphics wait budget reached/);checks++;
+  console.log(`${checks} graphics-transport checks passed (asynchronous flush, ordered resize, present/readback/reset barriers, finite deadline)`);
 } finally {runtime.stop();runtime.dispose();}

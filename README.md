@@ -19,7 +19,8 @@ Current implementation:
   In Chrome 157 it creates the game window, selects a graphics mode, decodes
   the original intro video and streams its PCM through the browser audio graph.
   The launcher can run until Stop; startup checks use a wall-clock limit.
-  Unbounded play avoids per-function host clock reads while retaining Stop checks.
+  Unbounded play skips function/graphics deadline clock reads while retaining
+  Stop checks and renderer-failure handling. Finite diagnostic runs retain limits.
   Node startup has no GPU attached.
 - The opening-movie part of `nfs5.ini`'s `NoMovies` setting is honored through
   the supplied patch's original jump point in the static translation.
@@ -83,11 +84,11 @@ Current implementation:
 
 Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
-40 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
+70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
-26 graphics-transport, 17 lifecycle and 10 startup-configuration checks. These include seven-worker
-contention, cancellation in original compute loops and disposal while a worker
-holds the VM in guest code.
+27 graphics-transport, 17 lifecycle and 10 startup-configuration checks. These
+cover seven-worker sleep and original compute-loop contention, finite graphics
+deadlines, cancellation in compute loops and disposal while a worker holds the VM.
 Another 24,000 stack-model transitions check both x87 storage layouts against an
 independent logical model, including special doubles, swaps and all eight slots.
 Chrome verifies original startup,
@@ -120,8 +121,8 @@ Other native-patch settings are not fully ported. Window APIs and
 text input cover a limited subset; hooks and full keyboard-layout handling are
 unsupported. An abrupt close can lose
 changes since the last checkpoint.
-The 4K/120 Hz gameplay target remains unmet: short Chrome driving samples at
-3840x2160 averaged 81–85 presented frames per second with the current build.
+The 4K/120 Hz gameplay target remains unmet: the latest eight-second Chrome
+driving check at 3840x2160 averaged about 86 presented frames per second.
 Sustained performance across tracks remains untested. The optimized Wasm module
 is about 84 MiB and retains tracing and optional execution limits. The x87
 helpers use double precision; English linguistic comparison uses an ICU
