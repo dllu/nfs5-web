@@ -141,7 +141,7 @@ try {
     expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],'disabled depth test also disables depth writes');
     renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000,{specular:0}),mesh,{fog_enable:1,fog_color:0x00808080});
     expect(pixel(await renderer.readPixels(),16,16),[128,128,128,255],'vertex fog');
-    renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000,{rhw:.5}),mesh,{fog_enable:1,fog_color:0x00808080,fog_mode:1,fog_near:1,fog_far:3});
+    renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000,{rhw:.5}),mesh,{fog_enable:1,fog_color:0xff808080,fog_mode:1,fog_near:1,fog_far:3});
     expect(pixel(await renderer.readPixels(),16,16),[192,64,64,255],'eye-depth linear fog',1);
     renderer.textureCreate(2,2,1,Uint8Array.of(255,0,0,255,0,255,0,255));
     const perspective = pack([{x:0,y:0,u:0,v:0,rhw:1},{x:64,y:0,u:1,v:0,rhw:.25},{x:64,y:64,u:1,v:1,rhw:.25},{x:0,y:64,u:0,v:1,rhw:1}]);

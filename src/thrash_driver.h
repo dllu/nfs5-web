@@ -15,8 +15,6 @@ static int opened,trace;
 static uint32_t state_values[8][1024],clear_color=0xFF000000u;
 static float clear_depth=1,vertex_depth_bias;
 static uint32_t selected_fog_mode;
-static int software_fog,fog_table_valid;
-static uint8_t fog_visibility[256];
 static nfspu_gpu_state render_state;
 static unsigned frames,draws,uploads,software_frames,partial_clears;
 static uint32_t vertex_stride=32,sprite_stride=32,thrash_calls;
@@ -168,7 +166,7 @@ static void submit(const nfspu_gpu_vertex *v,uint32_t n,const uint32_t *idx,uint
         if(!n){free(adjusted);return;}
         v=adjusted;idx=NULL;ni=0;primitive=0;
     }
-    if(ui_draw_depth||vertex_depth_bias!=0||(software_fog&&fog_table_valid)){
+    if(ui_draw_depth||vertex_depth_bias!=0){
         if(!adjusted){
             adjusted=malloc((size_t)n*sizeof *adjusted);if(!adjusted)hle_fatal("Thrash adjusted vertices allocation");
             memcpy(adjusted,v,(size_t)n*sizeof *adjusted);
@@ -176,12 +174,6 @@ static void submit(const nfspu_gpu_vertex *v,uint32_t n,const uint32_t *idx,uint
         for(uint32_t i=0;i<n;i++){
             if(ui_draw_depth&&!expanded){adjusted[i].x*=ui_scale[0];adjusted[i].y*=ui_scale[1];}
             adjusted[i].z+=vertex_depth_bias;
-            if(software_fog&&fog_table_valid){
-                float sample=adjusted[i].z*255.0f;
-                int at=!isfinite(sample)?255:sample<=0?0:sample>=255?255:(int)fp_round_cw(sample,g_fpu_cw);
-                if(at<0)at=0;if(at>255)at=255;
-                adjusted[i].specular=(uint32_t)fog_visibility[at]<<24;
-            }
         }v=adjusted;
     }
     nfspu_gpu_state s=render_state;s.primitive=primitive;
@@ -299,17 +291,6 @@ static void r_tupdate(void) {
 }
 static void r_texture(void){state_values[0][1]=A32(0);texture_slot *t=find_texture(A32(0));render_state.texture=t?t->gpu_id:0;RET(1,1);}
 static int known_state(uint32_t s){return s<=70||(s>=100&&s<=110)||(s>=200&&s<=215)||(s>=300&&s<=315)||(s>=400&&s<=415)||(s>=700&&s<=715);}
-static void install_fog_table(uint32_t va){
-    const uint8_t *source=hle_ptr(va);
-    for(int i=0;i<256;i++){
-        float t=(float)((double)i*(double)(1.0f/255.0f)*63.0);
-        int index=(int)fp_round_cw(t,g_fpu_cw);if(index<0)index=0;if(index>63)index=63;
-        float fraction=t-index;int amount=source[index];
-        if(fraction>0&&index<63){float interpolated=(float)(source[index]+(double)fraction*((int)source[index+1]-(int)source[index]));amount=(int)fp_round_cw(interpolated,g_fpu_cw);}
-        if(amount<0)amount=0;if(amount>255)amount=255;fog_visibility[i]=(uint8_t)(255-amount);
-    }
-    fog_table_valid=software_fog=1;selected_fog_mode=16;render_state.fog_mode=0;
-}
 static void r_getstate(void){uint32_t s=A32(0)&0xFFFF,stage=(A32(0)>>16)&7;if(s==29){make_descriptor();RET(surface_info,1);}RET(known_state(s)?state_values[stage][s]:0xFFFFFFFFu,1);}
 static void r_state(void) {
     uint32_t raw=A32(0),s=raw&0xFFFF,v=A32(1);
@@ -331,7 +312,6 @@ static void r_state(void) {
     if((s==48||(s>=52&&s<=54))&&v>7)RET(0,2);
     if((s==13||s==65||s==66)&&v>2)RET(0,2);
     if(s==30&&(v<32||v>128))RET(0,2);
-    if(s==21&&v!=0&&v!=1&&v!=2&&v!=4&&v!=8)RET(0,2);
     uint32_t previous=state_values[stage][s];
     if(s<1024&&known_state(s))state_values[stage][s]=v;
     if(trace)fprintf(stderr,"[thrash] setstate(%u,0x%08X)\n",raw,v);
@@ -357,15 +337,24 @@ static void r_state(void) {
         render_state.blend_enable=thrash_version>=107?v>=2:v!=0;
         render_state.alpha_test=render_state.blend_enable;
         render_state.alpha_func=render_state.alpha_test?4:7;break;
-    case 14:{float density=v>0&&v<4096?1.0f/v:as_float(v);render_state.fog_density=isfinite(density)&&density>=0?density:0;break;}
-    case 15:render_state.fog_color=v&0x00FFFFFFu;break;
+    /* Native 10006246/100062EF/1000631E/1000634D: ARGB fog strength,
+     * unsigned integer range endpoints, and reciprocal-or-float density. */
+    case 14:if(previous!=v)render_state.fog_density=v>0&&v<4096?1.0f/v:as_float(v);break;
+    case 15:if(previous!=v)render_state.fog_color=v;break;
+    case 22:if(previous!=v)render_state.fog_near=(float)v;break;
+    case 23:if(previous!=v)render_state.fog_far=(float)v;break;
     case 19:callbacks=v;break;
-    case 20:case 105:if(v)install_fog_table(v);break;
-    case 21:
-        render_state.fog_enable=v!=0;
-        if(!v)software_fog=0;
-        else if(v==1){software_fog=selected_fog_mode==16&&fog_table_valid;render_state.fog_mode=software_fog?0:selected_fog_mode;}
-        else{selected_fog_mode=v==2?1:v==4?2:3;render_state.fog_mode=selected_fog_mode;software_fog=0;}
+    /* The supplied driver's 20/21/105 aliases all reach 1000620C.
+     * Zero disables, one restores the last selected mode, and other values
+     * select the shader mode. Only native modes 2/4/8 draw fog; a pointer or
+     * mode 16 is not a fog-table upload in this OpenGL renderer. */
+    case 20:case 21:case 105:
+        if(previous!=v){
+            if(v>1)selected_fog_mode=v;
+            uint32_t mode=v==1?selected_fog_mode:v;
+            render_state.fog_mode=mode==2?1:mode==4?2:mode==8?3:0;
+            render_state.fog_enable=render_state.fog_mode!=0;
+        }
         break;
     case 24:case 102:vertex_depth_bias=(float)(int32_t)v/32768.0f;break;
     case 30:sprite_stride=v;break;
@@ -515,10 +504,10 @@ static void thrash_reset(void) {
     for(unsigned i=0;i<MAX_TEXTURES;i++){free(textures[i].pixels);free(textures[i].palette);}
     memset(textures,0,sizeof textures);memset(state_values,0,sizeof state_values);
     descriptor=modes=formats=framebuffer=framebuffer_capacity=lockdesc=surface_info=callbacks=0;
-    width=640;height=480;color_bits=16;window_color_clear=1;opened=trace=software_fog=fog_table_valid=0;thrash_version=107;
+    width=640;height=480;color_bits=16;window_color_clear=1;opened=trace=0;thrash_version=107;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
     frames=draws=uploads=software_frames=partial_clears=thrash_calls=0;vertex_stride=sprite_stride=32;
-    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.depth_write=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1,.alpha_func=4,
+    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.depth_write=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1,.alpha_func=4,
         .stencil_func=7,.stencil_ref=2,.stencil_read_mask=255,.stencil_write_mask=255,.color_write=1};
     state_values[0][48]=7;
     state_values[0][6]=state_values[0][7]=state_values[0][11]=1;

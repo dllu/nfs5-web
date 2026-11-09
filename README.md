@@ -27,10 +27,10 @@ incomplete.** Visual fidelity takes priority over further performance work.
   use the original detailed frontend path.
 - A WebGPU Thrash replacement implements the game's geometry/texture submission,
   perspective UVs, flat/Gouraud diffuse and specular shading, blending, alpha
-  tests, depth/stencil, fog, supplied mipmaps, filtering/address modes and
-  framebuffer transfers. An OffscreenCanvas consumer receives ordered commands
-  through a bounded shared-memory queue. Multitexture and broader scene/effect
-  fidelity remain under audit.
+  tests, depth/stencil, vertex fog with ARGB strength, supplied mipmaps,
+  filtering/address modes and framebuffer transfers. An OffscreenCanvas consumer
+  receives ordered commands through a bounded shared-memory queue. Broader
+  scene/effect fidelity remains under audit.
 - A browser-local file overlay persists saves and registry changes in IndexedDB
   per origin/executable, checkpointing every second and when play stops.
   Creating players and purchasing the first Evolution car survive a full
@@ -53,7 +53,7 @@ Wasm module is about 84 MiB and retains tracing and optional execution limits.
 
 ## Validation and remaining work
 
-Manual Chrome runs render Côte d'Azur and Zone Industrielle at
+Manual Chrome runs render Côte d'Azur, Schwarzwald and Zone Industrielle at
 6144×3162×32 without WebGPU errors, with active texture and car tiers both 4.
 The live camera half-FOV is 48.195°, matching Verok's aspect calculation.
 Physical L input switches the projected headlight beam on the industrial
@@ -79,7 +79,9 @@ need verification. The renderer has a core depth/stencil fallback when optional
 
 Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
-visibility. All nine portrait pixel planes match native GIMME conversion.
+visibility. Fog state handlers are compared against the original x86 OpenGL
+driver, and fog pixels against its embedded GLSL. All nine portrait pixel planes
+match native GIMME conversion.
 The checks also exercise Windows services, threads, x87 state, storage,
 audio, input and lifecycle behavior. Real Chrome checks cover intro/audio,
 menu gradients and portraits, maximum defaults, viewport/input scaling,

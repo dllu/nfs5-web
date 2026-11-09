@@ -14,8 +14,7 @@ struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) @interpolate(linear) color: vec4f,
     @location(1) uv: vec2f,
-    @location(2) @interpolate(linear) fog: f32,
-    @location(3) eye_depth: f32,
+    @location(2) @interpolate(linear) fog_amount: f32,
     @location(4) @interpolate(flat) flat_color: vec4f,
     @location(5) @interpolate(linear) specular: vec4f,
 };
@@ -31,8 +30,19 @@ struct VertexOutput {
     output.flat_color = color.bgra;
     output.specular = specular.bgra;
     output.uv = uv;
-    output.fog = specular.a;
-    output.eye_depth = max(w, 0.0);
+    // Verok calculates fog at vertices, then interpolates its amount in screen
+    // space. The ARGB fog color's alpha controls its maximum strength.
+    var fog_amount = 1.0 - specular.a;
+    if fx.fog_params.x > 0.5 {
+        var depth = 1.0;
+        if position.w != 0.0 { depth = 1.0 / position.w; }
+        var visibility = (fx.fog_params.w - depth) / (fx.fog_params.w - fx.fog_params.z);
+        let amount = fx.fog_params.y * depth;
+        if fx.fog_params.x > 2.5 { visibility = exp2(amount * amount * -1.442695); }
+        else if fx.fog_params.x > 1.5 { visibility = exp(-amount); }
+        fog_amount = (1.0 - clamp(visibility, 0.0, 1.0)) * fx.fog_color.a;
+    }
+    output.fog_amount = fog_amount;
     return output;
 }
 @fragment fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
@@ -53,15 +63,7 @@ struct VertexOutput {
         default: {}
     }
     if fx.effects.z > 0.5 {
-        var visibility = clamp(input.fog, 0.0, 1.0);
-        let depth = max(input.eye_depth, 0.0);
-        let amount = max(fx.fog_params.y, 0.0) * depth;
-        if fx.fog_params.x > 2.5 { visibility = exp(-amount * amount); }
-        else if fx.fog_params.x > 1.5 { visibility = exp(-amount); }
-        else if fx.fog_params.x > 0.5 {
-            visibility = clamp((fx.fog_params.w - depth) / max(fx.fog_params.w - fx.fog_params.z, 0.0000001), 0.0, 1.0);
-        }
-        color = vec4f(mix(fx.fog_color.rgb, color.rgb, clamp(visibility, 0.0, 1.0)), color.a);
+        color = vec4f(mix(color.rgb, fx.fog_color.rgb, clamp(input.fog_amount, 0.0, 1.0)), color.a);
     }
     return color;
 }
