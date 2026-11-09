@@ -113,6 +113,7 @@ static void r_mode(void) {
     if(opened){if(!gpu->resize(width,height))RET(0,3);}else if(!open_gpu())RET(0,3);
     hle_set_screen_size(width,height);
     web_projection_update(width,height);
+    web_ui_update(width,height);
     MEM32(lockdesc+4)=width*color_bits/8;MEM32(lockdesc+8)=color_bits==16?4:6;
     MEM32(lockdesc+12)=width;MEM32(lockdesc+16)=height;
     memcpy(hle_ptr(surface_info),hle_ptr(lockdesc),20);MEM32(surface_info)=0;RET(1,3);
@@ -144,6 +145,10 @@ static void r_flip(void){int ok=open_gpu()&&gpu->present();frames++;RET(ok,0);}
 static void r_sync(void){nfspu_thrash_pump();RET(1,1);}
 static void r_clip(void){
     uint32_t x=A32(0),y=A32(1),right=A32(2),bottom=A32(3);
+    if(ui_draw_depth){
+        x=(uint32_t)round((double)x*ui_scale[0]);right=(uint32_t)round((double)right*ui_scale[0]);
+        y=(uint32_t)round((double)y*ui_scale[1]);bottom=(uint32_t)round((double)bottom*ui_scale[1]);
+    }
     render_state.scissor_enable=1;render_state.scissor_x=x;render_state.scissor_y=y;
     render_state.scissor_w=right>x?right-x:0;render_state.scissor_h=bottom>y?bottom-y:0;
     RET(1,4);
@@ -152,10 +157,11 @@ static void r_clip(void){
 static void submit(const nfspu_gpu_vertex *v,uint32_t n,const uint32_t *idx,uint32_t ni,uint32_t primitive) {
     if(!n || !open_gpu())return;
     nfspu_gpu_vertex *adjusted=NULL;
-    if(vertex_depth_bias!=0||(software_fog&&fog_table_valid)){
+    if(ui_draw_depth||vertex_depth_bias!=0||(software_fog&&fog_table_valid)){
         adjusted=malloc((size_t)n*sizeof *adjusted);if(!adjusted)hle_fatal("Thrash adjusted vertices allocation");
         memcpy(adjusted,v,(size_t)n*sizeof *adjusted);
         for(uint32_t i=0;i<n;i++){
+            if(ui_draw_depth){adjusted[i].x*=ui_scale[0];adjusted[i].y*=ui_scale[1];}
             adjusted[i].z+=vertex_depth_bias;
             if(software_fog&&fog_table_valid){
                 float sample=adjusted[i].z*255.0f;

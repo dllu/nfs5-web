@@ -16,6 +16,7 @@ sys.path.insert(0, str(PCRECOMP))
 from tools.lift.translator import load_pe, discover_functions
 from tools.lift.lift32 import Lifter
 from verok_quality import IMAGE_SHA, LIBRARY_SHA, QualityHooks
+from ui_layout import UiHooks
 
 
 def main():
@@ -34,6 +35,7 @@ def main():
     for path in output.glob("*.c"):
         path.unlink()
     quality = None
+    ui = None
     if image_sha == IMAGE_SHA:
         library = args.patch_library or image.with_name('nfs5.dll')
         try:
@@ -42,6 +44,8 @@ def main():
             parser.error(str(error))
         patches.append('verok-graphics-quality')
         patches.append('verok-projection')
+        ui = UiHooks()
+        patches.append('browser-ui-layout')
     functions = discover_functions(data, info, iat)
     lifter = Lifter(iat_map=iat, lifted=set(functions))
     unsupported = Counter()
@@ -60,6 +64,8 @@ def main():
             source = lifter.lift_function(function)
             if quality:
                 source = quality.apply(address, source)
+            if ui:
+                source = ui.apply(source)
             # Keep logical x87 indices independent of the physical stack file.
             source = re.sub(r'\b_st\[([0-7])\]',r'FP_ST(\1)',source)
             source = re.sub(r'\bg_st_i64\[([0-7])\]',r'FP_I64(\1)',source)
@@ -91,6 +97,8 @@ def main():
         print(f"Lifted {min(start + 200, len(addresses))}/{len(addresses)}", flush=True)
     if quality:
         quality.validate()
+    if ui:
+        ui.validate()
     dispatch = ['#include "web_runtime.h"', '#include "functions.h"',
                 'const recomp_dispatch_entry_t recomp_dispatch_table[] = {']
     dispatch += [f"{{0x{a:08X}u, sub_{a:08X}}}," for a in addresses]

@@ -42,6 +42,11 @@ Current implementation:
   retain their saved indices. Mouse movement, buttons and wheel
   coordinates follow that scaling across window resizes. Stop returns to the
   launcher and its final frame.
+  Race HUD text, gauges, rear-view placement and pause controls use a separate
+  logical UI canvas, preserving their anchors and readable size at 4K/6K.
+  UI hit testing converts cached mouse positions and button-event coordinates;
+  Windows and DirectInput retain physical coordinates. Minimap stroke widths
+  and the race-loading panel still use fixed physical pixels.
   Original `ExitProcess` calls end the guest, wake blocked workers and report
   the unsigned game exit code separately from Stop and runtime errors.
 - Multimedia timers share one sleeping dispatcher and execute the original
@@ -114,6 +119,7 @@ Current implementation:
 Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, 260 native Verok DLL comparisons for texture tiers and car layers,
 260 projection calculations and 168 original camera/zoom comparisons,
+56 UI layout checks using the original HUD anchoring routine,
 plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 228 Thrash loader/ABI calls,
@@ -140,7 +146,7 @@ a fresh restart. An original frontend run verifies its capability-selected
 Gouraud UI path and the actual button highlight/center/shadow pixels.
 143 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
 an OffscreenCanvas rendered in a dedicated Worker using the core depth/stencil
-format. Another 187 checks exercise
+format. Another 211 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure, asynchronous flush and reuse of
 guest vertex memory before consumer execution. Pixel checks cover flat provoking
@@ -160,9 +166,10 @@ indexed/unindexed draws and textures, preserve alpha comparison defaults and
 wake after idle. These checks do not measure game FPS.
 
 Manual Chrome navigation reaches quick-race setup and renders the Côte d'Azur
-track and Porsche 356 at 6144x3456. Holding Up accelerates the car; the original
-HUD showed roughly 80 km/h and third gear. Pause and race restart work.
-Menu clicks can require retries. HUD scaling, broader input, fidelity and
+track and Porsche 356 at 6144×3162×32. Holding Up accelerates the car; the scaled
+HUD showed roughly 60 km/h and second gear. Pause hover, Continue and driving
+work with physical browser input; race restart has also been exercised.
+Menu clicks can require retries. Broader input, fidelity and
 performance need further verification. The original graphics menu selects a
 4K race mode successfully.
 Creating a player writes its original save and HUD files to browser storage;

@@ -39,6 +39,7 @@ static int critical_import(const char *name) {
 
 static void *guest_thread_main(void *opaque) {
     guest_thread *thread = opaque;
+    ui_draw_depth=0;
     current_thread = (unsigned)(thread - guest_threads);
     memset(&cpu, 0, sizeof cpu);
     cpu.r[4] = GUEST_SIZE - current_thread * 0x400000 - 16;
