@@ -65,5 +65,9 @@ try {
     {encoding:'utf8',timeout:15000});
   assert.equal(waits.status,0,waits.error?.message||waits.stderr);
   assert.match(waits.stdout,/43 blocked-wait checks passed/);console.log(waits.stdout.trim());checks++;
+  const exit=spawnSync(process.execPath,[new URL('./process-exit.mjs',import.meta.url).pathname],
+    {encoding:'utf8',timeout:30000});
+  assert.equal(exit.status,0,exit.error?.message||exit.stderr);
+  assert.match(exit.stdout,/23 process-exit checks passed/);console.log(exit.stdout.trim());checks++;
   console.log(`${checks} lifecycle checks passed (unbounded runs, message/sleep/loop/GPU cancellation, compute-worker shutdown, timer wakeup, stop/restart)`);
 }finally{runtime.dispose();}

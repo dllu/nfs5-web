@@ -36,6 +36,8 @@ Current implementation:
   alongside the primary thread.
 - Browser startup runs off the UI thread. The static server supplies the
   cross-origin isolation headers required for shared Wasm memory.
+  Original `ExitProcess` calls end the guest, wake blocked workers and report
+  the unsigned game exit code separately from Stop and runtime errors.
 - Multimedia timers share one sleeping dispatcher and execute the original
   five-argument callback, including its one-shot rescheduling. Event timers,
   periodic dispatch, synchronous cancellation and pulse waits are implemented.
@@ -89,9 +91,12 @@ Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
 routines, plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
 54 DirectSound, 31 registry, 98 window/desktop and 78 Thrash loader/ABI calls,
-27 graphics-transport, 18 lifecycle and 10 startup-configuration checks. Another
+27 graphics-transport, 19 lifecycle and 10 startup-configuration checks. Another
 43 blocked-wait checks cover signal races, seven parked workers, finite budgets,
-normal completion, Stop and worker-error delivery. The execution checks also
+normal completion, Stop and worker-error delivery. Another 23 process-exit
+checks cover unsigned exit codes, seven blocked workers and callback-driven
+exit during object, sleep, message, timer, compute and graphics waits.
+The execution checks also
 cover seven-worker sleep and original compute-loop contention, finite graphics
 deadlines, cancellation in compute loops and disposal while a worker holds the VM.
 Another 24,000 stack-model transitions check both x87 storage layouts against an
@@ -119,7 +124,12 @@ performance need further verification. The original graphics menu selects a
 4K race mode successfully.
 Creating a player writes its original save and HUD files to browser storage;
 the player reappears selected after a full browser restart, with identical save
-bytes. Campaign progress and explicit race-save/load flows remain untested.
+bytes. Buying the first Evolution car (a 1950 356 1100 Cabriolet for 11,000),
+confirming the game's Exit and restarting Chrome restores the owned car and
+zero account balance, with identical saved bytes. Confirmed Exit writes career
+changes; the launcher's Stop only checkpoints files the game has already written.
+Race results, campaign advancement and explicit race-save/load flows remain
+untested.
 Custom portrait conversion
 is unavailable; the original caller uses its optional-converter failure path.
 Other native-patch settings are not fully ported. Window APIs and

@@ -31,6 +31,7 @@ static __thread int machine_held;
 static pthread_mutex_t machine_mutex = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic unsigned machine_waiters;
 static int cancel_workers, fatal_pending;
+static uint32_t process_exited, process_exit_code;
 static _Atomic uint32_t stop_requested;
 static uint32_t error_import[10], error_thread;
 static void stop_guest_workers(void);
@@ -72,6 +73,7 @@ static void cpu_load(void) {
 }
 
 static void machine_abort_check(void) {
+    if (process_exited) longjmp(stop, 4);
     if (current_thread && cancel_workers) longjmp(stop, 2);
     if (fatal_pending) longjmp(stop, 1);
     if (atomic_load(&stop_requested))fail(g_cur_func,"Stopped by user");

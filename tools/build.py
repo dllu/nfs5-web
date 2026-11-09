@@ -101,6 +101,7 @@ def main():
     exports.extend(['_web_gpu_transport', '_web_gpu_attach', '_web_gpu_fail', '_web_gpu_stats'])
     exports.extend(['_web_pointer','_web_mapping_stats'])
     exports.extend(['_web_intro_config','_web_intro_skipped'])
+    exports.extend(['_web_process_exited','_web_exit_code'])
     profile_flags = ['--emit-symbol-map'] if args.profile else []
     if not args.profile:
         (ROOT / 'dist/engine.js.symbols').unlink(missing_ok=True)

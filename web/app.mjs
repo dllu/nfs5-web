@@ -61,8 +61,8 @@ async function start(milliseconds) {
       worker.postMessage({ type: 'start', milliseconds, audio: audio.configuration, display: { width: innerWidth, height: innerHeight },canvas:offscreen },[offscreen]);
     });
     window.nfs5Result = result;
-    status.textContent = result.stopped?'Stopped.':result.status ? (/budget reached/i.test(result.error)?'Diagnostic execution limit reached':'Execution stopped at a porting dependency') : 'Startup function returned';
-    write(result.error || 'Returned successfully');
+    status.textContent = result.stopped?'Stopped.':result.exited?`Game exited (code ${result.exitCode}).`:result.status ? (/budget reached/i.test(result.error)?'Diagnostic execution limit reached':'Execution stopped at a porting dependency') : 'Startup function returned';
+    write(result.error || (result.exited?`Game exited with code ${result.exitCode}`:'Returned successfully'));
     write(`\n${result.count.toLocaleString()} function entries. Recent calls:`);
     write(result.trace.slice(-32).map(pc => '0x' + hex(pc)).join(' → '));
     write('\n' + ['EAX', 'ECX', 'EDX', 'EBX', 'ESP', 'EBP', 'ESI', 'EDI']

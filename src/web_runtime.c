@@ -363,6 +363,16 @@ void web_import(uint32_t index) {
         last_error = 127; result(0, 2); return;
     }
     if (!strcmp(name, "GetCurrentProcess")) { result(0xFFFFFFFF, 0); return; }
+    if (!strcmp(name, "ExitProcess")) {
+        /* End the guest without terminating the browser/Node host. Every
+         * native guest stack unwinds at its next machine acquisition/check. */
+        process_exit_code = argument(0); process_exited = 1;
+        for (unsigned i = 0; i < 8; i++)
+            if (guest_threads[i].used && !guest_threads[i].done)
+                guest_threads[i].exit_code = process_exit_code;
+        wake_sync_waiters(); notify_timer_waiters(); gpu_wake_waiters();
+        longjmp(stop, 4);
+    }
     if (!strcmp(name, "GetDriveTypeA")) {
         const char *path = argument(0) ? (const char *)ADDR(argument(0)) : path_cwd;
         char drive = path[0] >= 'a' && path[0] <= 'z' ? path[0] - 32 : path[0];
@@ -558,7 +568,8 @@ uint32_t web_init(void) {
     memset(di_mouse, 0, sizeof di_mouse); memset(di_cursor, 0, sizeof di_cursor); di_buttons = 0; di_focused = 1;
     timer_created = timer_fired = timer_callbacks = timer_killed = 0;
     guest_threads[0].used = 1; guest_threads[0].id = 1; guest_threads[0].object = 0xFFFFFFFF; current_thread = 0;
-    next_thread_id = 2; cancel_workers = fatal_pending = 0; atomic_store(&stop_requested,0);error_thread = 0;
+    next_thread_id = 2; cancel_workers = fatal_pending = 0; process_exited = process_exit_code = 0;
+    atomic_store(&stop_requested,0);error_thread = 0;
     g_flag_k = g_flag_a = g_flag_b = g_flag_cf = 0;
     memset(g_st, 0, sizeof g_st);
     memset(g_st_i64,0,sizeof g_st_i64);
@@ -572,7 +583,10 @@ uint32_t web_init(void) {
 
 static int run_guest(uint32_t entry, uint32_t milliseconds) {
     machine_acquire();
-    if (!current_thread) { error[0] = 0; fatal_pending = 0; cancel_workers = 0; }
+    if (!current_thread) {
+        error[0] = 0; fatal_pending = 0; cancel_workers = 0;
+        process_exited = process_exit_code = 0;
+    }
     deadline = milliseconds?emscripten_get_now()+milliseconds:INFINITY;
     int stopped = setjmp(stop);
     if (!stopped) {
@@ -586,7 +600,7 @@ static int run_guest(uint32_t entry, uint32_t milliseconds) {
     if (stopped) sync_clear_waiters(guest_tid());
     machine_release();
     if (stopped && !current_thread) stop_guest_workers();
-    return stopped != 0;
+    return stopped != 0 && stopped != 4;
 }
 int web_run(uint32_t entry,uint32_t milliseconds) {
     atomic_store(&stop_requested,0);return run_guest(entry,milliseconds);
@@ -658,6 +672,8 @@ double web_trace_count(void) {
     machine_acquire();double count=(double)calls;machine_release();return count;
 }
 const char *web_error(void) { return error; }
+uint32_t web_process_exited(void) { return process_exited; }
+uint32_t web_exit_code(void) { return process_exit_code; }
 uint32_t web_last_pc(void) { return last_pc; }
 uint32_t web_first_pc(void) { return first_pc; }
 uint32_t web_error_thread(void) { return error_thread; }

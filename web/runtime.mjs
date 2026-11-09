@@ -148,7 +148,8 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     const rendering=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
     const mappings=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_mapping_stats(),6));
     const error=module.UTF8ToString(module._web_error());
-    return { status, error, stopped:error==='Stopped by user',intro,introSkipped:module._web_intro_skipped(),
+    const exited=Boolean(module._web_process_exited());
+    return { status, error, stopped:error==='Stopped by user',exited,exitCode:exited?module._web_exit_code()>>>0:null,intro,introSkipped:module._web_intro_skipped(),
       pc: module._web_last_pc(), thread: module._web_error_thread(), first: module._web_first_pc(), count, registers, trace, timers, input, files, mappings, sound, soundBuffers, rendering,
       lastImport: lastImport[0] === 0xffffffff ? null : { ...manifest.imports[lastImport[0]],
         caller: lastImport[1], arguments: Array.from(lastImport.subarray(2)) } };
