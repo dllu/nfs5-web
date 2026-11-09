@@ -136,7 +136,7 @@ def main():
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=402653184',
                     '-sSTACK_SIZE=8388608', '-sEXPORTED_FUNCTIONS=' + json.dumps(exports),
-                    '-sEXPORTED_RUNTIME_METHODS=["UTF8ToString","HEAPU8","PThread"]', '-sASSERTIONS=1',
+                    '-sEXPORTED_RUNTIME_METHODS=["UTF8ToString","HEAPU8","wasmMemory","PThread"]', '-sASSERTIONS=1',
                     '-lm'], env=env, check=True)
     for source in (ROOT / 'web').iterdir():
         if source.is_file():

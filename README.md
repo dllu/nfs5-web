@@ -76,6 +76,10 @@ an eight-worker pool and an approximately 84 MiB Wasm module (8.8 MiB gzip).
 It preserves integer MMX, uses double-precision x87 helpers and retains
 execution diagnostics; complete binary compatibility is not established. Memory
 can grow if needed. Browser/GPU/code memory is additional to the shared arena.
+JavaScript consumers refresh their byte view when a game thread grows shared
+memory, including while GPU readbacks are pending. Race loading is tested with
+the 911 GT1 and four opponents on Auvergne at 1280×960, 4K and 6K; the 6K case
+uses about 461 MiB of shared Wasm memory.
 
 ## Development
 
@@ -99,13 +103,15 @@ normal play; **Run original startup** is a bounded diagnostic. Browser checks:
 npm run test:browser
 npm run test:navigation
 npm run test:loading
+npm run test:races
 npm run test:renderer
 npm run test:usability
 ```
 
 Tests cover original-code comparisons, services, threads, input, audio,
 persistence, lifecycle and GPU pixels/transport, including 4K output and
-picture-strip seams. Public checks cover wide/portrait menu fitting and
+picture-strip seams and GPU readbacks after another worker grows memory.
+Public checks cover wide/portrait menu fitting and
 clicks with black-bar offsets; loading checks verify 4:3 artwork and the
 full-width race canvas at wide, portrait and 4K sizes. Usability checks cover
 touch input, short Escape presses, mobile typing and real hidden-tab

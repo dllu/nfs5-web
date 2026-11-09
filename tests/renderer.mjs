@@ -783,6 +783,33 @@ try {
     } finally{r.close();canvas.remove();}
   });
   assert.deepEqual(result.frontend.errors,[]);
+  result.heapGrowth=await page.evaluate(async()=>{
+    const {attachGraphics}=await import('./graphics.mjs'),{trackHeap}=await import('./memory.mjs');
+    const memory=new WebAssembly.Memory({initial:2,maximum:8,shared:true}),original=new Uint8Array(memory.buffer);
+    const header=new Int32Array(memory.buffer,0,8),ring=new Uint32Array(memory.buffer,32,4096);
+    header[5]=ring.length;header[6]=8;let sequence=0;
+    const module=trackHeap({wasmMemory:memory,HEAPU8:original,_web_gpu_transport:()=>0,_web_gpu_attach:()=>{},_malloc:()=>32768,_free:()=>{},_web_gpu_fail:()=>{}});
+    const canvas=document.createElement('canvas');document.body.append(canvas);
+    const graphics=await attachGraphics(module,canvas,{pace:false});
+    const url=URL.createObjectURL(new Blob(['onmessage=({data})=>{data.grow(1);postMessage(data.buffer.byteLength);}'],{type:'text/javascript'}));
+    const worker=new Worker(url);
+    function send(op,data){const packet=Uint32Array.of(data.length+3,op,++sequence,...data),start=Atomics.load(header,0);packet.forEach((w,i)=>ring[(start+i)%ring.length]=w);Atomics.store(header,0,start+packet.length);Atomics.notify(header,0);}
+    try {
+      send(1,[64,64]);send(2,[0xff112233,0x3f800000]);await graphics.settle();
+      const size=await new Promise((resolve,reject)=>{worker.onmessage=e=>resolve(e.data);worker.onerror=reject;worker.postMessage(memory);});
+      const destination=original.byteLength+32;
+      // The readback allocation is valid in grown memory, beyond every stale
+      // host view. Growing in another Worker reproduces the original crash.
+      send(8,[destination,4,4,1,1]);await graphics.settle();
+      const sample=Array.from(module.HEAPU8.subarray(destination,destination+4));
+      if(size!==196608||module.HEAPU8.byteLength!==size||original.byteLength!==131072||sample.join()!=='17,34,51,255')throw new Error('Readback lost the shared-memory growth: '+JSON.stringify({size,sample,heap:module.HEAPU8.byteLength}));
+      const view=module.HEAPU8;if(module.HEAPU8!==view)throw new Error('Unchanged heap should reuse its view');
+      // Emscripten can also refresh its exported view after a JS import.
+      module.HEAPU8=new Uint8Array(memory.buffer);if(module.HEAPU8.buffer!==memory.buffer)throw new Error('Runtime heap assignment failed');
+      return {before:original.byteLength,after:size,sample,errors:graphics.renderer.errors.slice()};
+    } finally{worker.terminate();URL.revokeObjectURL(url);graphics.close();canvas.remove();}
+  });
+  assert.deepEqual(result.heapGrowth.errors,[]);
   await writeFile('build/webgpu-renderer.json', JSON.stringify({ browser:browser.browser().version(),...result },null,2)+'\n');
   console.log(`WebGPU (${result.info.vendor}): ${result.checks} backend checks; ${result.thrash.checks} native-driver checks and ${result.thrash.calls} ABI calls passed, including 4K, ring wrapping and legacy polling after idle`);
 } finally { await browser.close(); }

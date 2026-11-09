@@ -3,13 +3,14 @@ import { openStorage } from './storage.mjs';
 import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
 import {openingMovies,verokImage,softwareViewport} from './config.mjs';
+import {trackHeap} from './memory.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
 export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, softwarePixelLimit=0 } = {}) {
   const [module, manifest, response] = await Promise.all([
-    createEngine({ print: log, printErr: log }),
+    createEngine({ print: log, printErr: log }).then(trackHeap),
     read('./manifest.json').then(checked).then(r => r.json()),
     read('./game.exe').then(checked),
   ]);

@@ -105,7 +105,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
         case 7:renderer.textureDestroy(data[0]);uploads.delete(data[0]);break;
         case 8:{
           const [destination,width,height,x=0,y=0]=data;
-          if(![3,5].includes(data.length)||!width||!height||x+width>renderer.width||y+height>renderer.height||destination+width*height*4>module.HEAPU8.length)throw new Error('Invalid graphics readback');
+          if(![3,5].includes(data.length)||!width||!height||x+width>renderer.width||y+height>renderer.height||destination+width*height*4>module.HEAPU8.length)
+            throw new Error(`Invalid graphics readback: ${width}x${height} at ${x},${y}, framebuffer ${renderer.width}x${renderer.height}, destination ${destination}, heap ${module.HEAPU8.length}, packet ${data.length}`);
           const pixels=await renderer.readPixels({x,y,width,height});if(closed)return;
           module.HEAPU8.set(pixels,destination);break;
         }
