@@ -55,8 +55,8 @@ async function barrier(entry,args,opcode) {
 try {
   const library=await call(slot('LoadLibraryA'),[text('drivers\\opengl3z')]);
   const methods={};
-  for(const name of ['flushwindow','pageflip','setvideomode','readrect','restore']) {
-    const suffix={flushwindow:0,pageflip:0,setvideomode:12,readrect:20,restore:0}[name];
+  for(const name of ['flushwindow','pageflip','setvideomode','readrect','restore','setstate','drawtri']) {
+    const suffix={flushwindow:0,pageflip:0,setvideomode:12,readrect:20,restore:0,setstate:8,drawtri:12}[name];
     methods[name]=await call(slot('GetProcAddress'),[library,text(`_THRASH_${name}@${suffix}`)]);
     assert(methods[name]);
   }
@@ -73,6 +73,22 @@ try {
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
+  assert.equal(Atomics.load(header,6),3,'Extended shading state uses transport v3');checks++;
+  const vertex=data+256;
+  for(let i=0;i<3;i++) {
+    [i===1?64:0,i===2?64:0,.5,1].forEach((v,j)=>view.setFloat32(vertex+i*32+j*4,v,true));
+    view.setUint32(vertex+i*32+16,0x80402010,true);view.setUint32(vertex+i*32+20,0x40203040,true);
+  }
+  for(const mode of [0,2,1]) {
+    assert.equal(await call(methods.setstate,[6,mode]),1);
+    assert.equal(await call(methods.drawtri,[vertex,vertex+32,vertex+64]),1);
+    const draw=await packet(4),state=draw.words.subarray(3,29);
+    assert.equal(state[25],mode,'Shading mode survives queued state snapshot');
+    assert.equal(state[22],1,'Native texture alpha modulation is enabled');
+    assert.deepEqual(Array.from(draw.words.slice(29,31)),[3,0],'Extended-state vertex/index counts');
+    assert.equal(draw.words[35],0x80402010);assert.equal(draw.words[36],0x40203040);checks++;
+    acknowledge(draw);
+  }
   const present=await barrier(methods.pageflip,[],3);acknowledge(present);assert.equal(await finish(),1);
   const readback=await barrier(methods.readrect,[0,0,1,1,data+128],8);
   const [destination,width,height]=readback.words.slice(3);

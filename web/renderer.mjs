@@ -5,7 +5,7 @@ const defaults = {
   filter_linear: 1, address_wrap: 1, cull: 1, alpha_test: 0, alpha_ref: 0,
   fog_enable: 0, fog_color: 0, fog_near: 0, fog_far: 1, primitive: 0, depth_func: 4,
   scissor_enable: 0, scissor_x: 0, scissor_y: 0, scissor_w: 0, scissor_h: 0,
-  alpha_modulate: 0, fog_mode: 0, fog_density: 1,
+  alpha_modulate: 0, fog_mode: 0, fog_density: 1, shade_mode: 1,
 };
 const rgba = value => [(value >>> 16 & 255) / 255, (value >>> 8 & 255) / 255, (value & 255) / 255, (value >>> 24) / 255];
 const blendFactors = ['one','zero','one','src','one-minus-src','src-alpha','one-minus-src-alpha','dst-alpha','one-minus-dst-alpha','dst','one-minus-dst','src-alpha-saturated'];
@@ -157,15 +157,20 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     const key = state.serial === undefined ? Object.values(state).join(':') : `${state.serial}:${state.primitive}`;
     vertices = grow(vertices, vertexBytes + data.byteLength); vertices.set(data, vertexBytes);
     indices = grow(indices, indexCount + n); const first = indexCount, base = vertexBytes / 32;
+    const primitiveSize=state.primitive===0?3:state.primitive===1?2:1;
     for (let i = 0; i < n; i++) {
-      const index = mesh ? mesh[i] : i; if (index >= count) throw new Error('Thrash mesh index exceeds its vertex buffer');
+      // OpenGL's last vertex supplies flat diffuse color; WebGPU uses the
+      // first. Rotate triangles (preserving winding), reverse line pairs.
+      const start=i-i%primitiveSize;
+      const source=state.shade_mode===0&&start+primitiveSize<=n?start+(i%primitiveSize+primitiveSize-1)%primitiveSize:i;
+      const index = mesh ? mesh[source] : source; if (index >= count) throw new Error('Thrash mesh index exceeds its vertex buffer');
       indices[indexCount++] = base + index;
     }
     const last = operations.at(-1);
     if (last?.type === 'draw' && last.key === key) last.count += n;
     else {
       uniforms = grow(uniforms, (uniformBytes + 256) / 4);
-      const values = [width,height,0,0,...rgba(state.fog_color),state.alpha_test,state.alpha_ref/255,state.fog_enable,state.texture ? state.alpha_modulate : 1,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
+      const values = [width,height,state.shade_mode,0,...rgba(state.fog_color),state.alpha_test,state.alpha_ref/255,state.fog_enable,state.texture ? state.alpha_modulate : 1,state.fog_mode,state.fog_density,state.fog_near,state.fog_far];
       uniforms.set(values, uniformBytes / 4);
       operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: uniformBytes }); uniformBytes += 256;
     }

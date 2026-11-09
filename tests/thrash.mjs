@@ -33,6 +33,13 @@ try {
   assert(sizes.some(v=>v[0]===6144&&v[1]===3456&&v[2]===32));
   assert.deepEqual([get(formats+4),get(formats+8)],[0,0],'Indexed formats use the original game conversion fallback');
   assert.equal(await method('_THRASH_init@0'),1);
+  assert.equal(await method('_THRASH_getstate@4',6),1,'Native default is Gouraud shading');
+  for(const mode of [0,2,1]) {
+    assert.equal(await method('_THRASH_setstate@8',6,mode),1);
+    assert.equal(await method('_THRASH_getstate@4',6),mode);
+  }
+  assert.equal(await method('_THRASH_setstate@8',6,3),0,'Unknown shading modes are rejected');
+  assert.equal(await method('_THRASH_getstate@4',6),1,'Rejected shading mode preserves state');
   assert.equal(await method('_THRASH_selectdisplay@4',0),1);assert.equal(await method('_THRASH_selectdisplay@4',1),0);
   assert.equal(await method('_THRASH_window@4',1),1);assert.equal(await method('_THRASH_window@4',3),0);
   assert.equal(await method('_THRASH_setstate@8',37,1),0,'Optional timer callbacks are not falsely advertised');

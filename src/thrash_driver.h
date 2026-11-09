@@ -158,8 +158,6 @@ static void submit(const nfspu_gpu_vertex *v,uint32_t n,const uint32_t *idx,uint
         }v=adjusted;
     }
     nfspu_gpu_state s=render_state;s.primitive=primitive;
-    if(state_values[0][41]==2)s.texture=0;
-    
     if(!gpu->draw(v,n,idx,ni,&s))hle_fatal("WebGPU draw: %s",gpu_error);
     free(adjusted);
     draws++;
@@ -177,7 +175,7 @@ static void submit_guest(uint32_t va,uint32_t n,const uint32_t *idx,uint32_t ni,
 }
 static void pointers(uint32_t count) {
     nfspu_gpu_vertex v[4];for(uint32_t i=0;i<count;i++)memcpy(v+i,APTR(i),32);
-    if(count==4){const uint32_t idx[]={0,1,2,0,2,3};submit(v,4,idx,6,0);}else submit(v,count,NULL,0,count==2?1:count==1?2:0);
+    if(count==4){const uint32_t idx[]={0,1,2,2,3,0};submit(v,4,idx,6,0);}else submit(v,count,NULL,0,count==2?1:count==1?2:0);
 }
 static void r_tri(void){pointers(3);RET(1,3);}
 static void r_quad(void){pointers(4);RET(1,4);}
@@ -191,7 +189,7 @@ static void mesh(uint32_t vertices_per_primitive,uint32_t primitive,uint32_t str
     if(max>1000000)hle_fatal("Thrash invalid mesh index %u",max);
     if(vertices_per_primitive==4) {
         uint32_t *tri=malloc(count*6*sizeof *tri);if(!tri)hle_fatal("Thrash indices allocation");
-        for(uint32_t i=0;i<count;i++){uint32_t a=idx[i*4],b=idx[i*4+1],c=idx[i*4+2],d=idx[i*4+3];uint32_t t[]={a,b,c,a,c,d};memcpy(tri+i*6,t,sizeof t);}
+        for(uint32_t i=0;i<count;i++){uint32_t a=idx[i*4],b=idx[i*4+1],c=idx[i*4+2],d=idx[i*4+3];uint32_t t[]={a,b,c,c,d,a};memcpy(tri+i*6,t,sizeof t);}
         submit_guest(A32(1),max+1,tri,count*6,0,stride);free(tri);
     } else submit_guest(A32(1),max+1,idx,ni,primitive,stride);
 }
@@ -293,6 +291,7 @@ static void r_state(void) {
        (s>=43&&s<=45)||(s>=49&&s<=51)||(s>=68&&s<=100)||s>=107)RET(0,2);
     if(s==10&&v!=0&&v!=2)RET(0,2);
     if(s==2&&v>2)RET(0,2);
+    if(s==6&&v>2)RET(0,2);
     if(s==30&&(v<32||v>128))RET(0,2);
     if(s==21&&v!=0&&v!=1&&v!=2&&v!=4&&v!=8)RET(0,2);
     uint32_t previous=state_values[stage][s];
@@ -303,6 +302,8 @@ static void r_state(void) {
     case 1:{if(stage)break;texture_slot *t=find_texture(v);render_state.texture=t?t->gpu_id:0;break;}
     case 2:render_state.cull=v==0?1:v==2?2:3;break;
     case 4:render_state.depth_test=render_state.depth_write=v!=0;break;
+    /* Native 10006716: flat, Gouraud, Gouraud with specular addition. */
+    case 6:render_state.shade_mode=v;break;
     case 7:case 47:case 48:render_state.address_wrap=v==1;break;
     case 10:render_state.blend_enable=v==2;break;
     case 11:case 13:case 65:case 66:render_state.filter_linear=v!=0;break;
@@ -320,7 +321,9 @@ static void r_state(void) {
     case 30:sprite_stride=v;break;
     case 36:render_state.alpha_test=v!=0;render_state.alpha_ref=v&255;break;
     case 40:render_state.depth_func=v+1;break;
-    case 41:if(!stage)render_state.alpha_modulate=v==3||v==6||v==7;break;
+    /* Verok retains state 41 but its shader always multiplies texture RGBA
+     * by diffuse RGBA; it does not select alpha or disable the texture here. */
+    case 41:break;
     case 42:if(v<=1)vertex_stride=v?40:32;break;
     case 56:case 104:
         if(v==0){render_state.src_blend=5;render_state.dst_blend=6;}
@@ -438,6 +441,7 @@ static void thrash_reset(void) {
     width=640;height=480;color_bits=16;opened=trace=software_fog=fog_table_valid=0;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
     frames=draws=uploads=software_frames=partial_clears=thrash_calls=0;vertex_stride=sprite_stride=32;
-    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.address_wrap=1,.cull=1,.fog_far=1,.fog_density=1,.depth_func=4};
+    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.address_wrap=1,.cull=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1};
+    state_values[0][6]=1;
 }
 #endif

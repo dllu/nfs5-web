@@ -73,6 +73,46 @@ try {
       {x:64,y:64,color:0xff00ff00,rhw:.25},{x:0,y:64,color:0xffff0000,rhw:1}]);
     renderer.clear(0xff000000); renderer.draw(gouraud,mesh);
     expect(pixel(await renderer.readPixels(),48,32),[62,193,0,255],'screen-linear vertex color with unequal RHW',1);
+    const flat = pack([{x:0,y:0,color:0xffff0000},{x:64,y:0,color:0xff00ff00},{x:0,y:64,color:0xff0000ff}]);
+    renderer.clear(0xff000000); renderer.draw(flat,null,{shade_mode:0});
+    expect(pixel(await renderer.readPixels(),8,8),[0,0,255,255],'flat triangle uses last vertex');
+    renderer.clear(0xff000000); renderer.draw(flat,Uint32Array.of(0,2,1),{shade_mode:0});
+    expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],'indexed flat triangle uses last mesh vertex');
+    for(const cull of [2,3]) {
+      renderer.clear(0xff000000);renderer.draw(flat,null,{cull,shade_mode:1});
+      const visible=pixel(await renderer.readPixels(),8,8).slice(0,3).some(v=>v);
+      renderer.clear(0xff000000);renderer.draw(flat,null,{cull,shade_mode:0});
+      expect([Number(pixel(await renderer.readPixels(),8,8)[2]>0)],[Number(visible)],'flat rotation preserves culling');
+    }
+    renderer.clear(0xff000000);
+    renderer.draw(pack([{x:0,y:16.5,color:0xffff0000},{x:64,y:16.5,color:0xff00ff00}]),null,{primitive:1,shade_mode:0});
+    renderer.draw(pack([{x:8.5,y:8.5,color:0xffff0000}]),null,{primitive:2,shade_mode:0});
+    pixels=await renderer.readPixels();
+    expect(pixel(pixels,16,16),[0,255,0,255],'flat line uses final endpoint');
+    expect(pixel(pixels,8,8),[255,0,0,255],'flat point color');
+    const highlights=pack([{x:0,y:0,rhw:1,color:0x40000000,specular:0},
+      {x:64,y:0,rhw:.25,color:0x40000000,specular:0x80804020},
+      {x:64,y:64,rhw:.25,color:0x40000000,specular:0x80804020},
+      {x:0,y:64,rhw:1,color:0x40000000,specular:0}]);
+    renderer.clear(0xff000000);renderer.draw(highlights,mesh,{shade_mode:1});
+    expect(pixel(await renderer.readPixels(),48,32),[0,0,0,64],'Gouraud mode ignores specular');
+    renderer.draw(highlights,mesh,{shade_mode:2});
+    expect(pixel(await renderer.readPixels(),48,32),[97,49,24,161],'screen-linear specular RGBA with unequal RHW',1);
+    renderer.textureCreate(4,1,1,Uint8Array.of(128,128,128,128));
+    const lit=quad(0,0,64,64,0x80402010,{specular:0x40203040}),litState={texture:4,alpha_modulate:1,shade_mode:2};
+    renderer.clear(0xff000000);renderer.draw(lit,mesh,{...litState,alpha_test:1,alpha_ref:120});
+    expect(pixel(await renderer.readPixels(),16,16),[64,64,72,128],'specular addition follows texture modulation and precedes alpha test',1);
+    renderer.clear(0xff000000);renderer.draw(lit,mesh,{...litState,alpha_test:1,alpha_ref:140});
+    expect(pixel(await renderer.readPixels(),16,16),[0,0,0,255],'alpha test after specular can discard');
+    renderer.draw(lit,mesh,{...litState,fog_enable:1,fog_color:0});
+    expect(pixel(await renderer.readPixels(),16,16),[16,16,18,128],'fog follows specular addition',1);
+    renderer.draw(quad(0,0,64,64,0xfff0f0f0,{specular:0x80a0a0a0}),mesh,{shade_mode:2});
+    expect(pixel(await renderer.readPixels(),16,16),[255,255,255,255],'specular output saturates at target');
+    renderer.clear(0xff000000);
+    renderer.draw(quad(0,0,32,64,0xff000000,{specular:0x00203040}),mesh,{shade_mode:1});
+    renderer.draw(quad(32,0,32,64,0xff000000,{specular:0x00203040}),mesh,{shade_mode:2});pixels=await renderer.readPixels();
+    expect(pixel(pixels,16,16),[0,0,0,255],'queued Gouraud state');
+    expect(pixel(pixels,48,16),[32,48,64,255],'queued shading mode change');
     renderer.textureCreate(3,1,1,Uint8Array.of(255,0,0,128)); renderer.clear(0xff000000);
     renderer.draw(quad(0,0,64,64,0x40ffffff),mesh,{texture:3}); expect(pixel(await renderer.readPixels(),16,16),[255,0,0,128],'texture alpha selection');
     renderer.draw(quad(0,0,64,64,0x40ffffff),mesh,{texture:3,alpha_modulate:1}); expect(pixel(await renderer.readPixels(),16,16),[255,0,0,32],'modulated texture alpha',1);
@@ -170,6 +210,37 @@ try {
     }
     for(let i=0;i<3;i++)put(vertices+i*32+16,0xff0000ff);
     expect(await pixel(8,8),0xff00ff00,'draw snapshot and readback after asynchronous flush');
+    await method('_THRASH_setstate@8',6,0);
+    vertex(vertices,0,0,0xffff0000);vertex(vertices+32,64,0,0xff00ff00);
+    vertex(vertices+64,64,64,0xff0000ff);vertex(vertices+96,0,64,0xffffffff);
+    await method('_THRASH_drawquad@16',vertices,vertices+32,vertices+64,vertices+96);
+    expect(await pixel(48,8),0xff0000ff,'native flat quad first triangle uses C');
+    expect(await pixel(8,48),0xffff0000,'native flat quad second triangle uses A');
+    const quadIndices=vertices+128;
+    [0,1,2,3].forEach((v,i)=>put(quadIndices+i*4,v));
+    await method('_THRASH_setstate@8',3,0xff000000);await method('_THRASH_clearwindow@0');
+    await method('_THRASH_drawquadmesh@12',1,vertices,quadIndices);
+    expect(await pixel(48,8),0xff0000ff,'native flat quad mesh first triangle');
+    expect(await pixel(8,48),0xffff0000,'native flat quad mesh second triangle');
+    vertex(vertices,0,0,0xffff0000);vertex(vertices+32,64,64,0xff00ff00);
+    await method('_THRASH_drawsprite@8',vertices,vertices+32);
+    expect(await pixel(48,8),0xff00ff00,'native flat sprite first triangle uses B');
+    expect(await pixel(8,48),0xff00ff00,'native flat sprite second triangle uses B');
+    const translucent=await method('_THRASH_talloc@20',1,1,6,0,0);
+    put(image,0x80808080);await method('_THRASH_tupdate@12',translucent,image,0);
+    await method('_THRASH_settexture@4',translucent);await method('_THRASH_setstate@8',6,2);
+    vertex(vertices,0,0,0x80402010);vertex(vertices+32,64,0,0x80402010);vertex(vertices+64,0,64,0x80402010);
+    for(let i=0;i<3;i++)put(vertices+i*32+20,0x40203040);
+    for(const stage41 of [3,2]) {
+      await method('_THRASH_setstate@8',41,stage41);
+      await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+      expect(await pixel(8,8),0xff404048,`native RGB modulation and specular with state 41=${stage41}`);
+      // The native readrect API returns opaque display pixels; inspect the
+      // render target to verify fragment alpha independently of that API.
+      const rgba=await runtime.graphics.renderer.readPixels();
+      expect(rgba[(8*640+8)*4+3],128,`native fragment alpha with state 41=${stage41}`);
+    }
+    await method('_THRASH_setstate@8',6,1);await method('_THRASH_tfree@4',translucent);
     const texture=await method('_THRASH_talloc@20',2,2,4,0,0),pixels=data+8192;
     [0xf800,0x07e0,0x001f,0xffff].forEach((v,i)=>view.setUint16(pixels+i*2,v,true));
     expect(await method('_THRASH_tupdate@12',texture,pixels,0),texture,'RGB565 upload');
@@ -237,6 +308,44 @@ try {
     } finally {graphics.close();runtime.dispose();}
   });
   assert.deepEqual(result.fallback.errors,[]);
+  result.legacyDraws=await page.evaluate(async()=>{
+    const {attachGraphics}=await import('./graphics.mjs'),results=[];
+    for(const version of [1,2]) {
+      // Original 25-word states must still decode both indexed and unindexed
+      // vertex payloads, using Gouraud without specular as their default.
+      const memory=new SharedArrayBuffer(32768),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
+      header[5]=ring.length;header[6]=version;let sequence=0;
+      const module={HEAPU8:heap,_web_gpu_transport:()=>0,_web_gpu_attach:()=>{header[3]=1;},
+        _malloc:()=>30000,_free:()=>{},_web_gpu_fail:()=>{}};
+      const canvas=document.createElement('canvas');document.body.append(canvas);
+      const graphics=await attachGraphics(module,canvas,{pace:false});
+      function send(opcode,data) {
+        const packet=Uint32Array.of(data.length+3,opcode,++sequence,...data),start=Atomics.load(header,0);
+        packet.forEach((word,i)=>ring[(start+i)%ring.length]=word);Atomics.store(header,0,start+packet.length);
+        if(version===2)Atomics.notify(header,0);
+      }
+      try {
+        send(1,Uint32Array.of(64,64));
+        const draw=new Uint32Array(25+2+24+3),floats=new Float32Array(draw.buffer);
+        draw[6]=draw[7]=draw[8]=draw[22]=1;draw[16]=4;floats[14]=floats[24]=1;draw[25]=draw[26]=3;
+        [[0,0,1,0xffff0000],[64,0,.25,0xff00ff00],[0,64,.5,0xff0000ff]].forEach(([x,y,rhw,color],i)=>{
+          const at=27+i*8;floats[at]=x;floats[at+1]=y;floats[at+2]=.5;floats[at+3]=rhw;draw[at+4]=color;draw[at+5]=0xffffffff;
+        });
+        draw.set([0,1,2],51);send(4,draw);send(3,new Uint32Array());await graphics.settle();
+        const sample=bytes=>Array.from(bytes.slice((8*64+8)*4,(8*64+8)*4+4));
+        const indexed=sample(await graphics.renderer.readPixels());
+        if(indexed.some((v,i)=>Math.abs(v-[187,34,34,255][i])>1))throw new Error(`Legacy v${version} indexed Gouraud: ${indexed}`);
+        await new Promise(resolve=>setTimeout(resolve,25));
+        draw[26]=0;for(let i=0;i<3;i++)draw[27+i*8+4]=0xff00ff00;
+        send(4,draw.subarray(0,51));send(3,new Uint32Array());await graphics.settle();
+        const unindexed=sample(await graphics.renderer.readPixels());
+        if(unindexed.join()!=='0,255,0,255')throw new Error(`Legacy v${version} unindexed draw: ${unindexed}`);
+        results.push({version,indexed,unindexed,errors:graphics.renderer.errors.slice()});
+      } finally {graphics.close();canvas.remove();}
+    }
+    return results;
+  });
+  for(const legacy of result.legacyDraws)assert.deepEqual(legacy.errors,[]);
   assert.deepEqual(errors,[]);
   await writeFile('build/webgpu-renderer.json', JSON.stringify({ browser:browser.browser().version(),...result },null,2)+'\n');
   console.log(`WebGPU (${result.info.vendor}): ${result.checks} backend checks; ${result.thrash.checks} native-driver checks and ${result.thrash.calls} ABI calls passed, including 4K, ring wrapping and legacy polling after idle`);
