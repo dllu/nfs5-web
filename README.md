@@ -101,6 +101,10 @@ Automated checks compare original x86/Unicorn and native Verok DLL execution
 against Wasm for copying, transforms, quality, projection, HUD anchoring and
 visibility and weather curves. Hardware/texture capability flags, fog uniforms
 and sampler parameters are compared against the original x86 OpenGL driver.
+An offline x86 comparison checks 656,210 generated test texels across the five
+advertised formats, exhaustive 16-bit inputs, supplied mips and texture updates.
+Alpha and 8-bit channels match exactly; 5/6-bit colors are within one RGBA8 step
+of normalized native upload components. This does not compare rendered pixels.
 GPU pixels are compared against its embedded GLSL for fog,
 depth clipping, texture projection and flat/smooth color. All nine portrait
 pixel planes match native GIMME conversion.
@@ -112,7 +116,8 @@ frontend at three viewport sizes using normal mouse clicks and rendered-screen
 readiness checks. Twelve original loading updates pass in SwiftShader at wide,
 tall and 4K sizes. A fresh GB10 loading check and broader browser/renderer
 rechecks are pending after a display-driver stall during a native reference
-run; subsequent Chrome requests report no adapter or time out. GPU pixel tests
+run; subsequent Chrome requests report no adapter, time out, or fail to finish
+browser initialization. GPU pixel tests
 cover native shading, blend/alpha/depth/stencil semantics, mipmaps, addressing,
 scaled UI and framebuffer transfers, including
 4K output. These checks do not measure gameplay FPS. Detailed evidence and

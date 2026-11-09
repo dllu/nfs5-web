@@ -7,21 +7,23 @@ process.env.TMPDIR=resolve('.cache/tmp');process.env.XDG_CACHE_HOME=resolve('.ca
 process.env.__GL_SHADER_DISK_CACHE_PATH=resolve('.cache/nvidia');
 await mkdir(process.env.TMPDIR,{recursive:true});
 const software=process.env.NFS5_GPU_SOFTWARE==='1';
-const browser=await chromium.launchPersistentContext(resolve('.cache/chrome-loading-test'),{
-  executablePath:'/usr/bin/google-chrome',headless:software,viewport:{width:1000,height:800},
-  args:['--no-sandbox','--disable-dev-shm-usage','--disable-breakpad','--crash-dumps-dir='+resolve('.cache/crashes'),
-    ...(software?['--enable-unsafe-webgpu','--use-webgpu-adapter=swiftshader','--use-angle=swiftshader','--use-vulkan=swiftshader','--enable-features=Vulkan','--disable-vulkan-surface']:[])],
-});
 const reports=[],errors=[];
 const observedAt=new Date().toISOString();
-const saveReport=extra=>writeFile('build/loading.json',JSON.stringify({observedAt,software,reports,pageErrors:errors,...extra},null,2)+'\n');
+let browser,stage='browser launch';
+const saveReport=extra=>writeFile('build/loading.json',JSON.stringify({observedAt,software,stage,reports,pageErrors:errors,...extra},null,2)+'\n');
 try {
   await saveReport({passed:false});
+  browser=await chromium.launchPersistentContext(resolve('.cache/chrome-loading-test'),{
+    executablePath:'/usr/bin/google-chrome',headless:software,timeout:30000,viewport:{width:1000,height:800},
+    args:['--no-sandbox','--disable-dev-shm-usage','--disable-breakpad','--crash-dumps-dir='+resolve('.cache/crashes'),
+      ...(software?['--enable-unsafe-webgpu','--use-webgpu-adapter=swiftshader','--use-angle=swiftshader','--use-vulkan=swiftshader','--enable-features=Vulkan','--disable-vulkan-surface']:[])],
+  });
   const page=await browser.newPage(),session=await browser.newCDPSession(page);
   await session.send('Network.enable');await session.send('Network.setCacheDisabled',{cacheDisabled:true});
   await session.send('Emulation.setFocusEmulationEnabled',{enabled:true});
   page.on('pageerror',error=>errors.push(String(error)));
   for(const [width,height] of [[1600,900],[900,1600],[3840,2160]]) {
+    stage=`${width}x${height} adapter selection`;await saveReport({passed:false});
     await page.goto(process.env.NFS5_TEST_URL??'http://127.0.0.1:8000');
     const adapter=await page.evaluate(async()=>{
       const a=await Promise.race([navigator.gpu.requestAdapter(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('WebGPU adapter request timed out')),10000))]);
@@ -29,7 +31,9 @@ try {
       return {vendor:a.info.vendor,architecture:a.info.architecture};
     });
     if(software)assert.equal(adapter.architecture,'swiftshader');
-    const report=await page.evaluate(async({width,height})=>{
+    stage=`${width}x${height} loading capture`;await saveReport({passed:false});
+    let captureTimer;
+    const report=await Promise.race([page.evaluate(async({width,height})=>{
       const {loadRuntime}=await import('./runtime.mjs');
       const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;document.body.prepend(canvas);
       const runtime=await loadRuntime({canvas,persist:false,intro:false,display:{width,height}});
@@ -80,7 +84,7 @@ try {
         clearTimeout(timer);runtime.stop();if(run)await run;
         renderer.draw=draw;renderer.present=present;renderer.textureCreate=textureCreate;runtime.dispose();
       }
-    },{width,height});
+    },{width,height}),new Promise((_,reject)=>{captureTimer=setTimeout(()=>reject(new Error('Loading runtime initialization/capture timed out')),55000);})]).finally(()=>clearTimeout(captureTimer));
     for(const [i,capture]of report.captures.entries()){
       if(i===0||i===report.captures.length-1)await writeFile(`build/loading-${width}x${height}-${i}.png`,Buffer.from(capture.url.split(',')[1],'base64'));
       delete capture.url;
@@ -96,8 +100,9 @@ try {
     console.log(`${width}×${height}: four original loading updates retain black margins and cover the viewport once`);
   }
   assert.deepEqual(errors,[]);
+  stage='complete';
   await saveReport({passed:true});
 } catch(error) {
   await saveReport({passed:false,error:String(error)});
   throw error;
-} finally {await browser.close();}
+} finally {await browser?.close();}
