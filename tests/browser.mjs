@@ -343,13 +343,15 @@ try {
       const viewportMode=[Math.max(640,Math.round(innerWidth*devicePixelRatio)),Math.max(480,Math.round(innerHeight*devicePixelRatio)),32];
       const still=document.createElement('canvas');still.width=640;still.height=480;still.id='menu-frame';
       still.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(capture.pixels),640,480),0,0);canvas.replaceWith(still);
-      return {top:capture.top,middle:capture.middle,bottom:capture.bottom,graphics,raceMode,viewportMode,stopped:result.stopped,gpuErrors:renderer.errors};
+      return {top:capture.top,middle:capture.middle,bottom:capture.bottom,graphics,raceMode,viewportMode,
+        mmx:view.getUint32(0x5deb18,true),stopped:result.stopped,gpuErrors:renderer.errors};
     }finally{clearTimeout(watchdog);runtime?.stop();runtime?.dispose();}
   });
   assert.equal(menu.stopped,true);assert.deepEqual(menu.gpuErrors,[]);assert.deepEqual(errors,[]);
   assert.deepEqual(menu.graphics,{Resolutions:26,CarChrome:2,CarDetail:4,SpecialFX:3,ViewDistance:3,
     Headlights:1,LensFlare:1,TextureDetail:4,SkyRendering:2},'Original frontend initializes maximum quality and the viewport race mode');
   assert.deepEqual(menu.raceMode,menu.viewportMode,'Selected race mode matches the physical browser viewport at 32-bit color');
+  assert.equal(menu.mmx,1,'Original CPU detection enables the MMX capability required by flare initialization');
   await page.locator('#menu-frame').screenshot({path:'build/original-menu-gradients.png'});
   await writeFile('build/original-menu-gradients.json',JSON.stringify(menu,null,2)+'\n');
   console.log(`Original menu gradient verified: top ${menu.top}, middle ${menu.middle}, bottom ${menu.bottom}`);

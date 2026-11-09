@@ -15,6 +15,8 @@ Current implementation:
   services, dynamic API lookup, and a tracked heap in a 256 MiB guest arena.
   Recovery includes overlapping instruction ranges;
   these counts do not establish complete code coverage.
+  The portable CPU model reports integer MMX support; unsupported SSE/3DNow
+  paths remain disabled.
 - Startup reaches original `WinMain` (`0x004B6710`) and worker (`0x0055F4F0`).
   In Chrome 157 it creates the game window, selects a graphics mode, decodes
   the original intro video and streams its PCM through the browser audio graph.
@@ -115,12 +117,15 @@ Current implementation:
   instead of the original CPU-based autodetection. Successful video-mode changes
   also update Verok’s aspect-dependent projection bases and camera field of view;
   projected effects and camera zoom use the corresponding native operands.
+  Verok’s guarded color-readback and flare-visibility hooks preserve edge
+  samples and remove the legacy timing heuristics that disable the effect.
   Multitexture, projected headlights and broader 3D scene fidelity need further
   implementation/auditing.
 
-Validation includes 201 original-x86/Unicorn versus Wasm comparisons across six
+Validation includes 298 original-x86/Unicorn versus Wasm comparisons across seven
 routines, 260 native Verok DLL comparisons for texture tiers and car layers,
 260 projection calculations and 168 original camera/zoom comparisons,
+64 native guarded-readback and 14 original flare-visibility comparisons,
 56 UI layout checks using the original HUD anchoring routine,
 plus 104 Windows-service, 38 virtual-memory, 54 synchronization,
 70 thread, 60 exact x87 integer-state, 27 timer, 45 DirectInput, 85 filesystem/path, 93 file-copy, 86 mapping,
@@ -148,7 +153,7 @@ a fresh restart. An original frontend run verifies its capability-selected
 Gouraud UI path and the actual button highlight/center/shadow pixels.
 143 WebGPU pixel/batching checks pass on the GB10, including 3840x2160 output and
 an OffscreenCanvas rendered in a dedicated Worker using the core depth/stencil
-format. Another 261 checks exercise
+format. Another 285 checks exercise
 the native Thrash bridge, including a 4K framebuffer round trip and command-ring
 wrapping under texture-upload backpressure, asynchronous flush and reuse of
 guest vertex memory before consumer execution. Pixel checks cover flat provoking
@@ -199,6 +204,9 @@ aspect calculation for that viewport. Full rendering of the selected effects,
 including nighttime projected headlights, still needs verification. Stencil
 behavior is covered by native-driver pixel checks; a completed in-game effect
 comparison remains outstanding.
+The live sun object initializes its 32-bit visibility samples and keeps sampling
+during driving with MMX enabled. A visible flare still needs a matched-scene
+comparison; the observed sun positions were occluded or outside the viewport.
 Côte d’Azur's pink sunset appearance has been visually checked against the
 native Wine/FEX game. The original sky mesh also renders its color gradient in
 an isolated WebGPU pass. Matching-profile headlight comparisons remain pending.

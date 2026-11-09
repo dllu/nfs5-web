@@ -333,6 +333,20 @@ try {
     }
     for(let i=0;i<3;i++)put(vertices+i*32+16,0xff0000ff);
     expect(await pixel(8,8),0xff00ff00,'draw snapshot and readback after asynchronous flush');
+    // Exercise the patch's private readback wrapper through the actual GPU.
+    // Its one-pixel edge margin leaves a blue border around this red corner.
+    const corner=vertices+128;
+    [[636,476],[640,476],[640,480],[636,480]].forEach(([x,y],i)=>vertex(corner+i*32,x,y,0xffff0000));
+    await method('_THRASH_drawquad@16',corner,corner+32,corner+64,corner+96);
+    put(0x6bd96c,functions.get('_THRASH_readrect@20'));
+    expect(await call(0x10003320,[639,479,4,4,out]),1,'Verok edge sample succeeds');
+    for(let y=0;y<4;y++)for(let x=0;x<4;x++)
+      expect(get(out+(y*4+x)*4),x&&y?0xffff0000:0xff112233,'Verok sample preserves native one-pixel margin and row order');
+    expect(await call(0x10003320,[0xfffffffe,0xfffffffe,2,2,out]),1,'Verok negative sample clamps to origin');
+    for(let i=0;i<4;i++)expect(get(out+i*4),0xff00ff00,'Clamped origin sample reads the rendered triangle');
+    put(out,0xdec0ffee);
+    expect(await method('_THRASH_readrect@20',639,479,4,4,out),0,'Unguarded driver retains invalid-rectangle behavior');
+    expect(get(out),0xdec0ffee,'Rejected raw readback preserves destination');
     // Native 404/405 factors apply independently to source and destination,
     // including the color factors used by the original doubled-modulate helper.
     const source=[64,128,192,128],destination=[192,128,64,128];

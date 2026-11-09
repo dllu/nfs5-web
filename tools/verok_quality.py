@@ -89,6 +89,13 @@ class QualityHooks:
         instruction('0043A083', '    ebx = web_verok_car_budget(ebx); /* Verok: five car-detail budgets */')
         instruction('0043A08A', '    eax = MEM32(ebp - 0x20); /* Verok: selected detail tier */')
         instruction('0043A3B6', '    eax = MEM32(esi + 0x2C0); if (!eax) eax = 1; /* Verok: minimum layer */')
+        # Native 10003390 installs the guarded color-readback wrapper and
+        # removes the old visibility/timing heuristics that suppress flares.
+        for pc in ['004603FF', '00460525', '00467D91', '00556F9A']:
+            instruction(pc, f'    RECOMP_ICALL(0x10003320u); /* 0x{pc}: Verok guarded readback */')
+        for pc in ['0046049A', '004604D9']:
+            instruction(pc, f'    /* 0x{pc}: Verok removes legacy flare visibility gate */')
+        instruction('0046059E', '    goto L_004605B1; /* 0x0046059E: Verok retains flares after slow readback */')
         # The native mode hook (10003B90 -> 10003840) computes these three
         # float values. The browser driver updates them after a successful mode
         # change; use the same operands in all recovered camera/effect copies.
@@ -155,6 +162,9 @@ class QualityHooks:
                    '0043A3B6', '0044EF8B', '0044EFAD', '0044F110', '0044F133', '004E5B86']:
             if not self.counts.get(pc):
                 raise ValueError('Missing Verok quality hook at ' + pc)
+        for pc in ['004603FF', '00460525', '00467D91', '00556F9A', '0046049A', '004604D9', '0046059E']:
+            if not self.counts.get(pc):
+                raise ValueError('Missing Verok visibility hook at ' + pc)
         for pc in ['0043A2DD', '00451824', '00451834', '00466FE5', '00466FF2',
                    '00467138', '00467148', '0044ECB0', '0044F1AF', '00462BFA',
                    '00462C24', '00462CA9', '00462CC2', '00462DD5', '00462DEE',

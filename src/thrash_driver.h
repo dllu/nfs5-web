@@ -456,6 +456,21 @@ static void r_readrect(void){
 }
 static void r_writerect(void){RET(blit_pixels(A32(4),A32(0),A32(1),A32(2),A32(3)),5);}
 
+/* nfs5.dll:10003320 guards four original readback call sites. Preserve the
+ * native signed comparisons, wrapping arithmetic and one-pixel edge margin. */
+static uint32_t verok_read_coordinate(uint32_t position,uint32_t size,uint32_t extent) {
+    if((int32_t)position<0)position=0;
+    if((int32_t)(position+size)>=(int32_t)extent)position=extent-size-1;
+    return position;
+}
+static void verok_readrect(void) {
+    uint32_t w=A32(2),h=A32(3),p=A32(4);
+    g_edx=verok_read_coordinate(A32(0),w,width);
+    g_ecx=verok_read_coordinate(A32(1),h,height);
+    uint32_t args[]={g_edx,g_ecx,w,h,p};
+    RET(hle_call_guest(MEM32(0x6BD96C),5,args),5);
+}
+
 typedef struct export_entry {const char *name;void(*fn)(void);} export_entry;
 static const export_entry th_exports[]={
     {"_THRASH_about@0",r_about},{"_THRASH_clearwindow@0",r_clear},{"_THRASH_clip@16",r_clip},
@@ -492,6 +507,7 @@ static uint32_t thrash_proc(uint32_t symbol) {
     return 0;
 }
 static recomp_func_t thrash_lookup(uint32_t address) {
+    if(address==0x10003320u)return verok_readrect;
     if(address<0xF5000000||address>=0xF5000290||(address&15))return NULL;
     thrash_calls++;return th_exports[(address-0xF5000000)/16].fn;
 }

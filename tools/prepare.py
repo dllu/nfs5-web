@@ -44,6 +44,7 @@ def main():
             parser.error(str(error))
         patches.append('verok-graphics-quality')
         patches.append('verok-projection')
+        patches.append('verok-visibility')
         ui = UiHooks()
         patches.append('browser-ui-layout')
         patches.append('browser-scaled-ui')

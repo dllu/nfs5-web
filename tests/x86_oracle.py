@@ -30,10 +30,11 @@ for case in request['cases']:
     for reg, value in zip(registers, case.get('registers', [0] * 8)):
         cpu.reg_write(reg, value)
     # Match web_call's four-argument cdecl stack, with a real return target.
-    stack = memory_size - 36
-    args = (case.get('args', []) + [0] * 4)[:4]
+    stack = case.get('stack', memory_size - 36)
+    args = case.get('args', [])
+    args = args + [0] * max(0, 4 - len(args))
     sentinel = 0xF000
-    cpu.mem_write(stack, struct.pack('<5I', sentinel, *args))
+    cpu.mem_write(stack, struct.pack('<' + 'I' * (1 + len(args)), sentinel, *args))
     cpu.reg_write(UC_X86_REG_ESP, stack)
     cpu.emu_start(case['entry'], sentinel, count=1000000)
     result = {'registers': [cpu.reg_read(r) for r in registers],

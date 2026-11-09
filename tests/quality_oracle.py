@@ -41,6 +41,13 @@ def patched_cpu(*args, **kwargs):
             cpu.mem_write(address, b'\xe9' + struct.pack('<I', (target - address - 5) & 0xffffffff))
         cpu.mem_write(0x4E5817, struct.pack('<I', 0x5B6D5C))
         cpu.mem_write(0x43A086, struct.pack('<I', 0x1000600C))
+        # Original bytes written by native 10003390. The wrapper's own body
+        # runs unmodified in Unicorn, including its signed edge comparisons.
+        for address in [0x4603FF, 0x460525, 0x467D91, 0x556F9A]:
+            cpu.mem_write(address, b'\x90\xe8' + struct.pack('<I', (0x10003320 - address - 6) & 0xffffffff))
+        for address in [0x46049A, 0x4604D9]:
+            cpu.mem_write(address, b'\x90' * 6)
+        cpu.mem_write(0x46059E, b'\xeb')
         # The actual projection operand redirects and camera trampolines.
         for address in [0x43A2DF, 0x451826, 0x466FE7, 0x46713A]:
             cpu.mem_write(address, struct.pack('<I', 0x10006134))

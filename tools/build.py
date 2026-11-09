@@ -52,6 +52,15 @@ def main():
         parser.error('Pinned x87 helpers changed; review the stack adapter')
     first_fpu, last_fpu = adapted.index(fpu_start), adapted.index(fpu_end)
     adapted = adapted[:first_fpu] + '#include "web_fpu.h"\n\n' + adapted[last_fpu:]
+    # Integer MMX is translated by the pinned 32-bit lifter. NFS uses this
+    # capability for visual effects too: its sun/flare initializer refuses
+    # framebuffer visibility sampling when CPUID leaf 1 hides bit 23.
+    # Keep SSE and 3DNow hidden; their floating SIMD paths are incomplete.
+    cpu_features = 'g_edx=0x00000111u & g_cpuid_edx1; /* x87, TSC, CMPXCHG8B; no SIMD */'
+    if adapted.count(cpu_features) != 1:
+        parser.error('Pinned CPUID helper changed; review supported guest features')
+    adapted = adapted.replace(cpu_features,
+        'g_edx=0x00800111u & g_cpuid_edx1; /* x87, TSC, CMPXCHG8B, integer MMX */')
     memory_header = includes / 'recomp_types.h'
     if not memory_header.exists() or memory_header.read_text() != adapted:
         memory_header.write_text(adapted)
@@ -75,6 +84,8 @@ def main():
         parser.error('Run tools/prepare.py again to generate the Verok graphics-quality hooks')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'verok-projection' not in metadata.get('patches',[]):
         parser.error('Run tools/prepare.py again to generate the Verok projection hooks')
+    if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'verok-visibility' not in metadata.get('patches',[]):
+        parser.error('Run tools/prepare.py again to generate the Verok visibility/readback hooks')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'browser-ui-layout' not in metadata.get('patches',[]):
         parser.error('Run tools/prepare.py again to generate the browser UI layout hooks')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'browser-scaled-ui' not in metadata.get('patches',[]):
