@@ -7,6 +7,8 @@ const defaults = {
   scissor_enable: 0, scissor_x: 0, scissor_y: 0, scissor_w: 0, scissor_h: 0,
   alpha_modulate: 0, fog_mode: 0, fog_density: 1, shade_mode: 1,
   mip_filter: 0, address_u: null, address_v: null, mip_lod_bias: 0, alpha_func: 6,
+  stencil_enable: 0, stencil_func: 7, stencil_fail: 0, stencil_depth_fail: 0, stencil_pass: 0,
+  stencil_ref: 2, stencil_read_mask: 255, stencil_write_mask: 255, color_write: 1,
 };
 export function mipLayout(width,height,levels=1) {
   if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||
@@ -21,6 +23,8 @@ export function mipLayout(width,height,levels=1) {
 const rgba = value => [(value >>> 16 & 255) / 255, (value >>> 8 & 255) / 255, (value & 255) / 255, (value >>> 24) / 255];
 const blendFactors = ['one','zero','one','src','one-minus-src','src-alpha','one-minus-src-alpha','dst-alpha','one-minus-dst-alpha','dst','one-minus-dst','src-alpha-saturated'];
 const compares = ['less-equal','never','less','equal','less-equal','greater','not-equal','greater-equal','always'];
+const stencilCompares=['never','less','equal','less-equal','greater','not-equal','greater-equal','always'];
+const stencilOps=['keep','zero','replace','increment-clamp','decrement-clamp','invert','increment-wrap','decrement-wrap'];
 const presentation = `
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var image_sampler: sampler;
@@ -32,11 +36,13 @@ struct Output { @builtin(position) position: vec4f, @location(0) uv: vec2f };
 @fragment fn fs(input: Output) -> @location(0) vec4f { return textureSample(image, image_sampler, input.uv); }
 `;
 
-export async function createRenderer(canvas, { onResize = () => {}, onError = () => {} } = {}) {
+export async function createRenderer(canvas, { onResize = () => {}, onError = () => {}, depthFormat: requestedDepthFormat } = {}) {
   if (!navigator.gpu) throw new Error('This browser does not expose WebGPU');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('No WebGPU adapter is available');
-  const device = await adapter.requestDevice({ requiredLimits: { maxTextureDimension2D: Math.min(16384, adapter.limits.maxTextureDimension2D) } });
+  const depthFormat=requestedDepthFormat??(adapter.features.has('depth32float-stencil8')?'depth32float-stencil8':'depth24plus-stencil8');
+  if(!['depth32float-stencil8','depth24plus-stencil8'].includes(depthFormat))throw new Error('Unsupported depth/stencil format');
+  const device = await adapter.requestDevice({ requiredFeatures:depthFormat==='depth32float-stencil8'?['depth32float-stencil8']:[],requiredLimits: { maxTextureDimension2D: Math.min(16384, adapter.limits.maxTextureDimension2D) } });
   const errors = [];
   device.addEventListener('uncapturederror', event => { errors.push(event.error.message); onError(event.error.message); });
   let closed = false;
@@ -90,14 +96,16 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     return entry.groups.get(key);
   }
   function pipeline(state) {
-    const key = [state.depth_test,state.depth_write,state.blend_enable,state.src_blend,state.dst_blend,state.cull,state.primitive,state.depth_func].join(':');
+    const key = [state.depth_test,state.depth_write,state.blend_enable,state.src_blend,state.dst_blend,state.cull,state.primitive,state.depth_func,
+      state.stencil_enable,state.stencil_func,state.stencil_fail,state.stencil_depth_fail,state.stencil_pass,state.stencil_read_mask,state.stencil_write_mask,state.color_write].join(':');
     if (!pipelines.has(key)) {
-      const target = { format: 'rgba8unorm' };
+      const target = { format: 'rgba8unorm',writeMask:state.color_write?GPUColorWrite.ALL:0 };
       if (state.blend_enable) {
         const component = { srcFactor: blendFactors[state.src_blend], dstFactor: blendFactors[state.dst_blend], operation: 'add' };
         if (!component.srcFactor || !component.dstFactor) throw new Error('Unsupported Thrash blend factor');
         target.blend = { color: component, alpha: component };
       }
+      const stencilFace=state.stencil_enable?{compare:stencilCompares[state.stencil_func],failOp:stencilOps[state.stencil_fail],depthFailOp:stencilOps[state.stencil_depth_fail],passOp:stencilOps[state.stencil_pass]}:{};
       pipelines.set(key, device.createRenderPipeline({ layout: pipelineLayout,
         vertex: { module: shader, entryPoint: 'vertex_main', buffers: [{ arrayStride: 32, attributes: [
           { shaderLocation: 0, offset: 0, format: 'float32x4' }, { shaderLocation: 1, offset: 16, format: 'unorm8x4' },
@@ -105,7 +113,8 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
         ] }] },
         fragment: { module: shader, entryPoint: 'fragment_main', targets: [target] },
         primitive: { topology: ['triangle-list','line-list','point-list'][state.primitive], frontFace: 'cw', cullMode: state.primitive ? 'none' : state.cull === 2 ? 'front' : state.cull === 3 ? 'back' : 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: Boolean(state.depth_write), depthCompare: state.depth_test ? compares[state.depth_func] ?? 'less-equal' : 'always' },
+        depthStencil: { format:depthFormat,depthWriteEnabled:Boolean(state.depth_test&&state.depth_write),depthCompare:state.depth_test?compares[state.depth_func]??'less-equal':'always',
+          stencilFront:stencilFace,stencilBack:stencilFace,stencilReadMask:state.stencil_read_mask,stencilWriteMask:state.stencil_enable?state.stencil_write_mask:0 },
       }));
     }
     return pipelines.get(key);
@@ -134,14 +143,16 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
       device.queue.writeBuffer(uniformBuffer, 0, uniforms, 0, uniformBytes / 4);
     }
     const encoder = target ?? device.createCommandEncoder(); let pass;
-    const begin = clear => encoder.beginRenderPass({ colorAttachments: [{ view: color.createView(), loadOp: clear ? 'clear' : 'load', storeOp: 'store', clearValue: clear ? rgba(clear.color) : [0,0,0,1] }],
-      depthStencilAttachment: { view: depth.createView(), depthLoadOp: clear ? 'clear' : 'load', depthStoreOp: 'store', depthClearValue: clear ? Math.max(0,Math.min(1,clear.depth)) : 1 } });
+    const begin = clear => encoder.beginRenderPass({ colorAttachments: [{ view: color.createView(), loadOp: clear?.mask&1 ? 'clear' : 'load', storeOp: 'store', clearValue: clear ? rgba(clear.color) : [0,0,0,1] }],
+      depthStencilAttachment: { view:depth.createView(),depthLoadOp:clear?.mask&2?'clear':'load',depthStoreOp:'store',depthClearValue:clear?Math.max(0,Math.min(1,clear.depth)):1,
+        stencilLoadOp:clear?.mask&4?'clear':'load',stencilStoreOp:'store',stencilClearValue:clear?.stencil??0 } });
     for (const operation of operations) {
       if (operation.type === 'clear') { pass?.end(); pass = begin(operation); continue; }
       pass ??= begin(null);
       const state = operation.state;
       if (state.scissor_enable && (!state.scissor_w || !state.scissor_h || state.scissor_x >= width || state.scissor_y >= height)) continue;
       pass.setPipeline(pipeline(state)); pass.setVertexBuffer(0, vertexBuffer); pass.setIndexBuffer(indexBuffer, 'uint32');
+      pass.setStencilReference(Math.min(255,state.stencil_ref>>>0));
       pass.setBindGroup(0, uniformGroup, [operation.uniformOffset]); pass.setBindGroup(1, textureGroup(state));
       pass.setScissorRect(state.scissor_enable ? state.scissor_x : 0, state.scissor_enable ? state.scissor_y : 0,
         state.scissor_enable ? Math.min(state.scissor_w,width-state.scissor_x) : width, state.scissor_enable ? Math.min(state.scissor_h,height-state.scissor_y) : height);
@@ -156,13 +167,28 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     if (w === width && h === height) return;
     flush(); color?.destroy(); depth?.destroy(); width = w; height = h; canvas.width = w; canvas.height = h;
     color = device.createTexture({ size: [w,h], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
-    depth = device.createTexture({ size: [w,h], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    depth = device.createTexture({ size: [w,h], format:depthFormat,usage:GPUTextureUsage.RENDER_ATTACHMENT });
     presentGroup = device.createBindGroup({ layout: presentPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: color.createView() }, { binding: 1, resource: presentSampler }] });
-    operations.push({ type: 'clear', color: 0xff000000, depth: 1 }); onResize(w,h);
+    operations.push({ type: 'clear', color: 0xff000000, depth: 1,stencil:0,mask:7 }); onResize(w,h);
   }
-  function clear(color, depth = 1) {
-    check(); const operation = { type: 'clear', color, depth };
-    if (operations.at(-1)?.type === 'clear') operations[operations.length - 1] = operation; else operations.push(operation);
+  function clear(color, depth = 1, {mask=7,stencil=0,rect}={}) {
+    check();mask&=7;stencil&=255;if(!mask)return;
+    if(rect&&(rect.x!==0||rect.y!==0||rect.width!==width||rect.height!==height)) {
+      if(!rect.width||!rect.height||rect.x>=width||rect.y>=height)return;
+      // Scissored clears bypass the game's texture, alpha, depth comparison
+      // and stencil comparison/ops, while writing only selected aspects.
+      const bytes=new Uint8Array(96),view=new DataView(bytes.buffer);
+      [[0,0],[width*2,0],[0,height*2]].forEach(([x,y],i)=>{
+        view.setFloat32(i*32,x,true);view.setFloat32(i*32+4,y,true);
+        view.setFloat32(i*32+8,Math.max(0,Math.min(1,depth)),true);view.setFloat32(i*32+12,1,true);view.setUint32(i*32+16,color,true);
+      });
+      draw(bytes,null,{depth_test:1,depth_write:Number(Boolean(mask&2)),depth_func:8,color_write:Number(Boolean(mask&1)),
+        stencil_enable:Number(Boolean(mask&4)),stencil_pass:2,stencil_ref:stencil,
+        scissor_enable:1,scissor_x:rect.x,scissor_y:rect.y,scissor_w:rect.width,scissor_h:rect.height});return;
+    }
+    const operation={type:'clear',color,depth,stencil,mask};
+    const last=operations.at(-1);
+    if(last?.type==='clear'&&last.mask===mask)operations[operations.length-1]=operation;else operations.push(operation);
   }
   function draw(data, mesh, requested = {}) {
     check(); const state = { ...defaults, ...requested };
@@ -228,7 +254,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   textureCreate(0,1,1,Uint8Array.of(255,255,255,255)); resize(canvas.width || 640, canvas.height || 480);
   return {
     resize, clear, draw, present, flush, textureCreate, textureUpdate, textureDestroy, readPixels, reset, stats, errors,
-    info: { vendor: adapter.info.vendor, maxTextureSize: device.limits.maxTextureDimension2D },
+    info: { vendor:adapter.info.vendor,maxTextureSize:device.limits.maxTextureDimension2D,depthFormat },
     get width() { return width; }, get height() { return height; },
     async validate() { await device.queue.onSubmittedWorkDone(); check(); },
     close() { if (closed) return; closed = true; for (const entry of textures.values()) entry.texture.destroy(); color.destroy(); depth.destroy(); vertexBuffer?.destroy(); indexBuffer?.destroy(); uniformBuffer?.destroy(); context.unconfigure(); device.destroy(); },

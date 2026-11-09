@@ -55,8 +55,8 @@ async function barrier(entry,args,opcode) {
 try {
   const library=await call(slot('LoadLibraryA'),[text('drivers\\opengl3z')]);
   const methods={};
-  for(const name of ['flushwindow','pageflip','setvideomode','readrect','restore','setstate','drawtri']) {
-    const suffix={flushwindow:0,pageflip:0,setvideomode:12,readrect:20,restore:0,setstate:8,drawtri:12}[name];
+  for(const name of ['flushwindow','pageflip','setvideomode','readrect','restore','setstate','drawtri','window','clearwindow','clip']) {
+    const suffix={flushwindow:0,pageflip:0,setvideomode:12,readrect:20,restore:0,setstate:8,drawtri:12,window:4,clearwindow:0,clip:16}[name];
     methods[name]=await call(slot('GetProcAddress'),[library,text(`_THRASH_${name}@${suffix}`)]);
     assert(methods[name]);
   }
@@ -73,8 +73,9 @@ try {
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
-  assert.equal(Atomics.load(header,6),5,'Native alpha comparison uses transport v5');checks++;
-  for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000],[10,3],[36,128]])assert.equal(await call(methods.setstate,[state,value]),1);
+  assert.equal(Atomics.load(header,6),6,'Stencil state and aspect clears use transport v6');checks++;
+  for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000],[10,3],[36,128],[47,1],[48,5],[52,3],[53,4],[54,6]])assert.equal(await call(methods.setstate,[state,value]),1);
+  assert.equal(await call(methods.window,[3]),1);
   const vertex=data+256;
   for(let i=0;i<3;i++) {
     [i===1?64:0,i===2?64:0,.5,1].forEach((v,j)=>view.setFloat32(vertex+i*32+j*4,v,true));
@@ -83,14 +84,24 @@ try {
   for(const mode of [0,2,1]) {
     assert.equal(await call(methods.setstate,[6,mode]),1);
     assert.equal(await call(methods.drawtri,[vertex,vertex+32,vertex+64]),1);
-    const draw=await packet(4),state=draw.words.subarray(3,34);
+    const draw=await packet(4),state=draw.words.subarray(3,43);
     assert.equal(state[25],mode,'Shading mode survives queued state snapshot');
     assert.equal(state[22],1,'Native texture alpha modulation is enabled');
-    assert.deepEqual(Array.from(state.slice(26)),[2,1,2,0xbf800000,4],'Sampling state and strict greater alpha comparison');
+    assert.deepEqual(Array.from(state.slice(26,31)),[2,1,2,0xbf800000,4],'Sampling state and strict greater alpha comparison');
+    assert.deepEqual(Array.from(state.slice(31)),[1,5,3,4,6,2,255,255,1],'Stencil compare/operations and fixed reference/masks');
     assert.deepEqual([state[3],state[9],state[10]],[1,1,128],'Blend mode and independent alpha reference');
-    assert.deepEqual(Array.from(draw.words.slice(34,36)),[3,0],'Extended-state vertex/index counts');
-    assert.equal(draw.words[40],0x80402010);assert.equal(draw.words[41],0x40203040);checks++;
+    assert.deepEqual(Array.from(draw.words.slice(43,45)),[3,0],'Extended-state vertex/index counts');
+    assert.equal(draw.words[49],0x80402010);assert.equal(draw.words[50],0x40203040);checks++;
     acknowledge(draw);
+  }
+  assert.equal(await call(methods.clip,[10,20,30,40]),1);
+  assert.equal(await call(methods.setstate,[4,1]),1);
+  for(const [depthWrite,window,stencil,mask] of [[1,3,1,6],[0,3,1,4],[0,2,1,5],[0,2,0,1]]) {
+    await call(methods.setstate,[57,depthWrite]);await call(methods.window,[window]);await call(methods.setstate,[47,stencil]);
+    assert.equal(await call(methods.clearwindow),1);
+    const clear=await packet(2);
+    assert.deepEqual(Array.from(clear.words.slice(3)),[0xff000000,0x3f800000,mask,0,10,20,20,20],'Clear snapshots independent aspects and clipping');checks++;
+    acknowledge(clear);
   }
   const present=await barrier(methods.pageflip,[],3);acknowledge(present);assert.equal(await finish(),1);
   const readback=await barrier(methods.readrect,[0,0,1,1,data+128],8);

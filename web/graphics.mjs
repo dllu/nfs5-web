@@ -3,7 +3,9 @@ import { createRenderer, mipLayout } from './renderer.mjs';
 const stateFields = ['texture','depth_test','depth_write','blend_enable','src_blend','dst_blend','filter_linear','address_wrap','cull',
   'alpha_test','alpha_ref','fog_enable','fog_color','fog_near','fog_far','primitive','depth_func',
   'scissor_enable','scissor_x','scissor_y','scissor_w','scissor_h','alpha_modulate','fog_mode','fog_density','shade_mode',
-  'mip_filter','address_u','address_v','mip_lod_bias','alpha_func'];
+  'mip_filter','address_u','address_v','mip_lod_bias','alpha_func',
+  'stencil_enable','stencil_func','stencil_fail','stencil_depth_fail','stencil_pass',
+  'stencil_ref','stencil_read_mask','stencil_write_mask','color_write'];
 
 export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true } = {}) {
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
@@ -14,8 +16,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
     const version=Atomics.load(header,6);
-    if(![1,2,3,4,5].includes(version))throw new Error('Unsupported graphics transport version');
-    stateSize=version>=5?31:version>=4?30:version>=3?26:25;
+    if(![1,2,3,4,5,6].includes(version))throw new Error('Unsupported graphics transport version');
+    stateSize=version>=6?40:version>=5?31:version>=4?30:version>=3?26:25;
     const size=Atomics.load(header,5)>>>0;
     if(!size || (size&(size-1)))throw new Error('Invalid graphics queue size');
     ring=new Uint32Array(module.HEAPU8.buffer,pointer+32,size);
@@ -55,7 +57,11 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
       Atomics.notify(header,1);
       switch(opcode) {
         case 1:renderer.resize(data[0],data[1]);onResize(data[0],data[1]);break;
-        case 2:renderer.clear(data[0],new Float32Array(data.buffer,data.byteOffset,data.length)[1]);break;
+        case 2:{
+          const options=data.length===2?undefined:{mask:data[2],stencil:data[3],rect:{x:data[4],y:data[5],width:data[6],height:data[7]}};
+          if(data.length!==2&&data.length!==8)throw new Error('Invalid clear packet length');
+          renderer.clear(data[0],new Float32Array(data.buffer,data.byteOffset,data.length)[1],options);break;
+        }
         case 3:
           if(pace)await new Promise(resolve=>typeof requestAnimationFrame==='function'?requestAnimationFrame(resolve):setTimeout(resolve,1000/60));
           if(closed)return;renderer.present();break;

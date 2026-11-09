@@ -10,6 +10,7 @@ enum {MODE_RESOLUTIONS=sizeof mode_sizes/sizeof mode_sizes[0],MODE_COUNT=MODE_RE
 static const __typeof__(web_gpu_api) *gpu=&web_gpu_api;
 static uint32_t descriptor,modes,formats,framebuffer,framebuffer_capacity,lockdesc,surface_info,callbacks;
 static uint32_t width=640,height=480,color_bits=16;
+static uint32_t window_color_clear=1;
 static int opened,trace;
 static uint32_t state_values[8][1024],clear_color=0xFF000000u;
 static float clear_depth=1,vertex_depth_bias;
@@ -88,7 +89,12 @@ static void make_descriptor(void) {
 static void r_about(void){make_descriptor();RET(descriptor,0);}
 static void r_init(void){make_descriptor();RET(1,0);}
 static void r_is(void){RET(1,0);}
-static void r_window(void){uint32_t id=A32(0);if(id!=1&&id!=2)RET(0,1);state_values[0][59]=id;nfspu_thrash_pump();RET(1,1);}
+/* Native 10008732 maps 0/1 to front, 2 to back, 3 to auxiliary. With no
+ * auxiliary buffers, window 3 still draws to back but omits color clears. */
+static void r_window(void){
+    uint32_t id=A32(0);state_values[0][59]=id;if(id>3)RET(0,1);
+    window_color_clear=id!=3;nfspu_thrash_pump();RET(1,1);
+}
 static void r_selectdisplay(void){RET(A32(0)==0 ? 1:0,1);}
 static void r_mode(void) {
     make_descriptor();uint32_t i=A32(0);
@@ -104,32 +110,20 @@ static void r_mode(void) {
 }
 static void r_restore(void){nfspu_thrash_shutdown();RET(1,0);}
 static void r_idle(void){nfspu_thrash_pump();RET(1,0);}
-/* dx7z Clear uses the clip rectangle (D3DRECT), not the whole target. A mirror
- * clear must not wipe the scene drawn outside that rectangle. */
-static void clear_clip(uint32_t x,uint32_t y,uint32_t w,uint32_t h){
-    float z=clear_depth;if(z<0)z=0;if(z>1)z=1;
-    nfspu_gpu_vertex v[4]={
-        {(float)x,(float)y,z,1,clear_color,0,0,0},
-        {(float)(x+w),(float)y,z,1,clear_color,0,0,0},
-        {(float)(x+w),(float)(y+h),z,1,clear_color,0,0,0},
-        {(float)x,(float)(y+h),z,1,clear_color,0,0,0}};
-    const uint32_t idx[]={0,1,2,0,2,3};
-    nfspu_gpu_state s={0};
-    s.depth_test=1;s.depth_write=1;s.depth_func=8;s.cull=1;s.fog_far=1;
-    s.scissor_enable=1;s.scissor_x=x;s.scissor_y=y;s.scissor_w=w;s.scissor_h=h;
-    gpu->draw(v,4,idx,6,&s);
-}
 static int clip_is_partial(void){
     return render_state.scissor_enable && (render_state.scissor_x!=0||render_state.scissor_y!=0||
         render_state.scissor_w!=width||render_state.scissor_h!=height);
 }
 static void r_clear(void){
     if(open_gpu()){
-        if(!clip_is_partial())gpu->clear(clear_color,clear_depth);
-        else if(render_state.scissor_w&&render_state.scissor_h){
+        /* Native 10008650 selects enabled aspects; glClear also respects the
+         * depth-write mask and scissor. Stencil's native clear value is zero. */
+        uint32_t mask=(window_color_clear?1:0)|
+            (render_state.depth_test&&render_state.depth_write?2:0)|(render_state.stencil_enable?4:0);
+        if(clip_is_partial()){
             partial_clears++;
-            clear_clip(render_state.scissor_x,render_state.scissor_y,render_state.scissor_w,render_state.scissor_h);
-        }
+            gpu->clear(clear_color,clear_depth,mask,0,render_state.scissor_x,render_state.scissor_y,render_state.scissor_w,render_state.scissor_h);
+        }else gpu->clear(clear_color,clear_depth,mask,0,0,0,width,height);
     }
     RET(1,0);
 }
@@ -298,12 +292,14 @@ static void r_state(void) {
     /* State 37 is an optional timer hook. Advertising it installs a callback
      * that must be implemented, not an innocuous successful no-op. */
     if(!known_state(s)||!s||s==12||s==16||s==17||s==29||s==34||s==37||s==38||
-       (s>=43&&s<=45)||(s>=49&&s<=51)||(s>=68&&s<=100)||(s>=107&&s!=404&&s!=405))RET(0,2);
+       (s>=43&&s<=45)||(s>=68&&s<=100)||(s>=107&&s!=404&&s!=405))RET(0,2);
     if(s==10&&v>(thrash_version>=107?3u:2u))RET(0,2);
     if((s==404||s==405)&&v>9)RET(0,2);
     if((s==56||s==104)&&v>3)RET(0,2);
     if(s==2&&v>2)RET(0,2);
+    if(s==4&&v>1)RET(0,2);
     if(s==6&&v>2)RET(0,2);
+    if((s==48||(s>=52&&s<=54))&&v>7)RET(0,2);
     if((s==13||s==65||s==66)&&v>2)RET(0,2);
     if(s==30&&(v<32||v>128))RET(0,2);
     if(s==21&&v!=0&&v!=1&&v!=2&&v!=4&&v!=8)RET(0,2);
@@ -314,7 +310,7 @@ static void r_state(void) {
     switch(s) {
     case 1:{if(stage)break;texture_slot *t=find_texture(v);render_state.texture=t?t->gpu_id:0;break;}
     case 2:render_state.cull=v==0?1:v==2?2:3;break;
-    case 4:render_state.depth_test=render_state.depth_write=v!=0;break;
+    case 4:render_state.depth_test=v!=0;break;
     /* Native 10006716: flat, Gouraud, Gouraud with specular addition. */
     case 6:render_state.shade_mode=v;break;
     /* Native 10008AF1 uses state 7 for spatial filtering and 11 for mips.
@@ -351,6 +347,12 @@ static void r_state(void) {
      * by diffuse RGBA; it does not select alpha or disable the texture here. */
     case 41:break;
     case 42:if(v<=1)vertex_stride=v?40:32;break;
+    /* Native 10006428..100065FD: stencil compare/reference mask and ops. */
+    case 47:render_state.stencil_enable=v!=0;break;
+    case 48:render_state.stencil_func=v;break;
+    case 52:render_state.stencil_fail=v;break;
+    case 53:render_state.stencil_depth_fail=v;break;
+    case 54:render_state.stencil_pass=v;break;
     case 56:case 104:
         {const uint32_t src[]={2,2,1,7},dst[]={3,0,3,1};
         state_values[stage][404]=src[v];state_values[stage][405]=dst[v];
@@ -398,7 +400,7 @@ static int blit_pixels(uint32_t p,uint32_t x,uint32_t y,uint32_t w,uint32_t h) {
     uint8_t *rgba=decode_window_pixels(p,w,h);if(!rgba)return 0;
     uint32_t tex=gpu->texture_create(w,h,rgba,1);free(rgba);if(!tex)return 0;
     nfspu_gpu_vertex v[4]={{x,y,0,1,0xFFFFFFFF,0,0,0},{x+w,y,0,1,0xFFFFFFFF,0,1,0},{x+w,y+h,0,1,0xFFFFFFFF,0,1,1},{x,y+h,0,1,0xFFFFFFFF,0,0,1}};
-    const uint32_t idx[]={0,1,2,0,2,3};nfspu_gpu_state s={.texture=tex,.src_blend=2,.dst_blend=1,.cull=1};
+    const uint32_t idx[]={0,1,2,0,2,3};nfspu_gpu_state s={.texture=tex,.src_blend=2,.dst_blend=1,.cull=1,.color_write=1};
     int ok=gpu->draw(v,4,idx,6,&s);gpu->texture_destroy(tex);return ok;
 }
 static void r_unlock(void){
@@ -467,10 +469,12 @@ static void thrash_reset(void) {
     for(unsigned i=0;i<MAX_TEXTURES;i++){free(textures[i].pixels);free(textures[i].palette);}
     memset(textures,0,sizeof textures);memset(state_values,0,sizeof state_values);
     descriptor=modes=formats=framebuffer=framebuffer_capacity=lockdesc=surface_info=callbacks=0;
-    width=640;height=480;color_bits=16;opened=trace=software_fog=fog_table_valid=0;thrash_version=107;
+    width=640;height=480;color_bits=16;window_color_clear=1;opened=trace=software_fog=fog_table_valid=0;thrash_version=107;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
     frames=draws=uploads=software_frames=partial_clears=thrash_calls=0;vertex_stride=sprite_stride=32;
-    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1,.alpha_func=4};
+    render_state=(nfspu_gpu_state){.src_blend=5,.dst_blend=6,.filter_linear=1,.cull=1,.depth_write=1,.fog_far=1,.fog_density=1,.depth_func=4,.shade_mode=1,.alpha_modulate=1,.mip_filter=1,.alpha_func=4,
+        .stencil_func=7,.stencil_ref=2,.stencil_read_mask=255,.stencil_write_mask=255,.color_write=1};
+    state_values[0][48]=7;
     state_values[0][6]=state_values[0][7]=state_values[0][11]=1;
     state_values[0][404]=2;state_values[0][405]=3;
 }

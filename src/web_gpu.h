@@ -16,9 +16,11 @@ typedef struct {
     uint32_t mip_filter,address_u,address_v;
     float mip_lod_bias;
     uint32_t alpha_func;
+    uint32_t stencil_enable,stencil_func,stencil_fail,stencil_depth_fail,stencil_pass;
+    uint32_t stencil_ref,stencil_read_mask,stencil_write_mask,color_write;
 } nfspu_gpu_state;
 _Static_assert(sizeof(nfspu_gpu_vertex) == 32, "Thrash vertex ABI");
-_Static_assert(sizeof(nfspu_gpu_state) == 124, "GPU state ABI");
+_Static_assert(sizeof(nfspu_gpu_state) == 160, "GPU state ABI");
 enum { GPU_RESIZE=1, GPU_CLEAR, GPU_PRESENT, GPU_DRAW, GPU_TEXTURE_CREATE, GPU_TEXTURE_WRITE,
        GPU_TEXTURE_DESTROY, GPU_READ_PIXELS, GPU_FLUSH, GPU_RESET };
 static struct {
@@ -89,8 +91,9 @@ static int gpu_resize(uint32_t width,uint32_t height) {
     gpu_width=width;gpu_height=height;return 1;
 }
 static int gpu_open(uint32_t width,uint32_t height) { return gpu_resize(width,height); }
-static void gpu_clear(uint32_t color,float depth) {
-    uint32_t args[2] = {color,0}; memcpy(args+1,&depth,4); gpu_send(GPU_CLEAR,args,8,NULL,0,NULL,0);
+static void gpu_clear(uint32_t color,float depth,uint32_t mask,uint32_t stencil,uint32_t x,uint32_t y,uint32_t width,uint32_t height) {
+    uint32_t args[]={color,0,mask,stencil,x,y,width,height};memcpy(args+1,&depth,4);
+    gpu_send(GPU_CLEAR,args,sizeof args,NULL,0,NULL,0);
 }
 static int gpu_present(void) { gpu_wait(gpu_send(GPU_PRESENT,NULL,0,NULL,0,NULL,0)); return 1; }
 /* Verok's _THRASH_flushwindow (10008690) submits its batch and calls glFlush
@@ -136,13 +139,13 @@ static void gpu_close(void) {
 }
 static const struct {
     int (*open)(uint32_t,uint32_t);void(*close)(void);int(*resize)(uint32_t,uint32_t);
-    void(*clear)(uint32_t,float);int(*present)(void);
+    void(*clear)(uint32_t,float,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);int(*present)(void);
     uint32_t(*texture_create)(uint32_t,uint32_t,const uint8_t*,uint32_t);int(*texture_update)(uint32_t,const uint8_t*);void(*texture_destroy)(uint32_t);
     int(*draw)(const nfspu_gpu_vertex*,uint32_t,const uint32_t*,uint32_t,const nfspu_gpu_state*);
     int(*read_pixels)(uint8_t*,uint32_t,uint32_t);
 } web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels};
 static void gpu_reset(void) {
-    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=5;
+    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=6;
     memset(gpu_textures,0,sizeof gpu_textures);gpu_width=gpu_height=gpu_next_texture=0;gpu_error[0]=0;
 }
 #endif

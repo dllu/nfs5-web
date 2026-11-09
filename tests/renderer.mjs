@@ -68,6 +68,77 @@ try {
     }
     renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000),mesh,{scissor_enable:1,scissor_x:16,scissor_y:16,scissor_w:16,scissor_h:16});
     pixels = await renderer.readPixels(); expect(pixel(pixels,20,20),[255,0,0,255],'inside clip'); expect(pixel(pixels,8,8),[0,0,0,255],'outside clip');
+    const stencil={stencil_enable:1,stencil_ref:2};
+    renderer.clear(0xff0000ff);renderer.draw(quad(0,0,32,64),mesh,{...stencil,stencil_pass:2,color_write:0});
+    expect(pixel(await renderer.readPixels(),8,8),[0,0,255,255],'stencil mask draw preserves color');
+    renderer.draw(quad(0,0,64,64,0xffff0000),mesh,{...stencil,stencil_func:2});pixels=await renderer.readPixels();
+    expect(pixel(pixels,8,8),[255,0,0,255],'stencil mask selects covered pixels');
+    expect(pixel(pixels,48,8),[0,0,255,255],'stencil mask rejects uncovered pixels');
+    for(const stored of [0,2,3]) {
+      const passes=stored===0?[false,false,false,false,true,true,true,true]:stored===2?
+        [false,false,true,true,false,false,true,true]:[false,true,false,true,false,true,false,true];
+      for(let func=0;func<8;func++) {
+        renderer.clear(0xff0000ff,1,{stencil:stored});
+        renderer.draw(quad(0,0,64,64,0xffff0000),mesh,{...stencil,stencil_func:func});
+        expect(pixel(await renderer.readPixels(),8,8),passes[func]?[255,0,0,255]:[0,0,255,255],`stencil compare ${func}, stored ${stored}`);
+      }
+    }
+    const operated=(op,value)=>[value,0,2,Math.min(255,value+1),Math.max(0,value-1),value^255,(value+1)&255,(value-1)&255][op];
+    for(const branch of ['pass','fail','depth_fail'])for(let op=0;op<8;op++) {
+      renderer.clear(0xff0000ff,.2,{stencil:70});
+      const write={...stencil,color_write:0,stencil_func:branch==='fail'?0:7,[`stencil_${branch}`]:op,
+        depth_test:Number(branch==='depth_fail'),depth_write:0};
+      renderer.draw(quad(0,0,64,64,0xffffffff,{z:.8}),mesh,write);
+      renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2,stencil_ref:operated(op,70)});
+      expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],`stencil ${branch} operation ${op}`);
+    }
+    for(const [op,stored] of [[3,255],[4,0],[6,255],[7,0]]) {
+      renderer.clear(0xff0000ff,1,{stencil:stored});renderer.draw(quad(0,0,64,64),mesh,{...stencil,color_write:0,stencil_pass:op});
+      renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2,stencil_ref:operated(op,stored)});
+      expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],'stencil operation clamps or wraps at byte boundary');
+    }
+    renderer.clear(0xff0000ff,1,{stencil:0xa5});
+    renderer.draw(quad(0,0,64,64),mesh,{...stencil,stencil_pass:2,stencil_ref:0x3c,stencil_write_mask:15,color_write:0});
+    renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2,stencil_ref:0xac});
+    expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],'stencil write mask preserves other bits');
+    renderer.clear(0xff0000ff,1,{mask:1});
+    renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2,stencil_ref:0x1c,stencil_read_mask:15});
+    expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],'stencil compare masks both stored value and reference');
+    renderer.clear(0xff0000ff,1,{stencil:5});renderer.draw(quad(0,0,64,64),mesh,{stencil_enable:0,stencil_pass:2,color_write:0});
+    renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2,stencil_ref:5});
+    expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],'disabled stencil leaves stored mask unchanged');
+    for(const branch of ['pass','fail','depth_fail']) {
+      renderer.clear(0xff0000ff,.2);
+      renderer.draw(quad(0,0,64,64,0x00ff0000,{z:.8}),mesh,{...stencil,[`stencil_${branch}`]:2,
+        stencil_func:branch==='fail'?0:7,depth_test:Number(branch==='depth_fail'),color_write:0,alpha_test:1,alpha_func:4});
+      renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2});
+      expect(pixel(await renderer.readPixels(),8,8),[0,0,255,255],`alpha discard prevents stencil ${branch} update`);
+    }
+    renderer.clear(0xff0000ff);
+    renderer.draw(quad(0,0,32,64),mesh,{...stencil,stencil_pass:2,stencil_ref:1,color_write:0});
+    renderer.draw(quad(32,0,32,64),mesh,{...stencil,stencil_pass:2,stencil_ref:2,color_write:0});
+    renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2});pixels=await renderer.readPixels();
+    expect(pixel(pixels,8,8),[0,0,255,255],'queued stencil references remain independent');expect(pixel(pixels,48,8),[0,255,0,255],'queued stencil reference change');
+    const rect={x:16,y:16,width:16,height:16};
+    renderer.clear(0xff0000ff,.2,{stencil:2});renderer.clear(0,.9,{mask:4,stencil:0,rect});
+    renderer.draw(quad(0,0,64,64,0xffff0000),mesh,{...stencil,stencil_func:2});pixels=await renderer.readPixels();
+    expect(pixel(pixels,20,20),[0,0,255,255],'clipped stencil clear removes only inner mask');expect(pixel(pixels,8,8),[255,0,0,255],'clipped stencil clear preserves outer mask');
+    renderer.clear(0xff0000ff,1,{stencil:511});renderer.clear(0,1,{mask:4,stencil:256,rect});
+    renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2,stencil_ref:255});pixels=await renderer.readPixels();
+    expect(pixel(pixels,8,8),[0,255,0,255],'full stencil clear uses low eight bits');expect(pixel(pixels,20,20),[0,0,255,255],'clipped stencil clear uses the same byte conversion');
+    renderer.clear(0xff0000ff,.2,{stencil:2});renderer.clear(0,1,{mask:2,rect});
+    renderer.draw(quad(0,0,64,64,0xffff0000,{z:.5}),mesh,{depth_test:1,depth_write:0});pixels=await renderer.readPixels();
+    expect(pixel(pixels,20,20),[255,0,0,255],'clipped depth clear allows geometry inside');expect(pixel(pixels,8,8),[0,0,255,255],'clipped depth clear preserves outer depth');
+    renderer.draw(quad(0,0,64,64,0xff00ff00),mesh,{...stencil,stencil_func:2});pixels=await renderer.readPixels();
+    expect(pixel(pixels,20,20),[0,255,0,255],'depth-only clipped clear preserves stencil');
+    renderer.clear(0xff0000ff,.2,{stencil:2});renderer.clear(0xff00ffff,1,{mask:1,rect});
+    renderer.draw(quad(0,0,64,64,0xffff0000,{z:.5}),mesh,{depth_test:1,depth_write:0});pixels=await renderer.readPixels();
+    expect(pixel(pixels,20,20),[0,255,255,255],'color-only clipped clear preserves depth');expect(pixel(pixels,8,8),[0,0,255,255],'color-only clipped clear respects rectangle');
+    renderer.clear(0xff0000ff);renderer.clear(0xffff0000,1,{mask:1});renderer.clear(0,1,{mask:4,stencil:2});
+    expect(pixel(await renderer.readPixels(),8,8),[255,0,0,255],'consecutive aspect clears do not erase earlier color clear');
+    renderer.clear(0xff0000ff);renderer.draw(quad(0,0,64,64,0xffff0000,{z:.1}),mesh,{depth_test:0,depth_write:1,color_write:0});
+    renderer.draw(quad(0,0,64,64,0xff00ff00,{z:.5}),mesh,{depth_test:1,depth_write:1});
+    expect(pixel(await renderer.readPixels(),8,8),[0,255,0,255],'disabled depth test also disables depth writes');
     renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000,{specular:0}),mesh,{fog_enable:1,fog_color:0x00808080});
     expect(pixel(await renderer.readPixels(),16,16),[128,128,128,255],'vertex fog');
     renderer.clear(0xff000000); renderer.draw(quad(0,0,64,64,0xffff0000,{rhw:.5}),mesh,{fog_enable:1,fog_color:0x00808080,fog_mode:1,fog_near:1,fog_far:3});
@@ -166,7 +237,7 @@ try {
     renderer.clear(0xff000000); const before = renderer.stats.batches;
     for (let i = 0; i < 100; i++) renderer.draw(quad(0,0,64,64,0xff00ffff),mesh);
     pixels = await renderer.readPixels(); expect([renderer.stats.batches-before],[1],'consecutive draw batching'); expect(pixel(pixels,16,16),[0,255,255,255],'batched vertices/indices');
-    renderer.resize(3840,2160); renderer.clear(0xff203040); renderer.draw(quad(3832,2152,8,8,0xffff0000),mesh);
+    renderer.resize(3840,2160); renderer.clear(0xff203040); renderer.draw(quad(3832,2152,8,8,0xffff0000),mesh,{stencil_enable:1,stencil_func:2,stencil_ref:0});
     pixels = await renderer.readPixels(); expect(pixel(pixels,0,0),[32,48,64,255],'4K target'); expect(pixel(pixels,3838,2158),[255,0,0,255],'4K lower-right raster');
     renderer.resize(640,360); renderer.clear(0xff102030);
     renderer.draw(pack([{x:40,y:40,color:0xffff0000},{x:350,y:55,color:0xff00ff00},{x:80,y:320,color:0xff0000ff}]),null);
@@ -187,14 +258,15 @@ try {
       self.onmessage = async ({data:canvas}) => {
         let renderer;
         try {
-          renderer = await createRenderer(canvas); renderer.clear(0xff112233);
+          renderer = await createRenderer(canvas,{depthFormat:'depth24plus-stencil8'}); renderer.clear(0xff112233);
           const bytes = new Uint8Array(96), view = new DataView(bytes.buffer);
           [[0,0],[16,0],[0,16]].forEach(([x,y],i) => {
             view.setFloat32(i*32,x,true);view.setFloat32(i*32+4,y,true);
             view.setFloat32(i*32+8,.5,true);view.setFloat32(i*32+12,1,true);view.setUint32(i*32+16,0xffff0000,true);
           });
-          renderer.draw(bytes,null);renderer.present();const pixels = await renderer.readPixels();await renderer.validate();
-          self.postMessage({inside:Array.from(pixels.slice((2*16+2)*4,(2*16+2)*4+4)),outside:Array.from(pixels.slice((14*16+14)*4,(14*16+14)*4+4)),vendor:renderer.info.vendor,errors:renderer.errors});
+          renderer.draw(bytes,null,{stencil_enable:1,stencil_pass:2,color_write:0});
+          renderer.draw(bytes,null,{stencil_enable:1,stencil_func:2});renderer.present();const pixels = await renderer.readPixels();await renderer.validate();
+          self.postMessage({inside:Array.from(pixels.slice((2*16+2)*4,(2*16+2)*4+4)),outside:Array.from(pixels.slice((14*16+14)*4,(14*16+14)*4+4)),vendor:renderer.info.vendor,depthFormat:renderer.info.depthFormat,errors:renderer.errors});
         } catch(error) {self.postMessage({error:String(error)});} finally {renderer?.close();}
       };`;
     const url = URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
@@ -207,6 +279,7 @@ try {
     } finally {worker.terminate();URL.revokeObjectURL(url);canvas.remove();}
   });
   assert.equal(result.worker.error,undefined);assert.deepEqual(result.worker.errors,[]);
+  assert.equal(result.worker.depthFormat,'depth24plus-stencil8');
   assert.deepEqual(result.worker.inside,[255,0,0,255]);assert.deepEqual(result.worker.outside,[17,34,51,255]);
   result.thrash=await page.evaluate(async()=>{
     const {loadRuntime}=await import('./runtime.mjs');
@@ -299,6 +372,45 @@ try {
     for(let i=0;i<3;i++){put(vertices+i*32+16,0xff00ff00);view.setFloat32(vertices+i*32+8,.5,true);}
     await method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
     expect(await pixel(8,8),0xff00ff00,'zero-alpha fragments do not occlude geometry behind them');
+    const state=(s,v)=>method('_THRASH_setstate@8',s,v),tri=()=>method('_THRASH_drawtri@12',vertices,vertices+32,vertices+64);
+    function triangle(color,z=.5,size=128){vertex(vertices,0,0,color,0,0,z);vertex(vertices+32,size,0,color,0,0,z);vertex(vertices+64,0,size,color,0,0,z);}
+    await state(4,0);await state(47,1);await state(48,7);await state(52,0);await state(53,0);await state(54,2);
+    await state(3,0xff0000ff);await method('_THRASH_clearwindow@0');await method('_THRASH_window@4',3);
+    await state(10,2);await state(36,0);await state(404,1);await state(405,0);
+    triangle(0xffff0000,.5,64);await tri();expect(await pixel(8,8),0xff0000ff,'native stencil mask can preserve color through ZERO/ONE blending');
+    await state(10,0);await state(56,0);
+    await method('_THRASH_window@4',2);await state(48,2);await state(54,0);
+    for(const [s,v] of [[49,99],[50,0],[51,0]])expect(await state(s,v),1,'native retains unused stencil reference/mask states');
+    triangle(0xff00ff00);await tri();expect(await pixel(8,8),0xff00ff00,'native stencil replace uses fixed reference two');
+    expect(await pixel(80,8),0xff0000ff,'native stencil compare retains fixed full read mask');
+    await state(47,0);await method('_THRASH_clearwindow@0');await state(47,1);await tri();
+    expect(await pixel(8,8),0xff00ff00,'native clear preserves stencil while stencil is disabled');
+    await state(47,0);await method('_THRASH_clearwindow@0');await method('_THRASH_window@4',3);await state(47,1);await state(48,0);
+    await method('_THRASH_clearwindow@0');await method('_THRASH_window@4',2);await state(48,2);triangle(0xffff0000);await tri();
+    expect(await pixel(8,8),0xff0000ff,'native stencil-only clear bypasses comparison and preserves color');
+    await method('_THRASH_window@4',3);await state(48,7);await state(54,2);await tri();
+    await method('_THRASH_window@4',2);await state(47,0);await method('_THRASH_clearwindow@0');
+    await method('_THRASH_window@4',3);await state(47,1);await state(48,0);await method('_THRASH_clip@16',16,16,32,32);await method('_THRASH_clearwindow@0');
+    await method('_THRASH_clip@16',0,0,640,480);await method('_THRASH_window@4',2);await state(48,2);await state(54,0);await tri();
+    expect(await pixel(20,20),0xff0000ff,'native clipped stencil clear removes the inner mask');
+    expect(await pixel(8,8),0xffff0000,'native clipped stencil clear preserves the outer mask');
+    await method('_THRASH_window@4',3);await method('_THRASH_clearwindow@0');await state(48,0);await state(52,2);await tri();
+    await method('_THRASH_window@4',2);await state(48,2);triangle(0xff00ff00);await tri();
+    expect(await pixel(20,20),0xff00ff00,'native stencil-fail operation updates the mask');
+    await method('_THRASH_window@4',3);await state(4,1);await state(57,1);await state(67,0x3e4ccccd);await method('_THRASH_clearwindow@0');
+    await state(57,0);await state(48,7);await state(52,0);await state(53,2);triangle(0xffff0000,.8);await tri();
+    await method('_THRASH_window@4',2);await state(4,0);await state(48,2);await tri();
+    expect(await pixel(20,20),0xffff0000,'native stencil depth-fail operation updates the mask');
+    await state(47,0);await state(4,1);await state(57,1);await method('_THRASH_clearwindow@0');
+    await state(57,0);await state(4,0);await state(4,1);await state(67,0x3f800000);await method('_THRASH_clearwindow@0');triangle(0xffff0000,.5);await tri();
+    expect(await pixel(8,8),0xff0000ff,'native clear and depth-test toggles preserve a disabled depth-write mask');
+    await state(57,1);await state(4,0);await method('_THRASH_window@4',3);triangle(0xffff0000,.1);await tri();
+    await state(4,1);await method('_THRASH_window@4',2);triangle(0xff00ff00,.15);await tri();
+    expect(await pixel(8,8),0xff00ff00,'native disabled depth test does not write depth');
+    await state(4,0);await method('_THRASH_window@4',3);triangle(0xff00ffff);await tri();await method('_THRASH_clearwindow@0');
+    expect(await pixel(8,8),0xff00ffff,'native no-auxiliary fallback draws to back but skips color clear');
+    await method('_THRASH_window@4',2);await state(4,1);
+    await state(48,7);await state(52,0);await state(53,0);await state(54,0);await method('_THRASH_clearwindow@0');
     await method('_THRASH_setstate@8',6,0);
     vertex(vertices,0,0,0xffff0000);vertex(vertices+32,64,0,0xff00ff00);
     vertex(vertices+64,64,64,0xff0000ff);vertex(vertices+96,0,64,0xffffffff);
@@ -431,7 +543,7 @@ try {
   assert.deepEqual(result.fallback.errors,[]);
   result.legacyDraws=await page.evaluate(async()=>{
     const {attachGraphics}=await import('./graphics.mjs'),results=[];
-    for(const version of [1,2,3,4]) {
+    for(const version of [1,2,3,4,5]) {
       // Older state layouts still decode geometry/textures and retain their
       // alpha >= reference comparison without the v5 alpha-function field.
       const memory=new SharedArrayBuffer(32768),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
@@ -447,7 +559,7 @@ try {
       }
       try {
         send(1,Uint32Array.of(64,64));
-        const stateSize=version>=4?30:version>=3?26:25,start=stateSize+2,end=start+24;
+        const stateSize=version>=5?31:version>=4?30:version>=3?26:25,start=stateSize+2,end=start+24;
         const draw=new Uint32Array(end+3),floats=new Float32Array(draw.buffer);
         draw[6]=draw[7]=draw[8]=draw[22]=1;draw[16]=4;floats[14]=floats[24]=1;
         if(version>=3)draw[25]=1;
@@ -471,11 +583,13 @@ try {
         const unindexed=sample(await graphics.renderer.readPixels());
         if(unindexed.join()!=='0,255,0,255')throw new Error(`Legacy v${version} unindexed draw: ${unindexed}`);
         send(5,version>=4?Uint32Array.of(7,1,1,1):Uint32Array.of(7,1,1));send(6,Uint32Array.of(7,0,4,4,0xff0000ff));
-        draw[9]=1;draw[10]=255; // Legacy comparison remains alpha >= reference.
+        draw[9]=1;draw[10]=255;
+        if(version>=5){draw[30]=4;send(2,Uint32Array.of(0xff0000ff,0x3f800000));}
+        // v1-v4 keep GEQUAL defaults; v5 preserves explicit GREATER.
         draw[0]=7;for(let i=0;i<3;i++)draw[start+i*8+4]=0xffffffff;
         send(4,draw.subarray(0,end));await graphics.settle();
         const textured=sample(await graphics.renderer.readPixels());
-        if(textured.join()!=='255,0,0,255')throw new Error(`Legacy v${version} texture packet: ${textured}`);
+        if(textured.join()!==(version>=5?'0,0,255,255':'255,0,0,255'))throw new Error(`Legacy v${version} texture/alpha packet: ${textured}`);
         results.push({version,indexed,unindexed,textured,errors:graphics.renderer.errors.slice()});
       } finally {graphics.close();canvas.remove();}
     }

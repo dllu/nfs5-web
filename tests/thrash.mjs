@@ -69,7 +69,15 @@ try {
   assert.equal(await method('_THRASH_setstate@8',10,1),1,'Older ABI accepts blend mode one');
   await method('_THRASH_setstate@8',31,107);await method('_THRASH_setstate@8',10,0);
   assert.equal(await method('_THRASH_selectdisplay@4',0),1);assert.equal(await method('_THRASH_selectdisplay@4',1),0);
-  assert.equal(await method('_THRASH_window@4',1),1);assert.equal(await method('_THRASH_window@4',3),0);
+  for(const window of [0,1,2,3])assert.equal(await method('_THRASH_window@4',window),1);
+  assert.equal(await method('_THRASH_window@4',4),0);await method('_THRASH_window@4',1);
+  assert.equal(await method('_THRASH_setstate@8',4,2),0,'Native OpenGL driver does not advertise W-buffer mode');
+  assert.equal(await method('_THRASH_getstate@4',4),0,'Rejected depth mode preserves state');
+  for(const state of [48,52,53,54]) {
+    assert.equal(await method('_THRASH_setstate@8',state,7),1);
+    assert.equal(await method('_THRASH_setstate@8',state,8),0,'Invalid stencil enum is rejected');
+    assert.equal(await method('_THRASH_getstate@4',state),7,'Invalid stencil enum preserves state');
+  }
   assert.equal(await method('_THRASH_setstate@8',37,1),0,'Optional timer callbacks are not falsely advertised');
   assert.equal(await method('_THRASH_setstate@8',451,0),1,'Native frontend extension probe enables detailed menu draws');
   assert.equal(await method('_THRASH_getstate@4',451),0xffffffff,'The native probe does not create retained state');
