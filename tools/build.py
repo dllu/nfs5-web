@@ -119,6 +119,7 @@ def main():
                '_web_shutdown', '_web_timer_stats', '_web_input_key', '_web_input_mouse', '_web_input_focus', '_web_input_cursor', '_web_input_stats',
                '_web_fs_mount', '_web_fs_store', '_web_fs_stats', '_web_fs_snapshot', '_web_fs_acknowledge', '_web_fs_remove', '_web_fs_restore_metadata', '_malloc', '_free']
     exports.extend(['_web_audio_mix', '_web_audio_stats'])
+    exports.extend(['_web_audio_start','_web_audio_tick','_web_audio_stop'])
     exports.append('_web_registry_restore')
     exports.append('_web_display_size')
     exports.extend(['_web_projection_update','_web_projection_state'])
@@ -130,6 +131,7 @@ def main():
     exports.extend(['_web_intro_config','_web_intro_skipped'])
     exports.extend(['_web_process_exited','_web_exit_code'])
     exports.extend(['_web_input_analog','_web_analog_state'])
+    exports.extend(['_web_fs_preload','_web_fs_io_stats'])
     exports.append('_web_flare_angle')
     profile_flags = ['--emit-symbol-map'] if args.profile else []
     if not args.profile:

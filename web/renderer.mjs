@@ -87,7 +87,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [uniformLayout, textureLayout] });
   const textures = new Map(), samplers = new Map(), pipelines = new Map();
   const normalized=new WeakMap();
-  const stats = { frames: 0, draws: 0, batches: 0, vertices: 0, submissions: 0, readbackBytes: 0, readbackBufferBytes: 0, pendingFrames:0, peakPendingFrames:0 };
+  const stats = { frames: 0, draws: 0, batches: 0, vertices: 0, submissions: 0, readbackBytes: 0, readbackBufferBytes: 0, pendingFrames:0, peakPendingFrames:0, pipelineBinds:0,uniformBinds:0,textureBinds:0 };
   const frames=[];
   const intervals=new Float64Array(600);let intervalCount=0,lastPresent=0;
   function resetTiming(){intervalCount=0;lastPresent=0;}
@@ -99,6 +99,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   let width = 0, height = 0, outputWidth=0, outputHeight=0, color, depth, presentGroup, readSurface;
   let vertices = new Uint8Array(512 * 1024), indices = new Uint32Array(32768), uniforms = new Float32Array(64 * 1024);
   let vertexBytes = 0, indexCount = 0, uniformBytes = 0, operations = [], imageStrip;
+  const uniformOffsets=new Map();
   let vertexBuffer, indexBuffer, uniformBuffer, uniformGroup;
   let vertexCapacity = 0, indexCapacity = 0, uniformCapacity = 0;
   const context = canvas.getContext('webgpu');
@@ -179,29 +180,34 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
       device.queue.writeBuffer(indexBuffer, 0, indices, 0, indexCount);
       device.queue.writeBuffer(uniformBuffer, 0, uniforms, 0, uniformBytes / 4);
     }
-    const encoder = target ?? device.createCommandEncoder(); let pass;
+    const encoder = target ?? device.createCommandEncoder(); let pass,bound,pipelineBound,uniformBound,textureBound,stencilBound,scissorBound;
     const begin = clear => encoder.beginRenderPass({ colorAttachments: [{ view: color.createView(), loadOp: clear?.mask&1 ? 'clear' : 'load', storeOp: 'store', clearValue: clear ? rgba(clear.color) : [0,0,0,1] }],
       depthStencilAttachment: { view:depth.createView(),depthLoadOp:clear?.mask&2?'clear':'load',depthStoreOp:'store',depthClearValue:clear?Math.max(0,Math.min(1,clear.depth)):1,
         stencilLoadOp:clear?.mask&4?'clear':'load',stencilStoreOp:'store',stencilClearValue:clear?.stencil??0 } });
     for (const operation of operations) {
-      if (operation.type === 'clear') { pass?.end(); pass = begin(operation); continue; }
+      if (operation.type === 'clear') { pass?.end(); pass = begin(operation);bound=false;pipelineBound=uniformBound=textureBound=stencilBound=scissorBound=undefined;continue; }
       pass ??= begin(null);
       const state = operation.state;
       if (state.scissor_enable && (!state.scissor_w || !state.scissor_h || state.scissor_x >= width || state.scissor_y >= height)) continue;
-      pass.setPipeline(pipeline(state)); pass.setVertexBuffer(0, vertexBuffer); pass.setIndexBuffer(indexBuffer, 'uint32');
-      pass.setStencilReference(Math.min(255,state.stencil_ref>>>0));
-      pass.setBindGroup(0, uniformGroup, [operation.uniformOffset]); pass.setBindGroup(1, textureGroup(state));
+      const p=pipeline(state),texture=textureGroup(state),stencil=Math.min(255,state.stencil_ref>>>0);
+      if(p!==pipelineBound){pass.setPipeline(p);pipelineBound=p;stats.pipelineBinds++;}
+      if(!bound){pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(indexBuffer,'uint32');bound=true;}
+      if(stencil!==stencilBound){pass.setStencilReference(stencil);stencilBound=stencil;}
+      if(operation.uniformOffset!==uniformBound){pass.setBindGroup(0,uniformGroup,[operation.uniformOffset]);uniformBound=operation.uniformOffset;stats.uniformBinds++;}
+      if(texture!==textureBound){pass.setBindGroup(1,texture);textureBound=texture;stats.textureBinds++;}
       const x=state.scissor_enable?Math.round(state.scissor_x*outputWidth/width):0;
       const y=state.scissor_enable?Math.round(state.scissor_y*outputHeight/height):0;
       const right=state.scissor_enable?Math.round(Math.min(width,state.scissor_x+state.scissor_w)*outputWidth/width):outputWidth;
       const bottom=state.scissor_enable?Math.round(Math.min(height,state.scissor_y+state.scissor_h)*outputHeight/height):outputHeight;
       if(right<=x||bottom<=y)continue;
-      pass.setScissorRect(x,y,right-x,bottom-y);
+      if(!scissorBound||x!==scissorBound[0]||y!==scissorBound[1]||right!==scissorBound[2]||bottom!==scissorBound[3]){
+        pass.setScissorRect(x,y,right-x,bottom-y);scissorBound=[x,y,right,bottom];
+      }
       pass.drawIndexed(operation.count, 1, operation.first); stats.batches++;
     }
     pass?.end();
     if (!target) { device.queue.submit([encoder.finish()]); stats.submissions++; }
-    vertexBytes = indexCount = uniformBytes = 0; operations = []; imageStrip=null;
+    vertexBytes = indexCount = uniformBytes = 0; operations = []; imageStrip=null;uniformOffsets.clear();
   }
   function resize(w, h) {
     check(); if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > device.limits.maxTextureDimension2D || h > device.limits.maxTextureDimension2D) throw new Error(`Unsupported renderer size ${w}x${h}`);
@@ -304,10 +310,12 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     const last = operations.at(-1);
     if (last?.type === 'draw' && last.key === key) last.count += n;
     else {
-      uniforms = grow(uniforms, (uniformBytes + 256) / 4);
-      if(state.uniformWidth!==width||state.uniformHeight!==height){state.uniformValues=effectUniforms(width,height,state,true);state.uniformWidth=width;state.uniformHeight=height;}
-      uniforms.set(state.uniformValues, uniformBytes / 4);
-      operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: uniformBytes }); uniformBytes += 256;
+      if(state.uniformWidth!==width||state.uniformHeight!==height){state.uniformValues=effectUniforms(width,height,state,true);state.uniformKey=state.uniformValues.join(':');state.uniformWidth=width;state.uniformHeight=height;}
+      let offset=uniformOffsets.get(state.uniformKey);
+      if(offset===undefined){
+        offset=uniformBytes;uniforms=grow(uniforms,(uniformBytes+256)/4);uniforms.set(state.uniformValues,uniformBytes/4);uniformBytes+=256;uniformOffsets.set(state.uniformKey,offset);
+      }
+      operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: offset });
     }
     vertexBytes += data.byteLength; stats.draws++; stats.vertices += count;
   }
@@ -338,6 +346,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     done.then(()=>{stats.pendingFrames--;if(frames[0]===done)frames.shift();},()=>{stats.pendingFrames--;if(frames[0]===done)frames.shift();});
   }
   async function frameBudget() { if(frames.length>=2)await frames[0];check(); }
+  function flushHint(){if(vertexBytes>=256*1024)flush();}
   async function readPixels({x=0,y=0,output=false,width:w=output?outputWidth:width,height:h=output?outputHeight:height}={}) {
     check();
     if(![x,y,w,h].every(Number.isInteger)||x<0||y<0||w<1||h<1||x+w>(output?outputWidth:width)||y+h>(output?outputHeight:height))throw new Error('Invalid readback rectangle');
@@ -364,7 +373,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   }
   textureCreate(0,1,1,Uint8Array.of(255,255,255,255)); resize(canvas.width || 640, canvas.height || 480);
   return {
-    resize, clear, draw, present, frameBudget, flush, textureCreate, textureUpdate, textureDestroy, readPixels, reset, stats, errors, timing, resetTiming,
+    resize, clear, draw, present, frameBudget, flush, flushHint, textureCreate, textureUpdate, textureDestroy, readPixels, reset, stats, errors, timing, resetTiming,
     info: { vendor:adapter.info?.vendor,architecture:adapter.info?.architecture,device:adapter.info?.device,description:adapter.info?.description,software:Boolean(adapter.info?.isFallbackAdapter??adapter.isFallbackAdapter),maxTextureSize:device.limits.maxTextureDimension2D,depthFormat },
     get width() { return width; }, get height() { return height; },
     get outputWidth(){return outputWidth;},get outputHeight(){return outputHeight;},

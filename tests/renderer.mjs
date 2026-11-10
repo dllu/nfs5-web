@@ -81,6 +81,13 @@ try {
     expect(pixel(await renderer.readPixels(),16,16),[128,0,127,191],'alpha blend',1);
     const texels = Uint8Array.of(255,0,0,255,0,255,0,255,0,0,255,255,255,255,255,255);
     renderer.textureCreate(1,2,2,texels); renderer.clear(0xff000000); const textured = {texture:1,filter_linear:0,address_wrap:0};
+    renderer.textureCreate(971,1,1,Uint8Array.of(255,0,0,255));renderer.textureCreate(972,1,1,Uint8Array.of(0,0,255,255));
+    const binds={...renderer.stats};
+    renderer.draw(quad(0,0,16,16),mesh,{texture:971});renderer.draw(quad(16,0,16,16),mesh,{texture:972});renderer.draw(quad(32,0,16,16),mesh,{texture:971});
+    let reusePixels=await renderer.readPixels();
+    expect(pixel(reusePixels,8,8),[255,0,0,255],'reused pipeline/uniform red');expect(pixel(reusePixels,24,8),[0,0,255,255],'reused pipeline/uniform blue');
+    expect([renderer.stats.pipelineBinds-binds.pipelineBinds,renderer.stats.uniformBinds-binds.uniformBinds,renderer.stats.textureBinds-binds.textureBinds],[1,1,3],'three texture batches reuse pipeline and identical uniforms');
+    renderer.textureDestroy(971);renderer.textureDestroy(972);renderer.clear(0xff000000);
     renderer.draw(quad(0,0,64,64),mesh,textured); pixels = await renderer.readPixels();
     expect(pixel(pixels,16,16),[255,0,0,255],'texture upper left'); expect(pixel(pixels,48,16),[0,255,0,255],'texture upper right');
     expect(pixel(pixels,16,48),[0,0,255,255],'texture lower left'); expect(pixel(pixels,48,48),[255,255,255,255],'texture lower right');
@@ -818,6 +825,15 @@ try {
     } finally{r.close();canvas.remove();}
   });
   assert.deepEqual(result.frontend.errors,[]);
+  result.touchBudget=await page.evaluate(async()=>{
+    const {loadRuntime}=await import('./runtime.mjs'),canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;document.body.append(canvas);
+    const r=await loadRuntime({canvas,persist:false,display:{width:2796,height:1290},touchPixelLimit:1440*810});
+    try{
+      if(r.display.width!==1590||r.display.height!==733||!r.reducedResolution)throw new Error('Touch race pixel budget was not applied');
+      if(r.graphics.renderer.outputHeight!==1290)throw new Error('Touch race budget reduced frontend density');
+      return {display:r.display,frontend:[r.graphics.renderer.outputWidth,r.graphics.renderer.outputHeight]};
+    }finally{r.dispose();canvas.remove();}
+  });
   result.visibilityReadback=await page.evaluate(async()=>{
     const {attachGraphics}=await import('./graphics.mjs');
     const memory=new SharedArrayBuffer(65536),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);

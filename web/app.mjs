@@ -65,7 +65,7 @@ async function start(milliseconds) {
       const offscreen=canvas.transferControlToOffscreen();
       worker.postMessage({ type: 'start', milliseconds, audio: audio.configuration,
         display: { width: Math.round(innerWidth * devicePixelRatio), height: Math.round(innerHeight * devicePixelRatio) },
-        canvas:offscreen },[offscreen]);
+        canvas:offscreen },[offscreen,audio.configuration.port]);
       worker.postMessage({type:'visibility',visible:!document.hidden});
     });
     window.nfs5Result = result;

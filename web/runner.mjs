@@ -6,7 +6,9 @@ self.onmessage = async ({ data }) => {
   if(data.type==='viewport'){runtime?.graphics?.setFrontendSize(data.display);return;}
   if(data.type==='diagnostics'){
     const r=runtime?.graphics?.renderer;
-    self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:runtime?.module.HEAPU8.byteLength,stats:r?.stats,transport:runtime?.graphics?.stats,submissionIntervalsMs:r?.timing()});return;
+    const m=runtime?.module,values=m&&Array.from(new Float64Array(m.HEAPU8.buffer,m._web_fs_io_stats(),6));
+    const files=values&&Object.fromEntries(['rangeRequests','rangeBytes','rangeWaitMs','maxRangeWaitMs','preloadedReads','preloadedBytes'].map((key,i)=>[key,values[i]]));
+    self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:m?.HEAPU8.byteLength,stats:r?.stats,transport:runtime?.graphics?.stats,submissionIntervalsMs:r?.timing(),loading:runtime?.loading,files,audio:runtime?.audioStats(),capabilities:{waitAsync:typeof Atomics.waitAsync==='function',schedulerYield:typeof scheduler!=='undefined'&&!!scheduler.yield}});return;
   }
   if (data.type === 'input') { runtime?.input(data); return; }
   if(data.type==='checkpoint'){await runtime?.checkpoint().catch(error=>self.postMessage({type:'save-error',error:String(error)}));return;}
@@ -14,7 +16,7 @@ self.onmessage = async ({ data }) => {
   if (data.type !== 'start' || runtime) return;
   try {
     runtime = await loadRuntime({ log: text => self.postMessage({ type: 'log', text }), audio: data.audio, display: data.display,
-      intro:data.intro,softwarePixelLimit:data.softwarePixelLimit,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
+      intro:data.intro,softwarePixelLimit:data.softwarePixelLimit,touchPixelLimit:data.touchPixelLimit,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
     runtime.graphics?.setVisible(visible);
     self.postMessage({ type: 'loaded', manifest: runtime.manifest, graphics:runtime.graphics?.renderer.info,
       display:runtime.display,reducedResolution:runtime.reducedResolution });

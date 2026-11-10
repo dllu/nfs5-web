@@ -15,13 +15,13 @@ try {
  page=await browser.newPage();page.on('pageerror',e=>errors.push(String(e)));
  for(const [width,height]of [[1280,960],[3840,2160],[6144,3456]]) {
   await page.goto(process.env.NFS5_TEST_URL??'http://127.0.0.1:8000');
-  await page.evaluate(({width,height})=>{
+  await page.evaluate(({width,height,assetsUrl})=>{
    document.body.innerHTML='<canvas id="game" width="640" height="480"></canvas>';document.querySelector('#viewport-style').media='all';
    const canvas=document.querySelector('#game'),worker=new Worker('./race-check-worker.mjs',{type:'module'});
    window.raceCheck={worker,events:[]};worker.onmessage=({data})=>{raceCheck.events.push(data);if(data.type==='screen')canvas.style.setProperty('--game-aspect',data.width/data.height);};
-   const offscreen=canvas.transferControlToOffscreen();worker.postMessage({type:'start',canvas:offscreen,display:{width,height},track:'castle',opponents:4,
+   const offscreen=canvas.transferControlToOffscreen();worker.postMessage({type:'start',canvas:offscreen,display:{width,height},assetsUrl,track:'castle',opponents:4,
     car:{filename:'gt1',spec:'GT1race',ai:'Gt1',sound:'GT1race'}},[offscreen]);
-  },{width,height});
+  },{width,height,assetsUrl:process.env.NFS5_TEST_ASSETS_URL});
   await page.waitForFunction(()=>{
    const failure=raceCheck.events.find(e=>e.type==='error'||e.type==='result');if(failure)throw new Error(JSON.stringify(failure));
    return raceCheck.events.some(e=>e.type==='ready');

@@ -34,6 +34,7 @@ static int cancel_workers, fatal_pending;
 static uint32_t process_exited, process_exit_code;
 static _Atomic uint32_t stop_requested;
 static uint32_t error_import[10], error_thread;
+static void audio_produce(void);
 static void stop_guest_workers(void);
 static uint32_t create_guest_thread(uint32_t entry, uint32_t parameter, uint32_t flags, uint32_t id_output, uint32_t stack_size);
 static int threads_import(const char *name);
@@ -97,6 +98,7 @@ static void machine_acquire(void) {
 }
 
 static void machine_release(void) {
+    audio_produce();
     cpu_save(); machine_held = 0;
     machine_unlock();
 }

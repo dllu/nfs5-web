@@ -116,16 +116,37 @@ def main():
         target = destination / entry['url']
         if not target.exists():
             shutil.copyfile(source / entry['url'], target)
+    wasm=(source/'engine.wasm').read_bytes()
+    wasm_name=hashlib.sha256(wasm).hexdigest()+'.wasm'
+    wasm_path=destination/'assets'/wasm_name
+    if not wasm_path.exists():
+        wasm_path.write_bytes(wasm)
+        wasm_path.with_suffix('.wasm.gz').write_bytes(gzip.compress(wasm,compresslevel=9,mtime=0))
     referenced = {Path(e['url']).name for e in index['entries'] if e.get('url', '').startswith('./assets/')}
+    referenced.update([wasm_name,wasm_name+'.gz'])
     for path in (destination / 'assets').iterdir():
         if path.name not in referenced:
             path.unlink()
+    # Small files otherwise cost hundreds of serial HTTP round trips. Keep a
+    # bounded immutable pack separate from the writable/profile overlay.
+    pack=bytearray();packed={}
+    for entry in index['entries']:
+        if entry.get('url') and entry['size']<=65536:
+            if entry['url'] not in packed:
+                packed[entry['url']]=len(pack)
+                pack.extend((destination/entry['url']).read_bytes())
+                pack.extend(b'\0'*(-len(pack)%4))
+            entry['preloadOffset']=packed[entry['url']]
+    digest=hashlib.sha256(pack).hexdigest()
+    (destination/'assets'/digest).write_bytes(pack)
+    (destination/'assets'/(digest+'.gz')).write_bytes(gzip.compress(pack,compresslevel=9,mtime=0))
+    index['preload']={'url':'./assets/'+digest,'size':len(pack),'sha256':digest}
     (destination / 'assets.json').write_text(json.dumps(index, separators=(',', ':')) + '\n')
     static = ['engine.js', 'engine.wasm', 'manifest.json', 'game.exe']
     for name in static:
         shutil.copyfile(source / name, destination / name)
     web = ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'config.mjs',
-           'input.mjs', 'controls.mjs', 'memory.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']
+           'input.mjs', 'controls.mjs', 'memory.mjs', 'assets.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']
     for name in web:
         shutil.copyfile(ROOT / 'web' / name, destination / name)
     shutil.copyfile(ROOT / 'web/play.html', destination / 'index.html')
@@ -141,7 +162,7 @@ def main():
     references = re.compile(r'''(['"])((?:\./)?(?:''' + names + r'''))\1''')
     for name in ['index.html', 'engine.js', *[n for n in web if n.endswith('.mjs')]]:
         path = destination / name
-        path.write_text(references.sub(lambda m: m[1] + m[2] + '?v=' + revision + m[1], path.read_text()))
+        path.write_text(references.sub(lambda m: m[1] + ('./assets/'+wasm_name if m[2].endswith('engine.wasm') else m[2]+'?v='+revision) + m[1], path.read_text()))
     for name in ('engine.wasm', 'engine.js', 'assets.json'):
         compressed = destination / (name + '.gz')
         compressed.write_bytes(gzip.compress((destination / name).read_bytes(), compresslevel=9, mtime=0))

@@ -1,9 +1,10 @@
 class GameAudio extends AudioWorkletProcessor {
   constructor({ processorOptions: { buffer } }) {
     super();
-    this.state = new Int32Array(buffer, 0, 8);
-    this.samples = new Float32Array(buffer, 32);
-    this.capacity = this.samples.length / 2;
+    const connect=({buffer,offset=0,capacity=4096})=>{
+      this.state=new Int32Array(buffer,offset,8);this.samples=new Float32Array(buffer,offset+32,capacity*2);this.capacity=capacity;
+    };
+    connect({buffer});this.port.onmessage=({data})=>connect(data);
   }
   process(inputs, outputs) {
     const output = outputs[0], frames = output[0].length;

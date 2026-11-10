@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {webcrypto} from 'node:crypto';
+import {loadRuntime} from '../dist/runtime.mjs';
+import {readAssets,preloadAssets} from '../web/assets.mjs';
+globalThis.crypto??=webcrypto;
+const bytes=Uint8Array.from({length:32},(_,i)=>i*7),digest=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
+const index={preload:{url:'./pack',size:bytes.length,sha256:digest},entries:[{path:'Preload.bin',size:bytes.length,preloadOffset:0}]};
+const source=await readAssets(async path=>path==='./assets.json'?Response.json(index):new Response(bytes));
+const runtime=await loadRuntime({persist:false,read:async path=>new Response(await readFile(new URL('../dist/'+path,import.meta.url)))}),m=runtime.module;
+let cached;
+try{
+  const id=runtime.mount('C:\\nfs5\\Preload.bin',{url:'file:///deliberately-not-present',size:bytes.length});
+  const stats=()=>Array.from(new Float64Array(m.HEAPU8.buffer,m._web_fs_io_stats(),6));
+  const snapshotCount=()=>new Uint32Array(m.HEAPU8.buffer,m._web_fs_snapshot(),3)[2];
+  const dirty=snapshotCount(),before=stats();
+  cached=await preloadAssets(m,source,new Map([['Preload.bin',id]]));
+  assert.equal(cached.files,1);assert.equal(stats()[5],32);assert.equal(snapshotCount(),dirty,'Preloading does not create save records');
+  const data=runtime.base+0x800000;m.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\Preload.bin\0'),data);
+  async function call(name,args){const result=await runtime.invokeAsync(runtime.manifest.imports.find(i=>i.name===name).slot,args);assert.equal(result.status,0,result.error);return result.registers[0];}
+  const file=await call('CreateFileA',[0x800000,0xc0000000,3,0,3,128,0]);assert.notEqual(file,0xffffffff);
+  assert.equal(await call('ReadFile',[file,0x800100,32,0x800200,0]),1);
+  assert.deepEqual(m.HEAPU8.slice(data+256,data+288),bytes);assert.equal(stats()[0],before[0],'Resident asset reads make no file/network request');
+  assert(stats()[4]>before[4]);
+  await call('SetFilePointer',[file,0,0,0]);m.HEAPU8.set([42,43,44],data+256);
+  assert.equal(await call('WriteFile',[file,0x800100,3,0x800200,0]),1);
+  assert.equal(stats()[5],0,'Writing detaches the immutable backing');
+  await call('SetFilePointer',[file,0,0,0]);await call('ReadFile',[file,0x800100,32,0x800200,0]);
+  assert.deepEqual(m.HEAPU8.slice(data+256,data+288),Uint8Array.from([42,43,44,...bytes.slice(3)]));
+  assert.deepEqual(await source.pack,bytes,'Writes preserve the startup pack');assert(snapshotCount()>dirty);
+  await call('CloseHandle',[file]);cached.release();cached=null;
+  assert.equal(m._web_fs_preload(id,0,0),1);
+  assert.equal(m._web_fs_preload(0,0,0),0);
+  await assert.rejects(preloadAssets(m,{index:{entries:[{...index.entries[0],preloadOffset:8}]},pack:Promise.resolve(bytes)},new Map()),/Invalid startup pack entry/);
+  const warnings=[];
+  const corrupt=await readAssets(async path=>path==='./assets.json'?Response.json(index):new Response(Uint8Array.from(bytes,v=>v^1)),message=>warnings.push(message));
+  assert.equal(await corrupt.pack,null);assert(warnings.some(s=>s.includes('hash')));
+  const absent=await readAssets(async path=>path==='./assets.json'?Response.json(index):new Response('',{status:404}),message=>warnings.push(message));
+  assert.equal(await absent.pack,null);
+  console.log('Startup pack hash/bounds, native reads without HTTP, immutable backing, writable overlay and fallback passed');
+}finally{cached?.release();runtime.dispose();}

@@ -17,6 +17,7 @@ proportional steering and pedals into the original controller channels, with
 a small dead zone and neutral release. Keyboard and pedal buttons can be used
 alongside it. **Controls** toggles
 the driving pad; **Keyboard** opens a name-entry field for creating profiles.
+Holding driving controls suppresses text selection and the iOS touch callout.
 
 Profiles, graphics preferences and other file changes stay in IndexedDB in
 this browser, per site and executable. **Exit through the game's menus to
@@ -28,10 +29,9 @@ Deleting a supplied profile is persistent too. Switching tabs releases held
 controls but keeps loading and simulation running, paced at 30 Hz in the
 background. Browser/OS suspension can still stop background tabs.
 
-A browser with WebGPU and shared-memory Wasm is required. Chrome on the NVIDIA
-GB10 is tested. Firefox with WebGPU enabled also runs; the isolated Linux
-Firefox check selects the llvmpipe software adapter. Other systems and Firefox
-hardware adapters need verification. New profiles and Showroom use maximum
+A browser with WebGPU and shared-memory Wasm is required. Chrome and Firefox
+159 with WebGPU enabled are tested on the NVIDIA GB10. Performance on other
+systems still needs verification. New profiles and Showroom use maximum
 exposed quality and a 32-bit viewport-sized race mode. Menus and loading artwork
 keep their original 4:3 aspect, centered with black bars when needed. On hardware
 adapters, frontend/garage geometry renders at the fitted monitor resolution;
@@ -45,13 +45,16 @@ Adapter selection requests high performance and tries other browser preferences
 before accepting a software adapter. Websites cannot override blocked drivers or
 force a particular installed GPU. **Info → Copy diagnostics** includes the actual
 adapter, browser, logical/output sizes, shared Wasm allocation and GPU queue stats.
-It also reports state-cache hits/misses and the last 600 submission intervals
+It also reports startup/preload timing, file requests, audio refill activity,
+state-cache hits/misses and the last 600 submission intervals
 (median, p95, p99, maximum and counts over 33 ms), reset on size/visibility changes.
 When WebGPU reports a software adapter, the public page reduces the default
 race mode to about 720p worth of pixels, preserving aspect and the minimum
 640×480 mode, and briefly explains that hardware acceleration is preferable.
-Explicit saved resolution choices remain available. Hardware adapters retain
-the full viewport resolution. At most two presented frames remain queued on the
+Touch devices default to about 1.2 million race pixels, preserving aspect;
+frontend/garage geometry retains the fitted monitor resolution. Explicit saved
+resolution choices remain available. Desktop hardware adapters default to the
+full viewport resolution. At most two presented frames remain queued on the
 GPU, bounding accumulation on slow renderers. Frame submissions are not a
 measurement of displayed frame rate.
 
@@ -70,8 +73,10 @@ blending/alpha tests, depth/stencil, fog, gamma, headlights, weather and
 framebuffer transfers. The frontend's nearly touching picture strips share
 edges to prevent subpixel black seams. Graphics queue packets are consumed
 without copying contiguous payloads. A bounded cache reuses immutable rendering
-states, uniforms and pipeline references, reducing allocations during play. Small
-framebuffer reads transfer only their requested rectangle, including the
+states, uniforms and pipeline references, reducing allocations during play.
+Identical uniform blocks and consecutive bindings are reused. Small flush hints
+are combined; larger geometry batches submit early to overlap GPU and game work.
+Small framebuffer reads transfer only their requested rectangle, including the
 sun-visibility sample, instead of a complete 4K/6K frame. Ongoing sun occlusion
 uses the latest completed GPU sample, usually one frame old, with one query in
 flight per sun. Reference captures and ordinary framebuffer reads remain exact.
@@ -81,8 +86,17 @@ uses the original 640×480 angular scale rather than increasing with resolution.
 intermittent menu input retries and a previously observed menu-return fault
 still need investigation. Warm local race samples show occasional 30–60 ms
 intervals even without asset requests. Sun sampling reduces synchronization
-overhead, but occasional long frames remain. No Wine reference runs are needed
-for normal work.
+overhead, but occasional long frames remain. Audio refills reuse the thread
+already holding the VM lock; host refill ticks skip a busy VM instead of blocking
+the graphics worker. No Wine reference runs are needed for normal work.
+
+Public startup batches small assets into an approximately 8 MiB pack (2.5 MiB
+compressed), downloaded alongside Wasm compilation. Larger files use byte ranges
+with an eight-page, 256 KiB/page cache. The pack adds about 8 MiB of Wasm memory;
+writable browser saves override it. A controlled 50 ms network-latency check
+reached the profile chooser in 13.7 seconds versus 27.2 seconds, with 34 versus
+291 asset requests. First-time download and compilation still depend on the
+connection and device.
 
 The engine uses a 256 MiB guest arena in initially 384 MiB shared Wasm memory,
 an eight-worker pool and an approximately 84 MiB Wasm module (8.8 MiB gzip).
@@ -124,13 +138,15 @@ npm run test:usability
 Tests cover original-code comparisons, services, threads, input, audio,
 persistence, lifecycle and GPU pixels/transport, including 4K output and
 picture-strip seams and GPU readbacks after another worker grows memory.
+Asset tests cover verified startup packs, writable overrides and range fallback;
+audio checks verify that a busy VM cannot block refill ticks.
 Sun-query checks cover delayed completion, sample reuse, one outstanding query,
 resize/reset invalidation, exact ordinary reads and asynchronous failure handling.
 Public checks cover wide/portrait menu fitting and
 clicks with black-bar offsets; loading checks verify 4:3 artwork and the
 full-width race canvas at wide, portrait and 4K sizes. Usability checks cover
 touch input, proportional native steering/pedals in a running race, short Escape
-presses, mobile typing and real hidden-tab
+presses, held pedals without text selection, mobile typing and real hidden-tab
 loading/racing; the latter uses raw Chrome CDP because Playwright forces tab
 visibility. Python Pillow is required for screenshot checks. Reports and
 screenshots go to ignored `build/` files.
@@ -153,9 +169,10 @@ to run it against the deployment instead.
 
 The public packager includes only referenced assets, strips installation
 players/replays/records, and supplies Showroom plus the original blank-profile
-template. Code URLs carry a content-derived release version, including styles,
-Wasm and worker dependencies, to prevent stale CDN/browser caches from mixing
-releases. It downloads a hash-pinned completed-save archive (requires
+template. JavaScript, styles and worker dependencies carry a content-derived
+release version to prevent mixed releases. Wasm and game assets use immutable
+content-hash URLs, allowing browser download/compilation caches to survive UI-only
+releases. The packager downloads a hash-pinned completed-save archive (requires
 libarchive); attribution is in [third-party notices](THIRD_PARTY_NOTICES.md).
 User profiles and deletion records overlay these defaults on subsequent runs.
 Original binaries, saves and generated game code are not committed to Git.

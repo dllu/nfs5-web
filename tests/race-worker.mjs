@@ -4,7 +4,15 @@ let runtime,run,ready=false;
 self.onmessage=async({data})=>{
  try {
   if(data.type==='start'){
-   runtime=await loadRuntime({canvas:data.canvas,persist:false,intro:false,display:data.display,onResize:(width,height)=>postMessage({type:'screen',width,height})});
+   // Optionally exercise the public pack while keeping this fixture in dist/.
+   const read=data.assetsUrl?async name=>{
+    if(name!=='./assets.json')return fetch(name);
+    const index=await(await fetch(data.assetsUrl)).json();
+    for(const entry of index.entries)entry.url=new URL(entry.url,data.assetsUrl).href;
+    if(index.preload)index.preload.url=new URL(index.preload.url,data.assetsUrl).href;
+    return new Response(JSON.stringify(index));
+   }:undefined;
+   runtime=await loadRuntime({canvas:data.canvas,persist:false,intro:false,display:data.display,read,onResize:(width,height)=>postMessage({type:'screen',width,height})});
    const opponents=data.opponents??0,car=data.car;
    let args=`debugmode=0 fe=0 track_name=${data.track??'coastal'} linear_track=1 numcars=${opponents+1} numplayerracecars=1 numopponentracecars=${opponents} car[0].class=human width=${data.display.width} height=${data.display.height} depth=32 texturedetail=4 cardetail=4`;
    if(car)for(let i=0;i<=opponents;i++)args+=` car[${i}].filename=${car.filename} car[${i}].specname=${car.spec} car[${i}].aispecname=${car.ai} car[${i}].soundname=${car.sound}`;

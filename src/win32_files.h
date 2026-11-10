@@ -4,12 +4,13 @@
 #define NFS5_WIN32_FILES_H
 #define FS_NODES 4096
 #define FS_WRITE_LIMIT (64u * 1024u * 1024u)
-#define FS_CHUNK 65536u
+#define FS_CHUNK 262144u
 typedef struct {
     char path[PATH_CAPACITY], url[PATH_CAPACITY];
     uint32_t attributes, size, capacity, live, dirty;
     uint64_t modified;
     uint8_t *data;
+    const uint8_t *asset_data; /* Borrowed immutable startup pack, not a save. */
 } fs_node;
 typedef struct { uint32_t node, references, access, share, flags; uint64_t position; } fs_object;
 typedef struct { uint32_t object, generation; } fs_handle;
@@ -21,6 +22,8 @@ static fs_handle fs_handles[512];
 static fs_cache_entry fs_cache[8];
 static fs_search fs_searches[64];
 static uint32_t fs_count, fs_cache_stamp, fs_written, fs_reads, fs_fetches, fs_revision;
+static uint64_t fs_fetch_bytes,fs_preload_reads,fs_preload_bytes;
+static double fs_fetch_ms,fs_fetch_max_ms;
 static uint32_t *fs_snapshot_buffer;
 
 /* Runs on the native worker performing ReadFile. HTTP Range keeps large VIV
@@ -74,6 +77,7 @@ static fs_node *fs_new(const char *path, uint32_t attributes) {
     if (!node && fs_count < FS_NODES) node = &fs_nodes[fs_count++];
     if (!node) { last_error = 8; return NULL; }
     fs_uncache(node);
+    if(node->asset_data)fs_preload_bytes-=node->size;
     memset(node, 0, sizeof *node); strcpy(node->path, path); node->attributes = attributes; node->live = 1;
     fs_touch(node); return node;
 }
@@ -98,6 +102,7 @@ static void fs_reset(void) {
     memset(fs_handles, 0, sizeof fs_handles); memset(fs_cache, 0, sizeof fs_cache);
     memset(fs_searches, 0, sizeof fs_searches);
     fs_count = fs_written = fs_reads = fs_fetches = fs_cache_stamp = fs_revision = 0;
+    fs_fetch_bytes=fs_preload_reads=fs_preload_bytes=0;fs_fetch_ms=fs_fetch_max_ms=0;
     free(fs_snapshot_buffer); fs_snapshot_buffer = NULL;
     fs_new("C:\\", 16); fs_new("D:\\", 16); fs_new("C:\\nfs5", 16);
     for (unsigned i = 0; i < fs_count; i++) fs_nodes[i].dirty = 0;
@@ -106,6 +111,7 @@ static int fs_read_node(fs_node *node, uint32_t offset, uint32_t count, uint8_t 
     if (offset > node->size || count > node->size - offset) { last_error = 87; return 0; }
     fs_reads++;
     if (node->data) { memcpy(destination, node->data + offset, count); return 1; }
+    if (node->asset_data) { memcpy(destination,node->asset_data+offset,count);fs_preload_reads++;return 1; }
     if (!count) return 1;
     if (!node->url[0]) { last_error = 30; return 0; }
     while (count) {
@@ -118,7 +124,10 @@ static int fs_read_node(fs_node *node, uint32_t offset, uint32_t count, uint8_t 
             cached->node = 0; cached->size = node->size - start;
             if (cached->size > FS_CHUNK) cached->size = FS_CHUNK;
             fs_fetches++;
-            if (fs_asset_read(node->url, start, cached->size, cached->bytes) != (int)cached->size) { last_error = 30; return 0; }
+            double began=emscripten_get_now();int got=fs_asset_read(node->url,start,cached->size,cached->bytes);
+            double elapsed=emscripten_get_now()-began;fs_fetch_ms+=elapsed;if(elapsed>fs_fetch_max_ms)fs_fetch_max_ms=elapsed;
+            if(got>0)fs_fetch_bytes+=got;
+            if (got != (int)cached->size) { last_error = 30; return 0; }
             cached->node = id; cached->offset = start;
         }
         cached->stamp = ++fs_cache_stamp;
@@ -138,6 +147,7 @@ static int fs_resize(fs_node *node, uint32_t size, int preserve) {
         free(node->data); fs_written -= node->capacity; node->data = data; node->capacity = wanted; fs_written += wanted;
     }
     if (size > node->size) memset(node->data + node->size, 0, size - node->size);
+    if(node->asset_data){fs_preload_bytes-=node->size;node->asset_data=NULL;}
     node->size = size; node->url[0] = 0; fs_touch(node); return 1;
 }
 static fs_object *fs_get(uint32_t handle) {

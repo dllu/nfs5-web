@@ -65,7 +65,8 @@ try {
   };
   const offscreen=canvas.transferControlToOffscreen();
   worker.postMessage({type:'start',milliseconds:0,intro:false,softwarePixelLimit:1280*720,audio:audio.configuration,
-    display:displaySize(),canvas:offscreen},[offscreen]);
+    touchPixelLimit:matchMedia('(pointer: coarse)').matches?1440*810:0,
+    display:displaySize(),canvas:offscreen},[offscreen,audio.configuration.port]);
   window.addEventListener('beforeunload',warnBeforeLeaving);
   worker.postMessage({type:'visibility',visible:!document.hidden});
   let resizeTimer;

@@ -4,15 +4,18 @@ import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
 import {openingMovies,verokImage,softwareViewport} from './config.mjs';
 import {trackHeap} from './memory.mjs';
+import {readAssets,preloadAssets} from './assets.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, softwarePixelLimit=0 } = {}) {
-  const [module, manifest, response] = await Promise.all([
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
+  const started=performance.now();
+  const [module, manifest, response, assets] = await Promise.all([
     createEngine({ print: log, printErr: log }).then(trackHeap),
     read('./manifest.json').then(checked).then(r => r.json()),
     read('./game.exe').then(checked),
+    readAssets(read,log),
   ]);
   const executable = new Uint8Array(await response.arrayBuffer());
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', executable));
@@ -59,19 +62,18 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       return id;
     } finally { module._free(name); module._free(source); }
   }
-  let assets,startupConfig;
-  try { assets = await read('./assets.json'); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if (assets?.ok) {
-    const index = await assets.json();
+  let startupConfig,assetMemory={bytes:0,files:0,release(){}};
+  if (assets) {
+    const {index}=assets,ids=new Map();
     if (index.executable !== sha256) throw new Error('Asset index does not match the translated executable');
-    for (const item of index.entries) mount('C:\\nfs5\\' + item.path.replaceAll('/', '\\'), {
+    for (const item of index.entries) ids.set(item.path,mount('C:\\nfs5\\' + item.path.replaceAll('/', '\\'), {
       ...item, url: item.url ? new URL(item.url, import.meta.url).href : '',
-    });
+    }));
+    try{assetMemory=await preloadAssets(module,assets,ids);}catch(error){log(`Startup preload unavailable: ${error.message}`);}
     log(`Mounted ${index.entries.length.toLocaleString()} game files and directories`);
     const ini=index.entries.find(item=>item.path.toLowerCase()==='nfs5.ini');
     if(ini?.url){const response=await read(ini.url);if(response.ok)startupConfig=new Uint8Array(await response.arrayBuffer());}
-  } else if (assets && assets.status !== 404) throw new Error(`Unable to load assets: HTTP ${assets.status}`);
+  }
   function changes() {
     const pointer = module._web_fs_snapshot();
     if (!pointer) throw new Error('Unable to snapshot local file changes');
@@ -135,8 +137,9 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace,frontendSize:display?{...display}:null}):null; }
   catch(error) {clearInterval(storageTimer);detachAudio?.();storage?.close();module.PThread.terminateAllThreads();throw error;}
   const originalDisplay=display;
-  if(graphics?.renderer.info.software&&softwarePixelLimit&&display) {
-    display=softwareViewport(display,softwarePixelLimit);
+  const pixelLimit=graphics?.renderer.info.software?(softwarePixelLimit||touchPixelLimit):touchPixelLimit;
+  if(graphics&&pixelLimit&&display) {
+    display=softwareViewport(display,pixelLimit);
     module._web_display_size(display.width,display.height);
   }
   const reducedResolution=!!(display&&originalDisplay&&(display.width!==originalDisplay.width||display.height!==originalDisplay.height));
@@ -171,6 +174,8 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     await checkpoint();return result;
   }
   return { module, manifest, base, memorySize, graphics, display, reducedResolution,
+    loading:{runtimeMs:performance.now()-started,preloadBytes:assetMemory.bytes,preloadedFiles:assetMemory.files},
+    audioStats:()=>detachAudio?.stats?.(),
     mount,
     checkpoint,
     input(event) {
@@ -195,7 +200,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       if(disposed)return;
       disposed=true;
       clearInterval(storageTimer);graphics?.close();detachAudio?.();storage?.close();
-      module._web_shutdown();module.PThread.terminateAllThreads();
+      module._web_shutdown();assetMemory.release();module.PThread.terminateAllThreads();
     },
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),
     call: (entry, ...args) => snapshot(module._web_call(entry, ...Array.from({ length: 4 }, (_, i) => args[i] ?? 0))),

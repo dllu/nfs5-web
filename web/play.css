@@ -1,19 +1,19 @@
 :root { color-scheme: dark; background: #000; color: #eee; font-family: system-ui, sans-serif; }
 body { margin: 0; overflow: hidden; }
-#game { outline: none; }
+#game { outline: none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 #loading { position: fixed; inset: 0; display: grid; align-content: center; justify-items: center; padding: 24px; background: #090b0d; text-align: center; }
 #loading[hidden], [hidden] { display: none !important; }
 h1 { margin: 0; font-size: clamp(28px, 5vw, 56px); font-weight: 600; letter-spacing: -.04em; }
 #status { color: #fff; }
 .detail { color: #aab0b6; font-size: 14px; line-height: 1.8; }
-button { background: #b92222; color: #fff; border: 0; border-radius: 4px; padding: 12px 20px; font: inherit; cursor: pointer; }
+button { background: #b92222; color: #fff; border: 0; border-radius: 4px; padding: 12px 20px; font: inherit; cursor: pointer; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 details { max-width: 700px; margin: 24px; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; font-size: 12px; }
 #notices { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); display: grid; justify-items: center; gap: 6px; pointer-events: none; }
 #notices p { margin: 0; padding: 8px 12px; background: #000b; border-radius: 4px; font-size: 13px; text-align: center; }
 #game-tools { position:fixed; right:max(8px, env(safe-area-inset-right)); top:max(8px, env(safe-area-inset-top)); display:flex; gap:5px; }
 #controls button { padding:8px 10px; background:#242424d9; border:1px solid #7778; font-size:12px; touch-action:none; }
-#touch-pad { position:fixed; inset:0; pointer-events:none; user-select:none; }
+#touch-pad { position:fixed; inset:0; pointer-events:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 #joystick { position:absolute; left:max(22px,env(safe-area-inset-left)); bottom:max(24px,env(safe-area-inset-bottom)); width:clamp(100px,23vw,160px); aspect-ratio:1; border:2px solid #fffa; border-radius:50%; background:#1116; pointer-events:auto; touch-action:none; display:grid; place-items:center; }
 #joystick span { width:40%; aspect-ratio:1; border-radius:50%; background:#ddd9; pointer-events:none; }
 #pedals { position:absolute; right:max(16px,env(safe-area-inset-right)); bottom:max(24px,env(safe-area-inset-bottom)); display:grid; grid-template-columns:repeat(2,1fr); gap:10px; pointer-events:auto; }

@@ -9,7 +9,7 @@ process.env.TMPDIR = resolve('.cache/tmp');
 process.env.XDG_CACHE_HOME = resolve('.cache/xdg');
 process.env.__GL_SHADER_DISK_CACHE_PATH = resolve('.cache/nvidia');
 await mkdir(process.env.TMPDIR, { recursive: true });
-const fixture = Uint8Array.from({ length: 131195 }, (_, i) => (i * 37 + (i >>> 8)) & 255);
+const fixture = Uint8Array.from({ length: 524411 }, (_, i) => (i * 37 + (i >>> 8)) & 255);
 await writeFile('dist/fs-browser-fixture.bin', fixture);
 const index=JSON.parse(await readFile('dist/assets.json','utf8')),ini=index.entries.find(item=>item.path.toLowerCase()==='nfs5.ini');
 const expectedIntro=openingMovies(ini?.url?new Uint8Array(await readFile(new URL('../dist/'+ini.url,import.meta.url))):null);
@@ -41,10 +41,10 @@ try {
   await page.screenshot({ path: 'build/chrome-startup.png', fullPage: true });
   await writeFile('build/chrome-startup.json', JSON.stringify({ browser: browser.browser().version(), ...result }, null, 2) + '\n');
   console.log(`Chrome ${browser.browser().version()}: ${result.count} original function entries; ${result.error}`);
-  const range = await page.request.get(new URL('./fs-browser-fixture.bin', page.url()).href, { headers: { Range: 'bytes=65530-65629' } });
+  const range = await page.request.get(new URL('./fs-browser-fixture.bin', page.url()).href, { headers: { Range: 'bytes=262138-262237' } });
   assert.equal(range.status(), 206);
-  assert.equal(range.headers()['content-range'], 'bytes 65530-65629/131195');
-  assert.deepEqual(new Uint8Array(await range.body()), fixture.subarray(65530, 65630));
+  assert.equal(range.headers()['content-range'], 'bytes 262138-262237/524411');
+  assert.deepEqual(new Uint8Array(await range.body()), fixture.subarray(262138, 262238));
   // Exercise real DOM key events through the same adapter used by the runner,
   // then read them through the Wasm DirectInput vtable, including focus loss.
   await page.evaluate(async () => {
@@ -102,13 +102,13 @@ try {
         await runtime.checkpoint();
       },
       async readFixture() {
-        runtime.mount('C:\\nfs5\\BrowserFixture.bin', { url: new URL('./fs-browser-fixture.bin', location.href).href, size: 131195 });
+        runtime.mount('C:\\nfs5\\BrowserFixture.bin', { url: new URL('./fs-browser-fixture.bin', location.href).href, size: 524411 });
         const name = data + 9000, output = data + 10000, transferred = output + 1024;
         module.HEAPU8.set(new TextEncoder().encode('browserfixture.bin\0'), base + name);
         const invoke = (name, args) => call(manifest.imports.find(item => item.name === name).slot, args);
         const file = invoke('CreateFileA', [name, 0x80000000, 3, 0, 3, 128, 0]);
         if (file === 0xffffffff) throw new Error('Fixture open failed');
-        invoke('SetFilePointer', [file, 65530, 0, 0]);
+        invoke('SetFilePointer', [file, 262138, 0, 0]);
         [file, output, 100, transferred, 0].forEach((v, i) => put(stack + i * 4, v));
         module._web_set_register(4, stack);
         if (module._web_start(manifest.imports.find(item => item.name === 'ReadFile').slot, 5000)) throw new Error('Native file-read worker failed');
@@ -121,7 +121,7 @@ try {
       },
       async mappingFixture() {
         const name=data+15000,path='C:\\nfs5\\BrowserMappingChecks.bin';
-        runtime.mount(path,{url:new URL('./fs-browser-fixture.bin',location.href).href,size:131195});
+        runtime.mount(path,{url:new URL('./fs-browser-fixture.bin',location.href).href,size:524411});
         module.HEAPU8.set(new TextEncoder().encode(path+'\0'),base+name);
         const invoke=(name,args)=>call(manifest.imports.find(i=>i.name===name).slot,args);
         const file=invoke('CreateFileA',[name,0xC0000000,3,0,3,128,0]);
@@ -161,7 +161,7 @@ try {
     await page.keyboard.up('w');
     const read = await page.evaluate(() => window.inputHarness.readFixture());
     assert.equal(read.ok, 1); assert.equal(read.count, 100);
-    assert.deepEqual(read.bytes, Array.from(fixture.subarray(65530, 65630)));
+    assert.deepEqual(read.bytes, Array.from(fixture.subarray(262138, 262238)));
     assert.equal(read.files[2], 2, 'A cross-chunk native read must fetch two HTTP ranges');
     const mapping=await page.evaluate(()=>window.inputHarness.mappingFixture());
     assert.deepEqual(mapping.original,Array.from(fixture.subarray(65536,65636)));

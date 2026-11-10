@@ -144,7 +144,10 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
           const rect={x,y,width,height},pixels=hint?await visibilityPixels(rect,key):await renderer.readPixels(rect);if(closed)return;
           module.HEAPU8.set(pixels,destination);break;
         }
-        case 9:renderer.flush();break;
+        // Flush is a submission hint, not a completion barrier. Keep geometry
+        // together, but submit large batches early to overlap GPU work with
+        // native scene preparation. Reads and mutations flush in order too.
+        case 9:renderer.flushHint();break;
         case 10:renderer.reset();uploads.clear();states.clear();stateOrder.fill(null);stateCursor=0;stateWords=stateCache=null;visibilitySamples.clear();break;
         default:throw new Error(`Unsupported graphics command ${opcode}`);
       }

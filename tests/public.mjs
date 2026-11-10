@@ -129,6 +129,9 @@ try {
   const diagnostics=JSON.parse(await page.locator('#game-info pre').textContent());
   assert.equal(diagnostics.wasmBytes,384*1024*1024);assert.equal(diagnostics.info.software,false);
   assert(diagnostics.transport.stateHits>0&&diagnostics.transport.stateMisses>0,'Diagnostics expose state reuse');
+  assert(diagnostics.loading.preloadedFiles>900&&diagnostics.loading.preloadBytes<16*1024*1024,'Small assets are batched in a bounded startup pack');
+  assert(diagnostics.files.preloadedReads>0,'The original game reads preloaded assets');
+  assert(diagnostics.audio.nativeFills>0,'The audio worklet consumes the native refill ring');
   assert(diagnostics.submissionIntervalsMs.samples>0&&diagnostics.submissionIntervalsMs.samples<=600);
   assert(diagnostics.submissionIntervalsMs.p99>=diagnostics.submissionIntervalsMs.p50);
   await page.getByRole('button',{name:'Close',exact:true}).click();

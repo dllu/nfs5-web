@@ -229,6 +229,7 @@ static uint32_t module_handle(const char *name) {
 #include "win32_timers.h"
 #include "win32_dinput.h"
 #include "win32_dsound.h"
+#include "web_audio.h"
 #include "win32_paths.h"
 #include "win32_files.h"
 #include "win32_mapping.h"
@@ -545,6 +546,7 @@ void recomp_dump_trace(const char *why) { (void)why; }
 
 uint32_t web_init(void) {
     stop_guest_workers();
+    audio_reset();
     if (!g_mem_base) g_mem_base = (ptrdiff_t)calloc(1, GUEST_SIZE);
     else memset((void *)g_mem_base, 0, GUEST_SIZE);
     if (!g_mem_base) return 0;
@@ -816,6 +818,7 @@ uint32_t web_fs_mount(const char *source, const char *url, uint32_t size, uint32
     if (!node && (!fs_parent(path) || !(node = fs_new(path, attributes)))) { machine_release(); return 0; }
     fs_uncache(node);
     fs_written -= node->capacity; free(node->data); node->data = NULL; node->capacity = 0;
+    if(node->asset_data)fs_preload_bytes-=node->size;node->asset_data=NULL;
     node->attributes = attributes; node->size = size; node->modified = fs_filetime(modified); node->dirty = 0;
     if (url) strcpy(node->url, url);
     uint32_t id = (uint32_t)(node - fs_nodes) + 1;
@@ -838,6 +841,20 @@ uint32_t *web_fs_stats(void) {
     static uint32_t stats[4];
     machine_acquire(); stats[0] = fs_count; stats[1] = fs_reads; stats[2] = fs_fetches; stats[3] = fs_written;
     machine_release(); return stats;
+}
+uint32_t web_fs_preload(uint32_t id,const uint8_t *data,uint32_t size) {
+    machine_acquire();
+    if(!id||id>fs_count||!fs_nodes[id-1].live||(fs_nodes[id-1].attributes&16)){machine_release();return 0;}
+    fs_node *node=&fs_nodes[id-1];
+    if(data&&(size!=node->size||!node->url[0]||node->data)){machine_release();return 0;}
+    if(node->asset_data)fs_preload_bytes-=node->size;
+    node->asset_data=data;if(data)fs_preload_bytes+=size;
+    machine_release();return 1;
+}
+double *web_fs_io_stats(void) {
+    static double stats[6];machine_acquire();
+    stats[0]=fs_fetches;stats[1]=fs_fetch_bytes;stats[2]=fs_fetch_ms;stats[3]=fs_fetch_max_ms;stats[4]=fs_preload_reads;stats[5]=fs_preload_bytes;
+    machine_release();return stats;
 }
 uint32_t *web_fs_snapshot(void) {
     machine_acquire();

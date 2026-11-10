@@ -34,6 +34,14 @@ try {
  const touch=await page.evaluate(()=>window.inputs.filter(e=>'buttons'in e&&e.x===200&&e.y===200));
  assert(touch.some(e=>e.buttons===1)&&touch.at(-1).buttons===0,'A tap becomes a complete mouse click');
  if(await page.locator('#touch-pad').isHidden())await page.getByRole('button',{name:'Controls',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'Gas',exact:true}).evaluate(e=>getComputedStyle(e).userSelect),'none');
+ const gas=await page.getByRole('button',{name:'Gas',exact:true}).boundingBox();
+ await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:gas.x+gas.width/2,y:gas.y+gas.height/2,id:4}]});
+ await page.waitForTimeout(1000);
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===200).at(-1).down),true,'Holding Gas stays pressed');
+ assert.equal(await page.evaluate(()=>String(getSelection())), '','Holding Gas must not select its label');
+ await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===200).at(-1).down),false);
  const stick=await page.locator('#joystick').boundingBox();
  await page.locator('#joystick').screenshot({path:'build/touch-stick.png'});
  await page.evaluate(()=>{window.pointerLog=[];for(const type of ['pointerdown','pointerup','pointercancel'])window.addEventListener(type,e=>window.pointerLog.push({type,target:e.target.id,x:e.clientX,y:e.clientY}),true);});
