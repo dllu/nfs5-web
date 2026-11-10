@@ -12,7 +12,10 @@ for sound. Select **Showroom** for the completed Evolution/Factory Driver
 profile, or **Create player** for a fresh career. Arrow keys drive, Space is
 the handbrake, C changes camera, and Esc opens the pause menu. The on-screen
 **Pause** button also opens it. Touch devices can tap menu buttons and use the
-virtual joystick, gas, brake, handbrake and camera controls. **Controls** toggles
+virtual joystick, gas, brake, handbrake and camera controls. The joystick feeds
+proportional steering and pedals into the original controller channels, with
+a small dead zone and neutral release. Keyboard and pedal buttons can be used
+alongside it. **Controls** toggles
 the driving pad; **Keyboard** opens a name-entry field for creating profiles.
 
 Profiles, graphics preferences and other file changes stay in IndexedDB in
@@ -42,6 +45,8 @@ Adapter selection requests high performance and tries other browser preferences
 before accepting a software adapter. Websites cannot override blocked drivers or
 force a particular installed GPU. **Info → Copy diagnostics** includes the actual
 adapter, browser, logical/output sizes, shared Wasm allocation and GPU queue stats.
+It also reports state-cache hits/misses and the last 600 submission intervals
+(median, p95, p99, maximum and counts over 33 ms), reset on size/visibility changes.
 When WebGPU reports a software adapter, the public page reduces the default
 race mode to about 720p worth of pixels, preserving aspect and the minimum
 640×480 mode, and briefly explains that hardware acceleration is preferable.
@@ -64,12 +69,20 @@ The Thrash backend implements geometry, supplied texture mips, filtering,
 blending/alpha tests, depth/stencil, fog, gamma, headlights, weather and
 framebuffer transfers. The frontend's nearly touching picture strips share
 edges to prevent subpixel black seams. Graphics queue packets are consumed
-without copying contiguous payloads, reducing allocations during play. Small
+without copying contiguous payloads. A bounded cache reuses immutable rendering
+states, uniforms and pipeline references, reducing allocations during play. Small
 framebuffer reads transfer only their requested rectangle, including the
-sun-visibility sample, instead of a complete 4K/6K frame.
+sun-visibility sample, instead of a complete 4K/6K frame. Ongoing sun occlusion
+uses the latest completed GPU sample, usually one frame old, with one query in
+flight per sun. Reference captures and ordinary framebuffer reads remain exact.
+Sun/light sprite rotation
+uses the original 640×480 angular scale rather than increasing with resolution.
 **Sustained 4K/120 Hz remains a target, not a verified result.** Microstutters,
 intermittent menu input retries and a previously observed menu-return fault
-still need investigation. No Wine reference runs are needed for normal work.
+still need investigation. Warm local race samples show occasional 30–60 ms
+intervals even without asset requests. Sun sampling reduces synchronization
+overhead, but occasional long frames remain. No Wine reference runs are needed
+for normal work.
 
 The engine uses a 256 MiB guest arena in initially 384 MiB shared Wasm memory,
 an eight-worker pool and an approximately 84 MiB Wasm module (8.8 MiB gzip).
@@ -111,10 +124,13 @@ npm run test:usability
 Tests cover original-code comparisons, services, threads, input, audio,
 persistence, lifecycle and GPU pixels/transport, including 4K output and
 picture-strip seams and GPU readbacks after another worker grows memory.
+Sun-query checks cover delayed completion, sample reuse, one outstanding query,
+resize/reset invalidation, exact ordinary reads and asynchronous failure handling.
 Public checks cover wide/portrait menu fitting and
 clicks with black-bar offsets; loading checks verify 4:3 artwork and the
 full-width race canvas at wide, portrait and 4K sizes. Usability checks cover
-touch input, short Escape presses, mobile typing and real hidden-tab
+touch input, proportional native steering/pedals in a running race, short Escape
+presses, mobile typing and real hidden-tab
 loading/racing; the latter uses raw Chrome CDP because Playwright forces tab
 visibility. Python Pillow is required for screenshot checks. Reports and
 screenshots go to ignored `build/` files.

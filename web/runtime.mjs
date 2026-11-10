@@ -174,6 +174,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     mount,
     checkpoint,
     input(event) {
+      if('steer'in event)module._web_input_analog(event.steer,event.pedal??0,event.analog?1:0);
       if ('focus' in event) module._web_input_focus(event.focus ? 1 : 0);
       if ('key' in event) module._web_input_key(event.key, event.down ? 1 : 0);
       if ('x' in event) module._web_input_cursor(event.x | 0, event.y | 0);

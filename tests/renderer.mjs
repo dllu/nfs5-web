@@ -714,6 +714,8 @@ try {
         _malloc:()=>30000,_free:()=>{},_web_gpu_fail:()=>{}};
       const canvas=document.createElement('canvas');document.body.append(canvas);
       const graphics=await attachGraphics(module,canvas,{pace:false});
+      const decoded=[],drawGeometry=graphics.renderer.draw;
+      graphics.renderer.draw=(vertices,indices,state)=>{decoded.push(state);drawGeometry(vertices,indices,state);};
       function send(opcode,data) {
         const packet=Uint32Array.of(data.length+3,opcode,++sequence,...data),start=Atomics.load(header,0);
         packet.forEach((word,i)=>ring[(start+i)%ring.length]=word);Atomics.store(header,0,start+packet.length);
@@ -731,6 +733,7 @@ try {
         [[0,0,1,0xffff0000],[64,0,.25,0xff00ff00],[0,64,.5,0xff0000ff]].forEach(([x,y,rhw,color],i)=>{
           const at=start+i*8;floats[at]=x;floats[at+1]=y;floats[at+2]=.5;floats[at+3]=rhw;draw[at+4]=color;draw[at+5]=0xffffffff;
         });
+        const originalState=draw.slice(0,stateSize);
         draw.set([0,1,2],end);send(4,draw);send(3,new Uint32Array());await graphics.settle();
         const sample=bytes=>Array.from(bytes.slice((8*64+8)*4,(8*64+8)*4+4));
         const indexed=sample(await graphics.renderer.readPixels());
@@ -757,6 +760,36 @@ try {
         send(8,Uint32Array.of(32768,64,64));await graphics.settle();
         const legacyReadback=sample(heap.subarray(32768,32768+64*64*4));
         if(legacyReadback.join()!==textured.join())throw new Error(`Legacy v${version} full readback packet changed pixels`);
+        // A -> B -> A must reuse the immutable decoded state and still use
+        // current geometry/textures. Reset must discard the interning cache.
+        draw.set(originalState);for(let i=0;i<3;i++)draw[start+i*8+4]=0xff00ff00;
+        send(4,draw.subarray(0,end));await graphics.settle();
+        if(decoded[0]!==decoded[1]||decoded[0]!==decoded.at(-1)||graphics.stats.stateHits<2)throw new Error(`Legacy v${version} state reuse failed`);
+        if(sample(await graphics.renderer.readPixels()).join()!=='0,255,0,255')throw new Error(`Legacy v${version} reused state changed pixels`);
+        const misses=graphics.stats.stateMisses;
+        send(10,new Uint32Array());send(4,draw.subarray(0,end));await graphics.settle();
+        if(decoded[0]===decoded.at(-1)||graphics.stats.stateMisses!==misses+1)throw new Error(`Legacy v${version} reset retained cached state`);
+        if(version===7){
+          const initial=decoded.at(-1),collision=originalState.slice();
+          let hash=2166136261;for(let i=0;i<18;i++)hash=Math.imul(hash^originalState[i],16777619);
+          const target=Math.imul(Math.imul(hash^originalState[18],16777619)^originalState[19],16777619);
+          collision[18]=12345;collision[19]=Math.imul(target,0x359c449b)^Math.imul(hash^collision[18],16777619);
+          draw.set(collision);send(4,draw.subarray(0,end));await graphics.settle();
+          if(decoded.at(-1)===initial||decoded.at(-1).scissor_x!==12345)throw new Error('Hash collision aliased distinct graphics states');
+          draw.set(originalState);send(4,draw.subarray(0,end));await graphics.settle();
+          if(decoded.at(-1)!==initial)throw new Error('Hash bucket lost the original state');
+          send(10,new Uint32Array());await graphics.settle();
+          const evictions=graphics.stats.stateEvictions;
+          for(let i=0;i<4160;i++){
+            draw[18]=i;send(4,draw.subarray(0,end));
+            if(i%32===31)await graphics.settle();
+          }
+          await graphics.settle();
+          if(graphics.stats.stateEvictions!==evictions+64)throw new Error('State cache did not evict incrementally at 4096 entries');
+          const before=graphics.stats.stateMisses;draw.set(originalState);send(4,draw.subarray(0,end));await graphics.settle();
+          if(graphics.stats.stateMisses!==before+1)throw new Error('Oldest graphics state was not evicted');
+          if(sample(await graphics.renderer.readPixels()).join()!=='0,255,0,255')throw new Error('State-cache eviction changed pixels');
+        }
         results.push({version,indexed,unindexed,textured,legacyReadback,errors:graphics.renderer.errors.slice()});
       } finally {graphics.close();canvas.remove();}
     }
@@ -777,12 +810,53 @@ try {
       if(pixel(output,226,226,1440)!=='0,255,0,255'||pixel(output,224,226,1440)!=='0,0,0,255'||pixel(logical,101,101,640)!=='0,255,0,255')throw new Error('Scaled clear/scissor or downsampling failed');
       for(let i=0;i<8;i++){r.present();await r.frameBudget();}
       await r.validate();if(r.stats.peakPendingFrames>2)throw new Error('GPU frame budget exceeded');
+      if(r.timing().samples!==7||r.timing().p99<0)throw new Error('Submission timing history is invalid');
       const result={logical:[r.width,r.height],output:[canvas.width,canvas.height],peakPendingFrames:r.stats.peakPendingFrames,errors:r.errors.slice()};
       r.resize(1920,1080);if(canvas.width!==1920||canvas.height!==1080)throw new Error('Race geometry was resized as frontend');
+      if(r.timing().samples!==0)throw new Error('Race timing retained menu/loading intervals');
       return result;
     } finally{r.close();canvas.remove();}
   });
   assert.deepEqual(result.frontend.errors,[]);
+  result.visibilityReadback=await page.evaluate(async()=>{
+    const {attachGraphics}=await import('./graphics.mjs');
+    const memory=new SharedArrayBuffer(65536),heap=new Uint8Array(memory),header=new Int32Array(memory,0,8),ring=new Uint32Array(memory,32,4096);
+    header[5]=ring.length;header[6]=9;let sequence=0,hold=false,completed=0,failed=false;
+    const gates=[],module={HEAPU8:heap,_web_gpu_transport:()=>0,_web_gpu_attach:()=>{},_malloc:()=>30000,_free:()=>{},_web_gpu_fail:()=>{failed=true;}};
+    const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;document.body.append(canvas);
+    const graphics=await attachGraphics(module,canvas,{pace:false}),r=graphics.renderer,read=r.readPixels;
+    r.readPixels=async rect=>{const pixels=await read(rect);if(hold)await new Promise(resolve=>gates.push(resolve));completed++;return pixels;};
+    const until=async predicate=>{const deadline=performance.now()+2000;while(!predicate()){if(performance.now()>deadline)throw new Error('Visibility readback did not progress');await new Promise(resolve=>setTimeout(resolve,1));}};
+    const send=(op,data=[])=>{const packet=Uint32Array.of(data.length+3,op,++sequence,...data),start=Atomics.load(header,0);packet.forEach((word,i)=>ring[(start+i)%ring.length]=word);Atomics.store(header,0,start+packet.length);Atomics.notify(header,0);};
+    const sample=(hint=1,key=7)=>send(8,[32768,4,4,1,1,hint,key]);
+    const pixel=()=>Array.from(heap.slice(32768,32772)).join();
+    try{
+      send(2,[0xffff0000,0x3f800000]);sample();await graphics.settle();
+      if(pixel()!=='255,0,0,255')throw new Error('First visibility sample must initialize synchronously');
+      hold=true;send(2,[0xff0000ff,0x3f800000]);sample();await graphics.settle();await until(()=>gates.length===1);
+      if(pixel()!=='255,0,0,255')throw new Error('Pending visibility must reuse the completed sample');
+      sample();await graphics.settle();
+      if(graphics.stats.visibilityQueries!==2||pixel()!=='255,0,0,255')throw new Error('Visibility polling queued duplicate pending maps');
+      hold=false;gates.splice(0).forEach(resolve=>resolve());await until(()=>completed===2);
+      sample();await graphics.settle();
+      if(pixel()!=='0,0,255,255')throw new Error('Completed visibility sample was not published');
+      await until(()=>completed===3);
+      hold=true;send(2,[0xff00ff00,0x3f800000]);sample(0);
+      const pending=graphics.settle();await until(()=>gates.length===1);
+      if(Atomics.load(header,2)===sequence||pixel()!=='0,0,255,255')throw new Error('Ordinary pixel reads must remain completion barriers');
+      hold=false;gates.splice(0).forEach(resolve=>resolve());await pending;
+      if(pixel()!=='0,255,0,255')throw new Error('Ordinary pixel read returned stale pixels');
+      for(const op of [1,10]){
+        send(op,op===1?[32,32]:[]);send(2,[0xffff0000,0x3f800000]);sample();await graphics.settle();
+        if(pixel()!=='255,0,0,255')throw new Error('Resize/reset retained an old visibility sample');
+      }
+      r.readPixels=async()=>{throw new Error('Deliberate visibility map failure');};sample();
+      await until(()=>failed);
+      try{await graphics.settle();throw new Error('Asynchronous map failure was swallowed');}catch(error){if(!String(error).includes('Deliberate visibility map failure'))throw error;}
+      return {stats:{...graphics.stats},completed,failed,errors:r.errors.slice()};
+    }finally{hold=false;gates.splice(0).forEach(resolve=>resolve());graphics.close();canvas.remove();}
+  });
+  assert.deepEqual(result.visibilityReadback.errors,[]);assert(result.visibilityReadback.failed);
   result.heapGrowth=await page.evaluate(async()=>{
     const {attachGraphics}=await import('./graphics.mjs'),{trackHeap}=await import('./memory.mjs');
     const memory=new WebAssembly.Memory({initial:2,maximum:8,shared:true}),original=new Uint8Array(memory.buffer);

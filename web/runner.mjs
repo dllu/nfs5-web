@@ -6,7 +6,7 @@ self.onmessage = async ({ data }) => {
   if(data.type==='viewport'){runtime?.graphics?.setFrontendSize(data.display);return;}
   if(data.type==='diagnostics'){
     const r=runtime?.graphics?.renderer;
-    self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:runtime?.module.HEAPU8.byteLength,stats:r?.stats});return;
+    self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:runtime?.module.HEAPU8.byteLength,stats:r?.stats,transport:runtime?.graphics?.stats,submissionIntervalsMs:r?.timing()});return;
   }
   if (data.type === 'input') { runtime?.input(data); return; }
   if(data.type==='checkpoint'){await runtime?.checkpoint().catch(error=>self.postMessage({type:'save-error',error:String(error)}));return;}

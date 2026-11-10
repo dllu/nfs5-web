@@ -129,6 +129,8 @@ def main():
     exports.extend(['_web_pointer','_web_mapping_stats'])
     exports.extend(['_web_intro_config','_web_intro_skipped'])
     exports.extend(['_web_process_exited','_web_exit_code'])
+    exports.extend(['_web_input_analog','_web_analog_state'])
+    exports.append('_web_flare_angle')
     profile_flags = ['--emit-symbol-map'] if args.profile else []
     if not args.profile:
         (ROOT / 'dist/engine.js.symbols').unlink(missing_ok=True)

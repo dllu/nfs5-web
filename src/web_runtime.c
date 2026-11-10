@@ -122,7 +122,9 @@ recomp_func_t recomp_lookup(uint32_t va) {
         ? recomp_dispatch_table[lo].func : NULL;
 }
 
+#include "web_analog.h"
 recomp_func_t recomp_lookup_manual(uint32_t va) {
+    recomp_func_t analog=analog_lookup(va);if(analog)return analog;
     if(va==0xF7000000u)return gimme_convert;
     if(va==0xF6000000)return map_flush_import;
     if (va == 0xF1000000) return thread_exit_code_import;
@@ -584,6 +586,7 @@ uint32_t web_init(void) {
     memset(di_devices, 0, sizeof di_devices); di_root_table = di_device_table = di_sequence = 0;
     memset(di_keys, 0, sizeof di_keys); memset(di_pressed, 0, sizeof di_pressed); memset(di_toggled, 0, sizeof di_toggled);
     memset(di_mouse, 0, sizeof di_mouse); memset(di_cursor, 0, sizeof di_cursor); di_buttons = 0; di_focused = 1;
+    analog_reset();
     timer_created = timer_fired = timer_callbacks = timer_killed = 0;
     guest_threads[0].used = 1; guest_threads[0].id = 1; guest_threads[0].object = 0xFFFFFFFF; current_thread = 0;
     next_thread_id = 2; cancel_workers = fatal_pending = 0; process_exited = process_exit_code = 0;

@@ -474,17 +474,17 @@ static void r_unlock(void){
     software_frames++;
     RET(ok,1);
 }
-static void r_readrect(void){
-    uint32_t x=A32(0),y=A32(1),w=A32(2),h=A32(3),p=A32(4);
-    if(!p||!w||!h||x>width||y>height||w>width-x||h>height-y||!open_gpu())RET(0,5);
-    uint8_t *rgba=malloc((size_t)w*h*4);if(!rgba)RET(0,5);
-    int ok=gpu->read_rect(rgba,x,y,w,h);
+static int readrect(uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t p,int visibility){
+    if(!p||!w||!h||x>width||y>height||w>width-x||h>height-y||!open_gpu())return 0;
+    uint8_t *rgba=malloc((size_t)w*h*4);if(!rgba)return 0;
+    int ok=visibility?gpu->read_visibility(rgba,x,y,w,h,g_esi):gpu->read_rect(rgba,x,y,w,h);
     if(ok)for(uint32_t j=0;j<h;j++)for(uint32_t i=0;i<w;i++){
         uint8_t *s=rgba+((size_t)j*w+i)*4;uint32_t n=j*w+i;
         if(color_bits==16)MEM16(p+n*2)=((s[0]>>3)<<11)|((s[1]>>2)<<5)|(s[2]>>3);
         else MEM32(p+n*4)=0xFF000000u|s[0]<<16|s[1]<<8|s[2];
-    }free(rgba);RET(ok,5);
+    }free(rgba);return ok;
 }
+static void r_readrect(void){RET(readrect(A32(0),A32(1),A32(2),A32(3),A32(4),0),5);}
 static void r_writerect(void){RET(blit_pixels(A32(4),A32(0),A32(1),A32(2),A32(3),ui_draw_depth!=0),5);}
 
 /* nfs5.dll:10003320 guards four original readback call sites. Preserve the
@@ -494,13 +494,19 @@ static uint32_t verok_read_coordinate(uint32_t position,uint32_t size,uint32_t e
     if((int32_t)(position+size)>=(int32_t)extent)position=extent-size-1;
     return position;
 }
-static void verok_readrect(void) {
+static void verok_readrect_impl(int visibility) {
     uint32_t w=A32(2),h=A32(3),p=A32(4);
     g_edx=verok_read_coordinate(A32(0),w,width);
     g_ecx=verok_read_coordinate(A32(1),h,height);
+    // Only the sun's ongoing occlusion sample can use a completed earlier
+    // frame. Its initial reference capture and all ordinary locks stay exact.
+    if(visibility&&w==4&&h==4&&thrash_lookup(MEM32(0x6BD96C))==r_readrect)
+        RET(readrect(g_edx,g_ecx,w,h,p,1),5);
     uint32_t args[]={g_edx,g_ecx,w,h,p};
     RET(hle_call_guest(MEM32(0x6BD96C),5,args),5);
 }
+static void verok_readrect(void){verok_readrect_impl(0);}
+static void verok_visibility_readrect(void){verok_readrect_impl(1);}
 
 typedef struct export_entry {const char *name;void(*fn)(void);} export_entry;
 static const export_entry th_exports[]={
@@ -539,6 +545,7 @@ static uint32_t thrash_proc(uint32_t symbol) {
 }
 static recomp_func_t thrash_lookup(uint32_t address) {
     if(address==0x10003320u)return verok_readrect;
+    if(address==0x10003321u)return verok_visibility_readrect;
     if(address<0xF5000000||address>=0xF5000290||(address&15))return NULL;
     thrash_calls++;return th_exports[(address-0xF5000000)/16].fn;
 }

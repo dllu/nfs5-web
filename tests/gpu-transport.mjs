@@ -73,7 +73,7 @@ try {
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
-  assert.equal(Atomics.load(header,6),8,'Rectangle readback uses transport v8');checks++;
+  assert.equal(Atomics.load(header,6),9,'Visibility hints use transport v9');checks++;
   for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000],[10,3],[36,128],[47,1],[48,5],[52,3],[53,4],[54,6]])assert.equal(await call(methods.setstate,[state,value]),1);
   assert.equal(await call(methods.window,[3]),1);
   const vertex=data+256;
@@ -111,6 +111,10 @@ try {
   module.HEAPU8.set([0x12,0xab,0x34,0xff],destination);
   acknowledge(readback);assert.equal(await finish(),1);
   assert.equal(view.getUint16(data+128,true),0x1546,'RGB565 readback is copied only after completion');checks++;
+  view.setUint32(0x6bd96c,methods.readrect,true);module._web_set_register(6,0x12345);
+  const visibility=await barrier(0x10003321,[123,234,4,4,data+128],8);
+  assert.deepEqual(Array.from(visibility.words.slice(4)),[4,4,123,234,1,0x12345],'Only the dedicated sun wrapper requests historical visibility');checks++;
+  module.HEAPU8.fill(0,visibility.words[3],visibility.words[3]+64);acknowledge(visibility);assert.equal(await finish(),1);
   const reset=await barrier(methods.restore,[],10);acknowledge(reset);assert.equal(await finish(),1);
   assert.equal(Atomics.load(header,0),Atomics.load(header,1));checks++;
   const timed=await runtime.invokeAsync(methods.setvideomode,[1,0,2],30);

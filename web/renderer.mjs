@@ -21,8 +21,8 @@ export function mipLayout(width,height,levels=1) {
   return {layout,size:offset};
 }
 const rgba = value => [(value >>> 16 & 255) / 255, (value >>> 8 & 255) / 255, (value & 255) / 255, (value >>> 24) / 255];
-export function effectUniforms(width,height,state) {
-  state={...defaults,...state};
+export function effectUniforms(width,height,state,complete=false) {
+  if(!complete)state={...defaults,...state};
   // effects.w: bit 0 modulates diffuse alpha, bit 1 enables texturing.
   const textureFlags=state.texture?2+Number(Boolean(state.alpha_modulate)):1;
   return [width,height,state.shade_mode,Number.isFinite(state.mip_lod_bias)?state.mip_lod_bias:0,
@@ -86,8 +86,16 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   ] });
   const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [uniformLayout, textureLayout] });
   const textures = new Map(), samplers = new Map(), pipelines = new Map();
+  const normalized=new WeakMap();
   const stats = { frames: 0, draws: 0, batches: 0, vertices: 0, submissions: 0, readbackBytes: 0, readbackBufferBytes: 0, pendingFrames:0, peakPendingFrames:0 };
   const frames=[];
+  const intervals=new Float64Array(600);let intervalCount=0,lastPresent=0;
+  function resetTiming(){intervalCount=0;lastPresent=0;}
+  function timing(){
+    const values=Array.from(intervals.subarray(0,Math.min(intervalCount,intervals.length))).sort((a,b)=>a-b);
+    const percentile=f=>values[Math.min(values.length-1,Math.floor(values.length*f))]??0;
+    return {samples:values.length,p50:percentile(.5),p95:percentile(.95),p99:percentile(.99),max:values.at(-1)??0,over33ms:values.filter(v=>v>1000/30).length};
+  }
   let width = 0, height = 0, outputWidth=0, outputHeight=0, color, depth, presentGroup, readSurface;
   let vertices = new Uint8Array(512 * 1024), indices = new Uint32Array(32768), uniforms = new Float32Array(64 * 1024);
   let vertexBytes = 0, indexCount = 0, uniformBytes = 0, operations = [], imageStrip;
@@ -113,7 +121,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     }));
     return samplers.get(key);
   }
-  function samplerKey(state) {return `${Boolean(state.filter_linear)}:${state.mip_filter}:${state.address_u}:${state.address_v}`;}
+  function samplerKey(state) {return state.samplerKey??`${Boolean(state.filter_linear)}:${state.mip_filter}:${state.address_u}:${state.address_v}`;}
   function textureGroup(state) {
     const entry = textures.get(state.texture);
     if (!entry) throw new Error(`Unknown GPU texture ${state.texture}`);
@@ -124,6 +132,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     return entry.groups.get(key);
   }
   function pipeline(state) {
+    if(state.pipeline)return state.pipeline;
     const key = [state.depth_test,state.depth_write,state.blend_enable,state.src_blend,state.dst_blend,state.cull,state.primitive,state.depth_func,
       state.stencil_enable,state.stencil_func,state.stencil_fail,state.stencil_depth_fail,state.stencil_pass,state.stencil_read_mask,state.stencil_write_mask,state.color_write].join(':');
     if (!pipelines.has(key)) {
@@ -145,7 +154,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
           stencilFront:stencilFace,stencilBack:stencilFace,stencilReadMask:state.stencil_read_mask,stencilWriteMask:state.stencil_enable?state.stencil_write_mask:0 },
       }));
     }
-    return pipelines.get(key);
+    return state.pipeline=pipelines.get(key);
   }
   function grow(array, required) {
     if (array.length >= required) return array;
@@ -203,7 +212,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     }
     if (w === width && h === height&&ow===outputWidth&&oh===outputHeight) return;
     flush(); color?.destroy(); depth?.destroy();readSurface?.destroy();readSurface=null;
-    width = w; height = h;outputWidth=ow;outputHeight=oh;canvas.width=ow;canvas.height=oh;
+    width = w; height = h;outputWidth=ow;outputHeight=oh;canvas.width=ow;canvas.height=oh;resetTiming();
     color = device.createTexture({ size: [ow,oh], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
     depth = device.createTexture({ size: [ow,oh], format:depthFormat,usage:GPUTextureUsage.RENDER_ATTACHMENT });
     presentGroup = device.createBindGroup({ layout: presentPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: color.createView() }, { binding: 1, resource: presentSampler }] });
@@ -229,11 +238,17 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     if(last?.type==='clear'&&last.mask===mask)operations[operations.length-1]=operation;else operations.push(operation);
   }
   function draw(data, mesh, requested = {}) {
-    check(); const state = { ...defaults, ...requested };
-    state.address_u??=state.address_wrap?1:0;state.address_v??=state.address_wrap?1:0;
+    check();let state=requested.serial===undefined?null:normalized.get(requested);
+    if(!state){
+      state={...defaults,...requested};
+      state.address_u??=state.address_wrap?1:0;state.address_v??=state.address_wrap?1:0;
+      state.key=state.serial===undefined?Object.values(state).join(':'):`${state.serial}:${state.primitive}`;
+      state.samplerKey=samplerKey(state);
+      if(requested.serial!==undefined)normalized.set(requested,state);
+    }
     if (!(data instanceof Uint8Array) || data.byteLength % 32) throw new Error('Invalid Thrash vertex buffer');
     const count = data.byteLength / 32, n = mesh ? mesh.length : count; if (!n) return;
-    const key = state.serial === undefined ? Object.values(state).join(':') : `${state.serial}:${state.primitive}`;
+    const key=state.key;
     vertices = grow(vertices, vertexBytes + data.byteLength); vertices.set(data, vertexBytes);
     // The frontend's rotating picture is sixteen separate, nearly touching
     // textured strips. Tiny transform differences leave subpixel cracks that
@@ -290,7 +305,8 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     if (last?.type === 'draw' && last.key === key) last.count += n;
     else {
       uniforms = grow(uniforms, (uniformBytes + 256) / 4);
-      uniforms.set(effectUniforms(width,height,state), uniformBytes / 4);
+      if(state.uniformWidth!==width||state.uniformHeight!==height){state.uniformValues=effectUniforms(width,height,state,true);state.uniformWidth=width;state.uniformHeight=height;}
+      uniforms.set(state.uniformValues, uniformBytes / 4);
       operations.push({ type: 'draw', state, key, first, count: n, uniformOffset: uniformBytes }); uniformBytes += 256;
     }
     vertexBytes += data.byteLength; stats.draws++; stats.vertices += count;
@@ -313,6 +329,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   function textureDestroy(id) { check(); if (!id) return; flush(); textures.get(id)?.texture.destroy(); textures.delete(id); }
   function reset() { flush();for(const [id,entry] of textures)if(id){entry.texture.destroy();textures.delete(id);}clear(0xff000000); }
   function present() {
+    const now=performance.now();if(lastPresent)intervals[intervalCount++%intervals.length]=now-lastPresent;lastPresent=now;
     const encoder = device.createCommandEncoder(); flush(encoder);
     const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0,0,0,1] }] });
     pass.setPipeline(presentPipeline); pass.setBindGroup(0,presentGroup); pass.draw(3); pass.end(); device.queue.submit([encoder.finish()]); stats.frames++; stats.submissions++;
@@ -347,7 +364,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   }
   textureCreate(0,1,1,Uint8Array.of(255,255,255,255)); resize(canvas.width || 640, canvas.height || 480);
   return {
-    resize, clear, draw, present, frameBudget, flush, textureCreate, textureUpdate, textureDestroy, readPixels, reset, stats, errors,
+    resize, clear, draw, present, frameBudget, flush, textureCreate, textureUpdate, textureDestroy, readPixels, reset, stats, errors, timing, resetTiming,
     info: { vendor:adapter.info?.vendor,architecture:adapter.info?.architecture,device:adapter.info?.device,description:adapter.info?.description,software:Boolean(adapter.info?.isFallbackAdapter??adapter.isFallbackAdapter),maxTextureSize:device.limits.maxTextureDimension2D,depthFormat },
     get width() { return width; }, get height() { return height; },
     get outputWidth(){return outputWidth;},get outputHeight(){return outputHeight;},

@@ -1,4 +1,4 @@
-// Touch controls feed the same scan-code bridge as physical keys.
+// Steering and pedals feed the original game's continuous input channels.
 export function attachControls(input,{onDiagnostics=()=>{}}={}) {
   const root=document.createElement('div');root.id='controls';
   root.innerHTML=`<nav id="game-tools" aria-label="Game controls">
@@ -16,18 +16,19 @@ export function attachControls(input,{onDiagnostics=()=>{}}={}) {
   const releaseButtons=[];
   let manual=null,racing=false,coarse=matchMedia('(pointer: coarse)'),stickPointer=null,textQueue=Promise.resolve(),closed=false;
   function update(){const show=manual??(coarse.matches&&racing);pad.hidden=!show;find('toggle-pad').setAttribute('aria-pressed',String(show));if(!show){releaseStick();releaseButtons.forEach(release=>release());}}
-  function releaseStick(){stickPointer=null;knob.style.transform='';for(const scan of [200,208,203,205])input.key(scan,false,'stick');}
+  function releaseStick(){stickPointer=null;knob.style.transform='';input.analog(0,0,false);}
   function stick(event) {
     if(event.type==='pointerdown'){if(stickPointer!==null)return;stickPointer=event.pointerId;joystick.setPointerCapture(event.pointerId);}
     if(event.pointerId!==stickPointer)return;event.preventDefault();
-    if(event.type==='pointerup'||event.type==='pointercancel'){releaseStick();return;}
+    if(['pointerup','pointercancel','lostpointercapture'].includes(event.type)){releaseStick();return;}
     const box=joystick.getBoundingClientRect(),radius=box.width/2;
     let x=(event.clientX-box.left-radius)/radius,y=(event.clientY-box.top-radius)/radius;
     const distance=Math.hypot(x,y);if(distance>1){x/=distance;y/=distance;}
     knob.style.transform=`translate(${x*radius*.65}px,${y*radius*.65}px)`;
-    for(const [scan,down] of [[203,x<-.22],[205,x>.22],[200,y<-.3],[208,y>.3]])input.key(scan,down,'stick');
+    const axis=value=>Math.abs(value)<.06?0:Math.sign(value)*(Math.abs(value)-.06)/.94;
+    input.analog(axis(x),-axis(y));
   }
-  for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])joystick.addEventListener(type,stick);
+  for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])joystick.addEventListener(type,stick);
   for(const button of root.querySelectorAll('[data-scan]')) {
     const pointers=new Set(),scan=Number(button.dataset.scan);
     const release=()=>{pointers.clear();input.key(scan,false,button);button.classList.remove('pressed');};releaseButtons.push(release);

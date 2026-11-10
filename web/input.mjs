@@ -62,6 +62,7 @@ export function attachInput(target, send, {viewport=target,keepRunningOnBlur=fal
     send({type:'input',dx:event.movementX||0,dy:event.movementY||0,dz,buttons,...lastPoint});
   }
   function release() {
+    analog(0,0,false);
     for(const timer of releaseTimers.values())clearTimeout(timer);
     releaseTimers.clear();clearTimeout(touchTimer);
     for(const scan of keys.keys())send({type:'input',key:scan,down:false});
@@ -94,5 +95,6 @@ export function attachInput(target, send, {viewport=target,keepRunningOnBlur=fal
   }
   for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])listen(viewport,type,touch,{passive:false});
   const detach=()=>{handlers.forEach(remove=>remove());release();send({type:'input',focus:false});};
-  Object.assign(detach,{key,pulse,release});return detach;
+  function analog(steer,pedal=0,active=true){send({type:'input',steer,pedal,analog:active});}
+  Object.assign(detach,{key,pulse,release,analog});return detach;
 }

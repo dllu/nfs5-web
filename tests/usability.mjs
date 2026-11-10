@@ -39,8 +39,9 @@ try {
  await page.evaluate(()=>{window.pointerLog=[];for(const type of ['pointerdown','pointerup','pointercancel'])window.addEventListener(type,e=>window.pointerLog.push({type,target:e.target.id,x:e.clientX,y:e.clientY}),true);});
  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:stick.x+stick.width*.2,y:stick.y+stick.height*.2,id:2}]});
  await page.waitForTimeout(100);
- const stickDown=await page.evaluate(()=>window.inputs.filter(e=>e.down).slice(-2).map(e=>e.key));
- assert.deepEqual(stickDown,[203,200],JSON.stringify({stick,pointers:await page.evaluate(()=>window.pointerLog)}));
+ const stickDown=await page.evaluate(()=>window.inputs.filter(e=>e.analog).at(-1));
+ assert(stickDown.steer<-.5&&stickDown.steer>-.8&&stickDown.pedal>.5&&stickDown.pedal<.8,'Joystick sends proportional native axes');
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===203||e.key===205).length),0,'Steering does not generate arrow keys');
  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
  await page.keyboard.down('ArrowUp');
  await page.evaluate(()=>window.dispatchEvent(new Event('blur')));

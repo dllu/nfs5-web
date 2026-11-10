@@ -128,6 +128,9 @@ try {
   await page.waitForFunction(()=>document.querySelector('#game-info pre').textContent.includes('wasmBytes'));
   const diagnostics=JSON.parse(await page.locator('#game-info pre').textContent());
   assert.equal(diagnostics.wasmBytes,384*1024*1024);assert.equal(diagnostics.info.software,false);
+  assert(diagnostics.transport.stateHits>0&&diagnostics.transport.stateMisses>0,'Diagnostics expose state reuse');
+  assert(diagnostics.submissionIntervalsMs.samples>0&&diagnostics.submissionIntervalsMs.samples<=600);
+  assert(diagnostics.submissionIntervalsMs.p99>=diagnostics.submissionIntervalsMs.p50);
   await page.getByRole('button',{name:'Close',exact:true}).click();
   const dialogPromise=page.waitForEvent('dialog');
   const reloading=page.reload().then(()=>false,()=>true);

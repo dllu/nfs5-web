@@ -15,6 +15,8 @@ export function decodeGraphicsState(words) {
 
 export async function attachGraphics(module, canvas, { onResize = () => {}, pace = true, frontendSize } = {}) {
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
+  const states=new Map(),stateOrder=new Array(4096);let stateCursor=0;
+  const visibilitySamples=new Map();
   let visible=true,cancelPacing;
   const backgroundClock=new Int32Array(new SharedArrayBuffer(4));
   function nextFrame() {
@@ -30,14 +32,14 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     });
   }
   let channel,yieldResolve;
-  const stats={packets:0,copiedBytes:0};
+  const stats={packets:0,copiedBytes:0,stateHits:0,stateMisses:0,stateEvictions:0,visibilityQueries:0,visibilityReuses:0};
   const pointer=module._web_gpu_transport(), uploads=new Map();
   let header,ring,stateSize;
   function views() {
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
     const version=Atomics.load(header,6);
-    if(![1,2,3,4,5,6,7,8].includes(version))throw new Error('Unsupported graphics transport version');
+    if(![1,2,3,4,5,6,7,8,9].includes(version))throw new Error('Unsupported graphics transport version');
     stateSize=version>=7?41:version>=6?40:version>=5?31:version>=4?30:version>=3?26:25;
     const size=Atomics.load(header,5)>>>0;
     if(!size || (size&(size-1)))throw new Error('Invalid graphics queue size');
@@ -61,9 +63,41 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   }
   function state(data) {
     if(!stateWords || stateWords.some((v,i)=>v!==data[i])) {
-      stateWords=data.slice(0,stateSize);stateCache={...decodeGraphicsState(stateWords),serial:++serial};
-    }
+      let hash=2166136261;
+      for(let i=0;i<stateSize;i++)hash=Math.imul(hash^data[i],16777619);
+      const bucket=states.get(hash),entry=bucket?.find(e=>e.words.every((v,i)=>v===data[i]));
+      if(entry){stateWords=entry.words;stateCache=entry.state;stats.stateHits++;}
+      else {
+        // Evict one old entry at a time. Clearing thousands of states together
+        // would rebuild the entire working set and create a garbage burst.
+        const old=stateOrder[stateCursor];
+        if(old){
+          const entries=states.get(old.hash);entries.splice(entries.indexOf(old),1);
+          if(!entries.length)states.delete(old.hash);stats.stateEvictions++;
+        }
+        stateWords=data.slice(0,stateSize);stateCache={...decodeGraphicsState(stateWords),serial:++serial};
+        const entry={hash,words:stateWords,state:stateCache};
+        if(states.has(hash))states.get(hash).push(entry);else states.set(hash,[entry]);
+        stateOrder[stateCursor]=entry;stateCursor=(stateCursor+1)%stateOrder.length;stats.stateMisses++;
+      }
+    } else stats.stateHits++;
     return stateCache;
+  }
+  async function visibilityPixels(rect,key) {
+    // Keep owned pixels, never a guest destination whose allocation ends at
+    // acknowledgement. One pending sample per cached sun bounds GPU work.
+    let entry=visibilitySamples.get(key);
+    if(!entry||entry.width!==rect.width||entry.height!==rect.height){
+      if(visibilitySamples.size>=8)visibilitySamples.delete(visibilitySamples.keys().next().value);
+      entry={width:rect.width,height:rect.height,pixels:null,pending:null};visibilitySamples.set(key,entry);
+    }
+    if(!entry.pending){
+      stats.visibilityQueries++;
+      entry.pending=renderer.readPixels(rect).then(pixels=>{entry.pixels=pixels;entry.pending=null;},error=>{entry.pending=null;fail(error);});
+    }
+    if(!entry.pixels){await entry.pending;if(failure)throw failure;}
+    else stats.visibilityReuses++;
+    return entry.pixels;
   }
   async function drain() {
     if(closed || failure)return;
@@ -78,7 +112,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
       stats.packets++;
       const packet=packetView(read,count),opcode=packet[1],sequence=packet[2],data=packet.subarray(3);
       switch(opcode) {
-        case 1:renderer.resize(data[0],data[1]);onResize(data[0],data[1]);break;
+        case 1:visibilitySamples.clear();renderer.resize(data[0],data[1]);onResize(data[0],data[1]);break;
         case 2:{
           const options=data.length===2?undefined:{mask:data[2],stencil:data[3],rect:{x:data[4],y:data[5],width:data[6],height:data[7]}};
           if(data.length!==2&&data.length!==8)throw new Error('Invalid clear packet length');
@@ -104,14 +138,14 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
         }
         case 7:renderer.textureDestroy(data[0]);uploads.delete(data[0]);break;
         case 8:{
-          const [destination,width,height,x=0,y=0]=data;
-          if(![3,5].includes(data.length)||!width||!height||x+width>renderer.width||y+height>renderer.height||destination+width*height*4>module.HEAPU8.length)
+          const [destination,width,height,x=0,y=0,hint=0,key=0]=data;
+          if(![3,5,7].includes(data.length)||!width||!height||hint>1||(hint&&(width>4||height>4))||x+width>renderer.width||y+height>renderer.height||destination+width*height*4>module.HEAPU8.length)
             throw new Error(`Invalid graphics readback: ${width}x${height} at ${x},${y}, framebuffer ${renderer.width}x${renderer.height}, destination ${destination}, heap ${module.HEAPU8.length}, packet ${data.length}`);
-          const pixels=await renderer.readPixels({x,y,width,height});if(closed)return;
+          const rect={x,y,width,height},pixels=hint?await visibilityPixels(rect,key):await renderer.readPixels(rect);if(closed)return;
           module.HEAPU8.set(pixels,destination);break;
         }
         case 9:renderer.flush();break;
-        case 10:renderer.reset();uploads.clear();stateWords=stateCache=null;break;
+        case 10:renderer.reset();uploads.clear();states.clear();stateOrder.fill(null);stateCursor=0;stateWords=stateCache=null;visibilitySamples.clear();break;
         default:throw new Error(`Unsupported graphics command ${opcode}`);
       }
       views();
@@ -150,7 +184,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   if(timer===null)consume().catch(fail);
   return {
     renderer,stats,
-    setVisible(value){visible=Boolean(value);cancelPacing?.();Atomics.notify(backgroundClock,0);},
+    setVisible(value){visible=Boolean(value);renderer.resetTiming();cancelPacing?.();Atomics.notify(backgroundClock,0);},
     setFrontendSize(size){if(!frontendSize)return;Object.assign(frontendSize,size);renderer.resize(renderer.width,renderer.height);onResize(renderer.width,renderer.height);},
     async settle() {
       while(!closed && !failure) {

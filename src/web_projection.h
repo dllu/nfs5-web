@@ -4,9 +4,11 @@
 #include <math.h>
 
 float web_projection[3]={640,480,37.5f}; /* virtual width, virtual height, half-FOV */
+static uint32_t projection_width=640,projection_height=480;
 
 void web_projection_update(uint32_t width,uint32_t height) {
     if(!width||!height||width>16384||height>16384)return;
+    projection_width=width;projection_height=height;
     /* Mirror the native float input/output stores and constants. Differential
      * checks compare the stored floats against its x87 calculation. */
     double ratio=(double)(float)width/(double)(float)height;
@@ -26,4 +28,12 @@ uint32_t web_projection_bits(unsigned field) {
 }
 
 float *web_projection_state(void){return web_projection;}
+
+double web_flare_angle(double position_sum) {
+    // Original 00451762 rotates sprites by (screen.x + screen.y) / 1440 turns.
+    // Keep the 640×480 centre/orientation and angular scale when pixel density
+    // or aspect changes. Projection scale also handles portrait viewports.
+    double logical=560.0+(position_sum-.5*(projection_width+projection_height))*web_projection[0]/projection_width;
+    return logical*0.0006944444444444445;
+}
 #endif
