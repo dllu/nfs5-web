@@ -8,6 +8,7 @@ let page;
 try {
  page=await browser.newPage();await page.goto(process.env.NFS5_TEST_URL??'http://127.0.0.1:8000');
  await page.evaluate(async()=>{
+  localStorage.removeItem('nfs5-touch-layout');
   document.body.innerHTML='<canvas id="game" width="640" height="480"></canvas>';document.querySelector('#viewport-style').media='all';
   const css=document.createElement('link');css.rel='stylesheet';css.href='./play.css';document.head.append(css);
   const {loadRuntime}=await import('./runtime.mjs'),{attachInput}=await import('./input.mjs'),{attachControls}=await import('./controls.mjs');
@@ -31,7 +32,10 @@ try {
  await sample(.5,0);await page.keyboard.down('ArrowLeft');await page.waitForTimeout(180);
  const mixed=await page.evaluate(()=>new DataView(analogCheck.runtime.module.HEAPU8.buffer,analogCheck.runtime.base+0x5e99dc).getInt8(1));assert.equal(mixed,-31);await page.keyboard.up('ArrowLeft');
  const released=await sample(0,0,false);assert.equal(released.steer,0);assert.equal(released.gas,0);
- await page.keyboard.down('ArrowRight');await page.waitForTimeout(180);assert.equal(await page.evaluate(()=>new DataView(analogCheck.runtime.module.HEAPU8.buffer,analogCheck.runtime.base+0x5e99dc).getInt8(1)),63);await page.keyboard.up('ArrowRight');
+ await page.keyboard.down('ArrowRight');await page.keyboard.down('ArrowUp');await page.waitForTimeout(180);
+ const keyboard=await page.evaluate(()=>{const r=analogCheck.runtime,v=new DataView(r.module.HEAPU8.buffer,r.base+0x5e99dc);return {steer:v.getInt8(1),gas:v.getUint8(2)};});
+ assert.equal(keyboard.steer,63);assert(keyboard.gas>120);
+ await page.keyboard.up('ArrowRight');await page.keyboard.up('ArrowUp');
  // Exercise a real browser touch drag through the public joystick -> input ->
  // original callback -> original signed steering byte, not only API calls.
  const session=await browser.newCDPSession(page),box=await page.locator('#joystick').boundingBox(),x=box.x+box.width*.7,y=box.y+box.height*.5;
@@ -39,9 +43,19 @@ try {
  const touch=await page.evaluate(()=>new DataView(analogCheck.runtime.module.HEAPU8.buffer,analogCheck.runtime.base+0x5e99dc).getInt8(1));assert(touch>15&&touch<30,'Partial touch displacement produces partial native steering');
  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForTimeout(180);
  assert.equal(await page.evaluate(()=>new DataView(analogCheck.runtime.module.HEAPU8.buffer,analogCheck.runtime.base+0x5e99dc).getInt8(1)),0);
+ await page.getByRole('button',{name:'Layout: Joystick',exact:true}).click();
+ const points=[];
+ for(const [i,name]of ['Steer right','Gas'].entries()){
+  const b=await page.getByRole('button',{name,exact:true}).boundingBox();points.push({x:b.x+b.width/2,y:b.y+b.height/2,id:i+4});
+ }
+ await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:points});await page.waitForTimeout(180);
+ const buttons=await page.evaluate(()=>{const r=analogCheck.runtime,v=new DataView(r.module.HEAPU8.buffer,r.base+0x5e99dc);return {steer:v.getInt8(1),gas:v.getUint8(2)};});
+ assert.deepEqual(buttons,keyboard,'Two-finger buttons match physical arrows in the original steering/throttle channels');
+ await session.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await page.waitForTimeout(180);
+ assert.deepEqual(await page.evaluate(()=>{const r=analogCheck.runtime,v=new DataView(r.module.HEAPU8.buffer,r.base+0x5e99dc);return {steer:v.getInt8(1),gas:v.getUint8(2)};}),{steer:0,gas:0});
  assert(!await page.evaluate(()=>Boolean(analogCheck.result)),'The original race remains running');
- await writeFile('build/native-analog.json',JSON.stringify({rows,brake,mixed,released,touch},null,2)+'\n');
- console.log('Original INPUT_poll: proportional steering/pedals, physical-key mixing, touch drag and neutral release passed');
+ await writeFile('build/native-analog.json',JSON.stringify({rows,brake,mixed,released,touch,buttons,keyboard},null,2)+'\n');
+ console.log('Original INPUT_poll: proportional steering/pedals, key mixing, touch drag, two-finger arrow buttons and neutral release passed');
 } finally {
  if(page)await page.evaluate(async()=>{const a=window.analogCheck;if(a){a.runtime.stop();await a.run;a.controls.close();a.input();a.runtime.dispose();}}).catch(()=>{});
  await browser.close();

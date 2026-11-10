@@ -135,6 +135,10 @@ try {
   assert(diagnostics.submissionIntervalsMs.samples>0&&diagnostics.submissionIntervalsMs.samples<=600);
   assert(diagnostics.submissionIntervalsMs.p99>=diagnostics.submissionIntervalsMs.p50);
   await page.getByRole('button',{name:'Close',exact:true}).click();
+  await page.getByRole('button',{name:'Controls',exact:true}).click();
+  if(await page.getByRole('button',{name:'Layout: Joystick',exact:true}).isVisible())await page.getByRole('button',{name:'Layout: Joystick',exact:true}).click();
+  assert.equal(await page.locator('#touch-pad').getAttribute('data-layout'),'buttons');
+  assert(await page.getByRole('button',{name:'Steer left',exact:true}).isVisible());
   const dialogPromise=page.waitForEvent('dialog');
   const reloading=page.reload().then(()=>false,()=>true);
   const dialog=await dialogPromise;assert.equal(dialog.type(),'beforeunload');await dialog.dismiss();
@@ -143,6 +147,7 @@ try {
   await page.screenshot({path:'build/public-test-created.png'});
   await browser.close();browser=null;
   await open();await ready();
+  assert.equal(await page.locator('#touch-pad').getAttribute('data-layout'),'buttons','Touch layout survives a full browser restart');
   const restored=await saved();assert.deepEqual(restored,first,'Profile bytes survive a full browser restart');
   await page.screenshot({path:'build/public-test-restored.png'});
   assert.deepEqual(errors,[]);

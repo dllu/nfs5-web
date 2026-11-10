@@ -15,8 +15,11 @@ the handbrake, C changes camera, and Esc opens the pause menu. The on-screen
 virtual joystick, gas, brake, handbrake and camera controls. The joystick feeds
 proportional steering and pedals into the original controller channels, with
 a small dead zone and neutral release. Keyboard and pedal buttons can be used
-alongside it. **Controls** toggles
-the driving pad; **Keyboard** opens a name-entry field for creating profiles.
+alongside it. **Controls** toggles the driving pad. **Layout: Joystick/Buttons**
+switches between the joystick and separate arrow buttons: left/right side by
+side for the left hand, gas above brake for the right, and handbrake between.
+The selected layout stays in this browser. **Keyboard** opens a name-entry field
+for creating profiles.
 Holding driving controls suppresses text selection and the iOS touch callout.
 
 Profiles, graphics preferences and other file changes stay in IndexedDB in
@@ -64,9 +67,10 @@ Startup, audio, the original frontend, profile creation, quick races and
 Evolution gameplay run. A user has completed a race with correct visuals and
 usable performance. Car purchases and profiles survive browser restarts.
 The Showroom seed exposes the completed campaign's cars and Monte Carlo tracks.
-Full campaign advancement and physical mobile/Mac/Windows devices remain
-unverified. Multiplayer, hardware controllers, custom photo import and many
-unused Windows APIs are unsupported.
+Local browser checks run on Linux; users report playable Mac, Windows and iPhone
+games with occasional stutters. Full campaign advancement remains unverified.
+Multiplayer, hardware controllers, custom photo import and many unused Windows
+APIs are unsupported.
 
 The Thrash backend implements geometry, supplied texture mips, filtering,
 blending/alpha tests, depth/stencil, fog, gamma, headlights, weather and

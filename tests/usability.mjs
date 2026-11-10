@@ -13,6 +13,7 @@ try {
  const session=await context.newCDPSession(page);await session.send('Emulation.setFocusEmulationEnabled',{enabled:true});
  await page.goto(process.env.NFS5_TEST_URL??'http://127.0.0.1:8000');
  await page.evaluate(async()=>{
+  localStorage.removeItem('nfs5-touch-layout');
   document.body.innerHTML='<canvas id="game" width="640" height="480" style="width:640px;height:480px;touch-action:none"></canvas>';
   const style=document.createElement('link');style.rel='stylesheet';style.href='./play.css';document.head.append(style);
   const {attachInput}=await import('./input.mjs'),{attachControls}=await import('./controls.mjs');
@@ -51,6 +52,55 @@ try {
  assert(stickDown.steer<-.5&&stickDown.steer>-.8&&stickDown.pedal>.5&&stickDown.pedal<.8,'Joystick sends proportional native axes');
  assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===203||e.key===205).length),0,'Steering does not generate arrow keys');
  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ await page.getByRole('button',{name:'Layout: Joystick',exact:true}).click();
+ assert.equal(await page.locator('#joystick').isVisible(),false);
+ assert.equal(await page.locator('#steering-buttons').isVisible(),true);
+ const boxes=async()=>{
+  const out={};for(const name of ['Steer left','Steer right','Gas','Brake','Handbrake','Camera'])out[name]=await page.getByRole('button',{name,exact:true}).boundingBox();return out;
+ };
+ for(const size of [{width:430,height:932},{width:320,height:568},{width:932,height:430}]){
+  await page.setViewportSize(size);const b=await boxes(),left=b['Steer left'],right=b['Steer right'];
+  assert(left.x+left.width<=right.x&&left.y===right.y,'Left and right sit side by side');
+  assert(b.Gas.x===b.Brake.x&&b.Gas.y+b.Gas.height<=b.Brake.y,'Gas sits above brake');
+  assert(left.x+left.width/2<b.Handbrake.x+b.Handbrake.width/2&&b.Handbrake.x+b.Handbrake.width/2<b.Gas.x+b.Gas.width/2,'Handbrake sits between the hands');
+  for(const [name,box]of Object.entries(b)){
+   assert(box.x>=0&&box.y>=0&&box.x+box.width<=size.width&&box.y+box.height<=size.height,name+' remains within the viewport');
+   for(const [other,c]of Object.entries(b))if(name!==other)assert(box.x+box.width<=c.x||c.x+c.width<=box.x||box.y+box.height<=c.y||c.y+c.height<=box.y,name+' does not overlap '+other);
+  }
+  const tools=await page.locator('#game-tools').boundingBox();assert(tools.x>=0&&tools.x+tools.width<=size.width,'The toolbar fits narrow screens');
+  await page.screenshot({path:`build/touch-buttons-${size.width}x${size.height}.png`});
+ }
+ await page.setViewportSize({width:430,height:932});
+ const b=await boxes(),point=(box,id)=>({x:box.x+box.width/2,y:box.y+box.height/2,id});
+ const leftPoint=point(b['Steer left'],11),gasPoint=point(b.Gas,12);
+ await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[leftPoint,gasPoint]});
+ await page.waitForTimeout(1000);
+ assert.deepEqual(await page.evaluate(()=>[203,200].map(key=>window.inputs.filter(e=>e.key===key).at(-1)?.down)),[true,true],'Steering and gas can be held with separate fingers');
+ assert.equal(await page.evaluate(()=>String(getSelection())),'');
+ await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[leftPoint]});
+ assert.deepEqual(await page.evaluate(()=>[203,200].map(key=>window.inputs.filter(e=>e.key===key).at(-1)?.down)),[false,true],'Releasing steering keeps gas held');
+ const handbrakePoint=point(b.Handbrake,14);
+ await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[gasPoint,handbrakePoint]});
+ assert.deepEqual(await page.evaluate(()=>[57,200].map(key=>window.inputs.filter(e=>e.key===key).at(-1)?.down)),[true,true],'The centered handbrake works while gas remains held');
+ await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[handbrakePoint]});
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===57).at(-1).down),false);
+ await page.keyboard.down('ArrowUp');
+ await page.getByRole('button',{name:'Layout: Buttons',exact:true}).click();
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===200).at(-1).down),true,'Changing layouts preserves a physical key held on the keyboard');
+ await page.keyboard.up('ArrowUp');
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===200).at(-1).down),false,'Changing layouts releases the virtual pedal');
+ await session.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+ await page.getByRole('button',{name:'Layout: Joystick',exact:true}).click();
+ const rightPoint=point((await boxes())['Steer right'],13);
+ await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[rightPoint]});
+ await page.getByRole('button',{name:'Controls',exact:true}).click();
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===205).at(-1).down),false,'Hiding the pad releases steering');
+ await session.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+ await page.evaluate(async()=>{window.controls.close();const {attachControls}=await import('./controls.mjs');window.controls=attachControls(window.input);window.controls.setScreen({width:1280,height:720});});
+ assert.equal(await page.locator('#touch-pad').getAttribute('data-layout'),'buttons','Layout preference survives rebuilding the controls');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('nfs5-touch-layout')),'buttons');
+ if(await page.locator('#touch-pad').isHidden())await page.getByRole('button',{name:'Controls',exact:true}).click();
+ await page.getByRole('button',{name:'Layout: Buttons',exact:true}).click();
  await page.keyboard.down('ArrowUp');
  await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
  events=await page.evaluate(()=>window.inputs);
@@ -65,5 +115,5 @@ try {
  await page.evaluate(()=>{window.controls.close();window.input();});
  assert.deepEqual(errors,[]);
  await writeFile('build/usability-input.json',JSON.stringify({events:events.length,touch,errors},null,2)+'\n');
- console.log('Touch click, joystick, mobile name entry, quick/fallback Escape, Pause and focus release passed');
+ console.log('Touch click, joystick/buttons, simultaneous steering/gas, layout persistence/release, mobile name entry, Escape, Pause and focus release passed');
 } finally {await context.close();}

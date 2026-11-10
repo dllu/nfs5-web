@@ -1,21 +1,31 @@
-// Steering and pedals feed the original game's continuous input channels.
+// Choose continuous native joystick axes or separate virtual arrow keys.
 export function attachControls(input,{onDiagnostics=()=>{}}={}) {
+  let layout='joystick';
+  try{if(localStorage.getItem('nfs5-touch-layout')==='buttons')layout='buttons';}catch{}
   const root=document.createElement('div');root.id='controls';
   root.innerHTML=`<nav id="game-tools" aria-label="Game controls">
     <button id="pause-game" type="button">Pause</button>
     <button id="toggle-pad" type="button" aria-pressed="false">Controls</button>
+    <button id="touch-layout" type="button" hidden>Layout: Joystick</button>
     <button id="show-keyboard" type="button">Keyboard</button>
     <button id="show-info" type="button">Info</button>
   </nav>
   <div id="touch-pad" hidden><div id="joystick" role="group" aria-label="Steer and accelerate"><span></span></div>
-    <div id="pedals"><button data-scan="200">Gas</button><button data-scan="208">Brake</button><button data-scan="57">Handbrake</button><button data-pulse="46">Camera</button></div></div>
+    <div id="steering-buttons" role="group" aria-label="Steering" hidden><button data-scan="203" aria-label="Steer left">◀</button><button data-scan="205" aria-label="Steer right">▶</button></div>
+    <div id="pedals"><button id="gas" data-scan="200"><span aria-hidden="true">▲</span> Gas</button><button id="brake" data-scan="208"><span aria-hidden="true">▼</span> Brake</button><button id="handbrake" data-scan="57">Handbrake</button><button id="camera" data-pulse="46">Camera</button></div></div>
   <form id="game-keyboard" hidden><input aria-label="Type player name" placeholder="Type player name" autocomplete="off" autocapitalize="off" spellcheck="false"><button>Enter</button></form>
   <section id="game-info" hidden><button id="close-info">Close</button><button id="copy-info">Copy diagnostics</button><p>Exit through the game's Quit to Windows option to save career progress. Profiles stay in this browser.</p><pre></pre></section>`;
   document.body.append(root);
   const find=id=>root.querySelector('#'+id),pad=find('touch-pad'),joystick=find('joystick'),knob=joystick.firstElementChild;
   const releaseButtons=[];
   let manual=null,racing=false,coarse=matchMedia('(pointer: coarse)'),stickPointer=null,textQueue=Promise.resolve(),closed=false;
-  function update(){const show=manual??(coarse.matches&&racing);pad.hidden=!show;find('toggle-pad').setAttribute('aria-pressed',String(show));if(!show){releaseStick();releaseButtons.forEach(release=>release());}}
+  function update(){const show=manual??(coarse.matches&&racing);pad.hidden=!show;find('touch-layout').hidden=!show;find('toggle-pad').setAttribute('aria-pressed',String(show));if(!show)blur();}
+  function setLayout(next){
+    blur();layout=next;pad.dataset.layout=layout;
+    joystick.hidden=layout==='buttons';find('steering-buttons').hidden=layout!=='buttons';
+    find('touch-layout').textContent='Layout: '+(layout==='buttons'?'Buttons':'Joystick');
+    find('touch-layout').title='Switch to '+(layout==='buttons'?'joystick':'button')+' controls';
+  }
   function releaseStick(){stickPointer=null;knob.style.transform='';input.analog(0,0,false);}
   function stick(event) {
     if(event.type==='pointerdown'){if(stickPointer!==null)return;stickPointer=event.pointerId;joystick.setPointerCapture(event.pointerId);}
@@ -39,6 +49,7 @@ export function attachControls(input,{onDiagnostics=()=>{}}={}) {
   for(const b of root.querySelectorAll('[data-pulse]'))b.onclick=()=>input.pulse(Number(b.dataset.pulse));
   find('pause-game').onclick=()=>input.pulse(1);
   find('toggle-pad').onclick=()=>{manual=pad.hidden;update();};
+  find('touch-layout').onclick=()=>{setLayout(layout==='buttons'?'joystick':'buttons');try{localStorage.setItem('nfs5-touch-layout',layout);}catch{}};
   coarse.addEventListener('change',update);
   const form=find('game-keyboard'),field=form.querySelector('input');
   find('show-keyboard').onclick=()=>{form.hidden=!form.hidden;if(!form.hidden)field.focus();};
@@ -61,7 +72,7 @@ export function attachControls(input,{onDiagnostics=()=>{}}={}) {
   find('close-info').onclick=()=>{find('game-info').hidden=true;};
   find('copy-info').onclick=async()=>{try{await navigator.clipboard.writeText(find('game-info').querySelector('pre').textContent);find('copy-info').textContent='Copied';}catch{find('copy-info').textContent='Select and copy the text below';}};
   function blur(){releaseStick();releaseButtons.forEach(release=>release());}
-  window.addEventListener('blur',blur);update();
+  window.addEventListener('blur',blur);setLayout(layout);update();
   return {
     setScreen({width,height}){racing=width!==640||height!==480;update();},
     diagnostics(data){find('game-info').querySelector('pre').textContent=JSON.stringify({browser:navigator.userAgent,...data},null,2);},
