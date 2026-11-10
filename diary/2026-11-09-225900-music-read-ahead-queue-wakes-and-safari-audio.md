@@ -75,3 +75,21 @@ full-queue parking/wake; isolated hardware renderer/native shader comparisons;
 browser PCM/intro playback, profile bytes and frontend lifecycle. Reports are
 ignored build/perf-pass-*.json/log files. Further GPU-readback sampling experiments
 are separate from this verified implementation. No Wine process was launched.
+
+A follow-up same-race experiment sampled native 4×4 readbacks at full rate,
+then at most 30 Hz, then full rate again (three 30-second windows). Actual
+readbacks fell from 1804 to 725 and returned to 1768. Intervals over 33 ms were
+6 / 7 / 6, with p99 24.55 / 24.49 / 24.63 ms and maxima 68.81 / 61.07 / 61.43 ms.
+Synchronous range waits remained zero throughout. This did not establish a
+stutter improvement, so no visibility-frequency change is retained. Raw data:
+build/perf-pass-readback-rate.json. The normal-build Wasm SHA-256 is
+4a19551874dab755e283ad49956c6864b1f197793836070f63066799ed560d3f;
+packaged revision e2bfb798bd79d59f.
+
+The normal packaged preview passes launch, completed/fresh profiles, full
+browser-restart persistence, touch-layout preference and new stream/audio/
+notification diagnostics. The 911 GT1 with four opponents on Auvergne loads
+and drives using public assets at 1280×960, 4K and 6K in the isolated session;
+4K/6K grow Wasm to 460.8 MiB. The initial 384 MiB allocation is unchanged.
+The public test now requires a healthy read-ahead worker and browser audio
+state/rate/peak fields. Source checkpoint: 609fc92.

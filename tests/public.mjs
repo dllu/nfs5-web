@@ -132,6 +132,9 @@ try {
   assert(diagnostics.loading.preloadedFiles>900&&diagnostics.loading.preloadBytes<16*1024*1024,'Small assets are batched in a bounded startup pack');
   assert(diagnostics.files.preloadedReads>0,'The original game reads preloaded assets');
   assert(diagnostics.audio.nativeFills>0,'The audio worklet consumes the native refill ring');
+  assert.equal(diagnostics.audio.state,'running');assert(diagnostics.audio.rate>0&&diagnostics.audio.peak>=0,'Diagnostics include browser audio state and signal level');
+  assert(diagnostics.streaming.enabled&&diagnostics.streaming.failures===0,'The music read-ahead worker is available');
+  assert(diagnostics.transport.producerPackets>=diagnostics.transport.producerNotifications&&diagnostics.transport.producerNotifications>0,'Diagnostics expose actual queue notifications');
   assert(diagnostics.submissionIntervalsMs.samples>0&&diagnostics.submissionIntervalsMs.samples<=600);
   assert(diagnostics.submissionIntervalsMs.p99>=diagnostics.submissionIntervalsMs.p50);
   await page.getByRole('button',{name:'Close',exact:true}).click();
