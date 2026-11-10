@@ -93,3 +93,18 @@ and drives using public assets at 1280×960, 4K and 6K in the isolated session;
 4K/6K grow Wasm to 460.8 MiB. The initial 384 MiB allocation is unchanged.
 The public test now requires a healthy read-ahead worker and browser audio
 state/rate/peak fields. Source checkpoint: 609fc92.
+
+Revision e2bfb798bd79d59f is deployed to pupserver.linode:/www/misc/nfs5.
+The live isolated Chrome public test passes direct launch, profiles and exact
+save bytes across restart, touch layout, audio state/peak and a healthy music
+worker. Both public hostnames serve matching stream-worker/runtime/audio modules
+and the new immutable Wasm URL. Firefox 159 in the private Wayland session
+exposes hardware NVIDIA GB10/Vulkan and validates rendering, queue notifications
+and background music fetches without failures. Its intentionally muted automation
+session leaves AudioContext suspended, so the additional PCM assertion did not
+pass there; this check establishes Firefox graphics/streaming compatibility,
+not Firefox audible output. Chrome PCM checks and audio-policy unit checks pass.
+The physical iPhone playback-route change remains for the user to verify.
+
+Owned preview servers, Firefox WebDriver and private compositors were stopped.
+The original port 8000 server and user desktop compositor remain running.
