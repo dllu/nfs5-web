@@ -42,7 +42,7 @@ export function attachInput(target, send, {viewport=target,keepRunningOnBlur=fal
     releaseTimers.set(source,timer);
   }
   function keyboard(event) {
-    const editing=event.target?.closest?.('input,textarea,select,[contenteditable="true"]');
+    const editing=event.target?.closest?.('input,textarea,select,#controls button,[contenteditable="true"]');
     if(editing&&event.type==='keydown')return;
     const scan=scans[event.code]??(event.key==='Escape'?1:undefined);
     if(!scan)return;

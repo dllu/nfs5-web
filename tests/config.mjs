@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {openingMovies,softwareViewport,sceneDetail,sceneDetailMode,savedSceneDetail} from '../web/config.mjs';
+import {openingMovies,softwareViewport,sceneDetail,sceneDetailMode,savedSceneDetail,touchViewport,savedSkyboxes} from '../web/config.mjs';
 import {selectAdapter} from '../web/renderer.mjs';
 const bytes=s=>new TextEncoder().encode(s);
 for(const [text,expected] of [
@@ -22,6 +22,11 @@ for(const [display,expected] of [
 assert.equal(softwareViewport(null,1280*720),null);
 const hardware={width:6144,height:3456};assert.equal(softwareViewport(hardware,0),hardware);
 console.log('7 software-adapter display checks passed (pixel budget, aspect, minimum size and opt-in)');
+const touchLimit=1440*810;
+assert.deepEqual(touchViewport({width:1290,height:2796},touchLimit),{width:1244,height:933});
+assert.deepEqual(touchViewport({width:2796,height:1290},touchLimit),{width:1244,height:933});
+assert.deepEqual(touchViewport({width:320,height:568},touchLimit),{width:644,height:483});
+assert.equal(savedSkyboxes(),false,'Atmospheric skies require an opt-in');
 const hardwareAdapter={info:{isFallbackAdapter:false}},softwareAdapter={info:{isFallbackAdapter:true}},requests=[];
 assert.equal(await selectAdapter({requestAdapter:async options=>{requests.push(options);return options.powerPreference==='low-power'?hardwareAdapter:softwareAdapter;}}),hardwareAdapter);
 assert.equal(requests.length,2);assert(requests.every(options=>options.forceFallbackAdapter===false));

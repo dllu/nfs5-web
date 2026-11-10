@@ -31,3 +31,9 @@ The optional public release's Showroom profile is adapted from
 (2015). The public packager downloads a hash-pinned archive and changes only
 its profile name and graphics preferences; the original game data and this
 save are not committed to this repository.
+
+The public release can package the 964, 993 and 996 model replacements from
+[Rear spoiler fix for Verok's patch by Zolee](https://www.nfsaddons.com/downloads/nfspu/tools/11074/rear-spoiler-fix-veroks-patch-964993996.html).
+The opt-in skybox assets come from
+[New Atmospheric Skyboxes by AndrewD](https://www.nfsaddons.com/downloads/nfspu/tracks/11357/new-atmospheric-skyboxes.html).
+Both archives are supplied locally to the packager.

@@ -1,7 +1,7 @@
 import {attachInput} from './input.mjs';
 import {openAudio} from './audio.mjs';
 import {attachControls} from './controls.mjs';
-import {savedSceneDetail} from './config.mjs';
+import {savedSceneDetail,savedSkyboxes,touchViewport} from './config.mjs';
 
 const loading=document.querySelector('#loading'), status=document.querySelector('#status');
 const retry=document.querySelector('#retry'), failure=document.querySelector('#failure');
@@ -10,6 +10,7 @@ retry.onclick=()=>location.reload();
 let worker,audio,detach,controls,screen,logs=[],finished=false;
 const warnBeforeLeaving=event=>{if(!finished){event.preventDefault();event.returnValue='';}};
 const displaySize=()=>({width:Math.round(innerWidth*devicePixelRatio),height:Math.round(innerHeight*devicePixelRatio)});
+const touchPixelLimit=matchMedia('(pointer: coarse)').matches?1440*810:0;
 const resume=()=>audio?.resume().then(()=>{sound.hidden=audio.stats().state==='running';}).catch(()=>{});
 window.addEventListener('pointerdown',resume,{capture:true});
 window.addEventListener('keydown',resume,{capture:true});
@@ -47,14 +48,14 @@ try {
         }
         worker.postMessage(event);
       },{viewport:canvas,keepRunningOnBlur:true});
-      controls=attachControls(detach,{onDiagnostics:()=>worker.postMessage({type:'diagnostics'}),onDetailChange:value=>{worker.postMessage({type:'detail',value});worker.postMessage({type:'diagnostics'});}});
+      controls=attachControls(detach,{skyboxes:data.skyboxes,onDiagnostics:()=>worker.postMessage({type:'diagnostics'}),onDetailChange:value=>{worker.postMessage({type:'detail',value});worker.postMessage({type:'diagnostics'});}});
       if(screen)controls.setScreen(screen);
     }
     if(data.type==='screen'){
       screen=data;controls?.setScreen(data);canvas.style.setProperty('--game-aspect',data.width/data.height);loading.hidden=true;
       // Opening a phone's keyboard resizes the viewport. Keep its text field
       // focused when the renderer acknowledges that resize.
-      if(!document.activeElement?.matches('input,textarea'))canvas.focus({preventScroll:true});
+      if(!document.activeElement?.closest('#controls'))canvas.focus({preventScroll:true});
     }
     if(data.type==='diagnostics')controls?.diagnostics({...data,audio:{...data.audio,...audio?.stats()},type:undefined});
     if(data.type==='save-error'){sound.hidden=false;sound.textContent='Local save failed. Keep this tab open and free some browser storage.';}
@@ -65,9 +66,10 @@ try {
     }
   };
   const offscreen=canvas.transferControlToOffscreen();
+  const display=displaySize();
   worker.postMessage({type:'start',milliseconds:0,intro:false,softwarePixelLimit:1280*720,audio:audio.configuration,
-    detail:savedSceneDetail(),touchPixelLimit:matchMedia('(pointer: coarse)').matches?1440*810:0,
-    display:displaySize(),canvas:offscreen},[offscreen,audio.configuration.port]);
+    detail:savedSceneDetail(),skyboxes:savedSkyboxes(),touchPixelLimit,
+    display:touchPixelLimit?touchViewport(display,touchPixelLimit):display,canvas:offscreen},[offscreen,audio.configuration.port]);
   window.addEventListener('beforeunload',warnBeforeLeaving);
   worker.postMessage({type:'visibility',visible:!document.hidden});
   const updateFocus=()=>{if(!finished)worker.postMessage({type:'focus',focused:document.hasFocus()});};

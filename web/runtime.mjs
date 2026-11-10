@@ -10,13 +10,13 @@ import {attachStream} from './streaming.mjs';
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, detail='auto', softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, detail='auto', skyboxes=false, softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
   const started=performance.now();
   const [module, manifest, response, assets] = await Promise.all([
     createEngine({ print: log, printErr: log }).then(trackHeap),
     read('./manifest.json').then(checked).then(r => r.json()),
     read('./game.exe').then(checked),
-    readAssets(read,log),
+    readAssets(read,log,skyboxes),
   ]);
   const executable = new Uint8Array(await response.arrayBuffer());
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', executable));
@@ -180,7 +180,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     const status=module._web_async_finish();await graphics?.settle();const result=snapshot(status);
     await checkpoint();return result;
   }
-  return { module, manifest, base, memorySize, graphics, display, reducedResolution,
+  return { module, manifest, base, memorySize, graphics, display, reducedResolution, skyboxes:assets?.skyboxes,
     loading:{runtimeMs:performance.now()-started,preloadBytes:assetMemory.bytes,preloadedFiles:assetMemory.files},
     audioStats:()=>detachAudio?.stats?.(),
     streamingStats:()=>streaming.stats(),

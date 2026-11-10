@@ -43,6 +43,7 @@ try {
  const touch=await page.evaluate(()=>new DataView(analogCheck.runtime.module.HEAPU8.buffer,analogCheck.runtime.base+0x5e99dc).getInt8(1));assert(touch>15&&touch<30,'Partial touch displacement produces partial native steering');
  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForTimeout(180);
  assert.equal(await page.evaluate(()=>new DataView(analogCheck.runtime.module.HEAPU8.buffer,analogCheck.runtime.base+0x5e99dc).getInt8(1)),0);
+ await page.getByRole('button',{name:'Game menu'}).click();
  await page.getByRole('button',{name:'Layout: Joystick',exact:true}).click();
  const points=[];
  for(const [i,name]of ['Steer right','Gas'].entries()){

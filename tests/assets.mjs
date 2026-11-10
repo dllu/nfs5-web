@@ -7,6 +7,19 @@ globalThis.crypto??=webcrypto;
 const bytes=Uint8Array.from({length:32},(_,i)=>i*7),digest=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
 const index={preload:{url:'./pack',size:bytes.length,sha256:digest},entries:[{path:'Preload.bin',size:bytes.length,preloadOffset:0}]};
 const source=await readAssets(async path=>path==='./assets.json'?Response.json(index):new Response(bytes));
+const skyIndex={...index,skyboxes:[
+  {path:'preload.bin',size:96,url:'./custom-texture'},
+  {path:'Sky/lightning.bin',size:16,url:'./custom-lightning'},
+]};
+const requests=[];
+const read=async path=>{requests.push(path);return path==='./assets.json'?Response.json(skyIndex):new Response(bytes);};
+const originalSky=await readAssets(read);
+const customSky=await readAssets(read,undefined,true);
+assert.deepEqual(originalSky.skyboxes,{available:true,enabled:false});
+assert.deepEqual(originalSky.index.entries,index.entries);
+assert.deepEqual(customSky.skyboxes,{available:true,enabled:true});
+assert.deepEqual(customSky.index.entries,skyIndex.skyboxes,'Selected assets replace the old case-insensitive entry and its preload offset');
+assert.deepEqual(requests,['./assets.json','./pack','./assets.json','./pack'],'Selection never downloads custom sky payloads at startup');
 const runtime=await loadRuntime({persist:false,read:async path=>new Response(await readFile(new URL('../dist/'+path,import.meta.url)))}),m=runtime.module;
 let cached;
 try{

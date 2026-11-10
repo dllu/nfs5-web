@@ -44,7 +44,12 @@ try {
  async function capture(path){const {data}=await command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(path,Buffer.from(data,'base64'));}
  await sleep(6000);
  const racing=await sample('racing'),away=await send('Target.createTarget',{url:'about:blank'});await send('Target.activateTarget',{targetId:away.targetId});
- await until(()=>evaluate('document.hidden'),10000);await sleep(Number(process.env.NFS5_BACKGROUND_MS??65000));const backgroundRace=await sample('background-race');assert(backgroundRace.frames>racing.frames+30,'A hidden race continues simulating and presenting');assert(backgroundRace.stats.canvasFrames<=racing.stats.canvasFrames+2,'Hidden frames must not depend on the compositor surface');
+ await until(()=>evaluate('document.hidden'),10000);
+ const hiddenRaceStart=await sample('hidden-race-start');
+ await sleep(Number(process.env.NFS5_BACKGROUND_MS??65000));
+ const backgroundRace=await sample('background-race');
+ assert(backgroundRace.frames>hiddenRaceStart.frames+30,'A hidden race continues simulating and presenting');
+ assert(backgroundRace.stats.canvasFrames<=hiddenRaceStart.stats.canvasFrames+2,'Hidden frames must not depend on the compositor surface');
  await send('Target.activateTarget',{targetId});await send('Target.closeTarget',{targetId:away.targetId});
  await key('ArrowUp','ArrowUp',38,true);await sleep(2000);await key('ArrowUp','ArrowUp',38,false);
  await capture('build/race-before-pause.png');
@@ -59,6 +64,6 @@ try {
  const resumed=await sample('resumed');await evaluate('window.worker.postMessage({type:"stop"})');await until(()=>evaluate('window.messages.some(m=>m.type==="stopped")'),15000);
  const result=await evaluate('window.messages.find(m=>m.type==="result").result');assert.equal(result.stopped,true);
  const errors=await evaluate('window.messages.filter(m=>m.type==="error")');assert.deepEqual(errors,[]);
- await writeFile('build/race-usability.json',JSON.stringify({before,hidden,racing,backgroundRace,paused,resumed,errors},null,2)+'\n');
+ await writeFile('build/race-usability.json',JSON.stringify({before,hidden,racing,hiddenRaceStart,backgroundRace,paused,resumed,errors},null,2)+'\n');
  console.log(`Hidden-tab frames advanced ${hidden.frames-before.frames}; race memory ${paused.memory/1024/1024} MiB; queue peak ${paused.stats.peakPendingFrames}. Pause/resume screenshots captured.`);
 } finally{socket?.close();child.kill('SIGTERM');}

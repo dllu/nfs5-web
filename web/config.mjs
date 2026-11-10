@@ -39,3 +39,14 @@ export function sceneDetailMode(value,{touch=false,software=false}={}) {
   value=sceneDetail(value);
   return value==='very-far'?2:value==='far'?1:value==='original'||touch||software?0:1;
 }
+
+export function touchViewport({width,height},pixelLimit) {
+  // A distinct 4:3 mode keeps the race controls active on small viewports
+  // where the minimum mode would otherwise match the 640×480 frontend.
+  const unit=Math.max(161,Math.floor(Math.min(width/4,height/3,Math.sqrt(pixelLimit/12))));
+  return {width:unit*4,height:unit*3};
+}
+
+export function savedSkyboxes() {
+  try{return globalThis.localStorage?.getItem('nfs5-skyboxes')==='atmospheric';}catch{return false;}
+}

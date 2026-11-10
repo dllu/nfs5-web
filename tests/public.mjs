@@ -46,6 +46,10 @@ async function click(x,y) {
   await page.mouse.down();await page.waitForTimeout(120);await page.mouse.up();
   await page.waitForTimeout(1000);
 }
+async function action(name) {
+  await page.getByRole('button',{name:'Game menu'}).click();
+  await page.getByRole('button',{name,exact:true}).click();
+}
 async function saved() {
   return page.evaluate(async()=>{
     const {sha256}=await (await fetch('./manifest.json')).json();
@@ -70,14 +74,22 @@ try {
   await page.goto(new URL('THIRD_PARTY_NOTICES.md',url).href);
   await page.evaluate(async()=>{
     localStorage.removeItem('nfs5-scene-detail');
+    localStorage.removeItem('nfs5-skyboxes');
     const {sha256}=await (await fetch('./manifest.json')).json();
     await new Promise((resolve,reject)=>{const r=indexedDB.deleteDatabase('nfs5-web-files-'+sha256);r.onsuccess=resolve;r.onerror=()=>reject(r.error);r.onblocked=()=>reject(new Error('Test save database is blocked'));});
   });
   await ready();
   assert.equal(await page.locator('#game-tools').evaluate(c=>getComputedStyle(c).position),'fixed','Controls load the matching release stylesheet');
+  assert(await page.locator('#game-actions').isHidden());
   assert.equal(await page.locator('#retry').isVisible(),false);
   assert.equal(await page.locator('#game').evaluate(c=>getComputedStyle(c).cursor),'none');
   assert.equal(await page.evaluate(()=>crossOriginIsolated),true);
+  if(await page.evaluate(()=>document.fullscreenEnabled)){
+    await action('Fullscreen');
+    await page.waitForFunction(()=>document.fullscreenElement===document.documentElement);
+    await action('Exit fullscreen');
+    await page.waitForFunction(()=>!document.fullscreenElement);
+  }
   for(const size of [{width:1920,height:1080},{width:900,height:1600}]) {
     await page.setViewportSize(size);
     await page.waitForTimeout(350);
@@ -110,12 +122,12 @@ try {
   }
   assert(creating,'Create player must open the name field');
   await click(350,169);
-  await page.getByRole('button',{name:'Keyboard',exact:true}).click();
+  await action('Keyboard');
   await page.setViewportSize({width:1920,height:1000});await page.waitForTimeout(400);
-  assert(await page.getByRole('textbox',{name:'Type player name'}).evaluate(field=>document.activeElement===field),'Opening the mobile keyboard retains focus across a renderer resize');
-  await page.getByRole('textbox',{name:'Type player name'}).fill('webcheck');
+  assert(await page.getByRole('textbox',{name:'Game text'}).evaluate(field=>document.activeElement===field),'Opening the mobile keyboard retains focus across a renderer resize');
+  await page.getByRole('textbox',{name:'Game text'}).fill('webcheck');
   await page.waitForTimeout(1400);
-  await page.getByRole('button',{name:'Keyboard',exact:true}).click();
+  await page.getByRole('button',{name:'Close keyboard',exact:true}).click();
   await page.screenshot({path:'build/public-test-named.png'});
   await click(225,237);await click(320,400);
   let first;
@@ -125,9 +137,16 @@ try {
   assert.deepEqual(first.completion,[0,0,0]);
   assert.equal(first.resolution,26);assert.equal(first.carDetail,4);assert.equal(first.textureDetail,4);
   console.log('Fresh profile saved locally');
-  await page.getByRole('button',{name:'Info',exact:true}).click();
+  await action('Info');
   await page.waitForFunction(()=>document.querySelector('#game-info pre').textContent.includes('wasmBytes'));
   const diagnostics=JSON.parse(await page.locator('#game-info pre').textContent());
+  const skyboxes=()=>page.getByRole('checkbox',{name:'Atmospheric skyboxes'});
+  if(diagnostics.skyboxes?.available){
+    assert.equal(diagnostics.skyboxes.enabled,false,'Original skies are the default');
+    assert.equal(await skyboxes().isChecked(),false);
+    await skyboxes().check();
+    assert.equal(await page.evaluate(()=>localStorage.getItem('nfs5-skyboxes')),'atmospheric');
+  }
   assert.equal(diagnostics.detail.multiplier,await page.evaluate(()=>matchMedia('(pointer: coarse)').matches?1:2),'Automatic adapts to desktop/touch input');
   await page.getByLabel('View distance').selectOption('very-far');
   await page.waitForFunction(()=>JSON.parse(document.querySelector('#game-info pre').textContent).detail.multiplier===4);
@@ -146,8 +165,8 @@ try {
   assert(diagnostics.submissionIntervalsMs.p50>=1000/70,'Menu redraws are capped near 60 Hz on a high-refresh display');
   assert(diagnostics.submissionIntervalsMs.p99>=diagnostics.submissionIntervalsMs.p50);
   await page.getByRole('button',{name:'Close',exact:true}).click();
-  await page.getByRole('button',{name:'Controls',exact:true}).click();
-  if(await page.getByRole('button',{name:'Layout: Joystick',exact:true}).isVisible())await page.getByRole('button',{name:'Layout: Joystick',exact:true}).click();
+  await action('Controls');
+  if(await page.locator('#touch-pad').getAttribute('data-layout')==='joystick')await action('Layout: Joystick');
   assert.equal(await page.locator('#touch-pad').getAttribute('data-layout'),'buttons');
   assert(await page.getByRole('button',{name:'Steer left',exact:true}).isVisible());
   const dialogPromise=page.waitForEvent('dialog');
@@ -158,10 +177,16 @@ try {
   await page.screenshot({path:'build/public-test-created.png'});
   await browser.close();browser=null;
   await open();await ready();
-  await page.getByRole('button',{name:'Info',exact:true}).click();
+  await action('Info');
   assert.equal(await page.getByLabel('View distance').inputValue(),'very-far','Scene detail survives a full browser restart');
   await page.waitForFunction(()=>document.querySelector('#game-info pre').textContent.includes('wasmBytes'));
-  assert.equal(JSON.parse(await page.locator('#game-info pre').textContent()).detail.multiplier,4);
+  const restoredDiagnostics=JSON.parse(await page.locator('#game-info pre').textContent());
+  assert.equal(restoredDiagnostics.detail.multiplier,4);
+  if(diagnostics.skyboxes?.available){
+    assert.equal(restoredDiagnostics.skyboxes.enabled,true,'Relaunch mounts the selected skyboxes');
+    assert.equal(await skyboxes().isChecked(),true);
+    await skyboxes().uncheck();
+  }
   await page.getByLabel('View distance').selectOption('auto');
   await page.getByRole('button',{name:'Close',exact:true}).click();
   assert.equal(await page.locator('#touch-pad').getAttribute('data-layout'),'buttons','Touch layout survives a full browser restart');
@@ -169,7 +194,7 @@ try {
   await page.screenshot({path:'build/public-test-restored.png'});
   assert.deepEqual(errors,[]);
   await writeFile('build/public-test.json',JSON.stringify({url,seed,first,restored,errors},null,2)+'\n');
-  console.log('Public autostart, completed seed, fresh 1950 profile, maximum defaults, hidden cursor and browser-restart persistence passed');
+  console.log('Public autostart, fullscreen, completed seed, fresh profile, skybox selection and browser-restart persistence passed');
 } catch(error) {
   await page?.screenshot({path:'build/public-test-failure.png'}).catch(()=>{});
   throw error;

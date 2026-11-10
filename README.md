@@ -10,16 +10,13 @@ its workers run on Wasm threads. The deployment is entirely static.
 The public page launches directly into the original game. Click or press a key
 for sound. Select **Showroom** for the completed Evolution/Factory Driver
 profile, or **Create player** for a fresh career. Arrow keys drive, Space is
-the handbrake, C changes camera, and Esc opens the pause menu. The on-screen
-**Pause** button also opens it. Touch devices can tap menu buttons and use the
-virtual joystick, gas, brake, handbrake and camera controls. The joystick feeds
-proportional steering and pedals into the original controller channels, with
-a small dead zone and neutral release. Keyboard and pedal buttons can be used
-alongside it. **Controls** toggles the driving pad. **Layout: Joystick/Buttons**
-switches between the joystick and separate arrow buttons: left/right side by
-side for the left hand, gas above brake for the right, and handbrake between.
-The selected layout stays in this browser. **Keyboard** opens a name-entry field
-for creating profiles.
+the handbrake, C changes camera, and Esc opens the pause menu. The top-right
+**Game menu** contains **Pause**, **Fullscreen** on supported browsers,
+**Keyboard** for game text or prices, and **Info**. Touch devices can tap game
+menus and use proportional joystick steering and pedals or separate arrow
+buttons. **Controls** toggles the driving pad, and **Layout** changes the
+layout for this browser. In portrait the controls sit below the 4:3 picture.
+In landscape they sit on either side. Gas is above brake in both layouts.
 Holding driving controls suppresses text selection and the iOS touch callout.
 Safari uses the playback audio-session type for sound with Silent Mode enabled.
 
@@ -43,8 +40,9 @@ exposed quality and a 32-bit viewport-sized race mode. Menus and loading artwork
 keep their original 4:3 aspect, centered with black bars when needed. On hardware
 adapters, frontend/garage geometry renders at the fitted monitor resolution;
 original bitmap art, videos, UI layout and mouse hitboxes retain their logical
-640×480 coordinates. Frontend density follows browser resize. Races keep
-the selected resolution’s aspect, including a widescreen browser-sized mode.
+640×480 coordinates. Frontend density follows browser resize. The default
+race mode fits a 4:3 frame on touch devices and the full viewport on desktop.
+Explicit race resolutions retain their aspect within the available frame.
 Mouse coordinates follow the fitted canvas. The system cursor is hidden over
 the game.
 
@@ -56,7 +54,10 @@ in this browser, separately from career saves and the game's graphics sliders.
 Higher settings retain detailed models farther away and draw more scenery;
 they can reduce performance. Track-authored visibility and fog still apply, so
 some transitions remain. Diagnostic reports include the selected multiplier and
-original/effective section range.
+original/effective section range. **Info → Atmospheric skyboxes** enables
+AndrewD's sky pack on the next launch. The setting is off by default and
+persists in this browser. The public build includes Zolee's high-detail
+rear-spoiler correction for the 964, 993 and 996.
 
 Adapter selection requests high performance and tries other browser preferences
 before accepting a software adapter. Websites cannot override blocked drivers or
@@ -72,10 +73,8 @@ file reads include paths, timestamps, durations and calling guest threads.
 When WebGPU reports a software adapter, the public page reduces the default
 race mode to about 720p worth of pixels, preserving aspect and the minimum
 640×480 mode, and briefly explains that hardware acceleration is preferable.
-Touch devices default to about 1.2 million race pixels, preserving aspect;
-frontend/garage geometry retains the fitted monitor resolution. Explicit saved
-resolution choices remain available. Desktop hardware adapters default to the
-full viewport resolution. At most two presented frames remain queued on the
+Touch devices default to at most about 1.2 million race pixels.
+At most two presented frames remain queued on the
 GPU, bounding accumulation on slow renderers. Frame submissions are not a
 measurement of displayed frame rate.
 
@@ -180,7 +179,7 @@ npm run test:usability
 Tests cover original-code comparisons, services, threads, input, audio,
 persistence, lifecycle and GPU pixels/transport, including 4K output and
 picture-strip seams and GPU readbacks after another worker grows memory.
-Asset tests cover verified startup packs, writable overrides, bounded read-ahead,
+Asset tests cover verified startup packs, optional skybox selection, writable overrides, bounded read-ahead,
 claimed-page eviction protection, exact tail bytes and range fallback;
 audio checks verify that a busy VM cannot block refill ticks.
 Audio-session checks cover playback routing, resume and cleanup.
@@ -190,7 +189,8 @@ Public checks cover wide/portrait menu fitting and
 clicks with black-bar offsets; loading checks verify 4:3 artwork and the
 full-width race canvas at wide, portrait and 4K sizes. Usability checks cover
 touch input, proportional native steering/pedals in a running race, short Escape
-presses, held pedals without text selection, mobile typing and real hidden-tab
+presses, controls outside the picture in both orientations, held pedals without
+text selection, mobile text and price entry, and real hidden-tab
 loading/racing; the latter uses raw Chrome CDP because Playwright forces tab
 visibility. Python Pillow is required for screenshot checks. Reports and
 screenshots go to ignored `build/` files.
@@ -214,6 +214,11 @@ npm run build:public
 python3 tools/serve.py --directory build/public --port 8001
 python3 tools/deploy_public.py
 ```
+
+The packager reads `.cache/mods/spoiler-fix.zip` and
+`.cache/mods/atmospheric-skyboxes.zip` when present. Supply different archive
+paths with `npm run build:public -- --spoiler-fix PATH --skyboxes PATH`.
+The optional skybox payloads load on demand when selected.
 
 With the public preview running, `npm run test:public` checks direct launch,
 blank-profile defaults, mobile name entry, native-density 4:3 output, adapter

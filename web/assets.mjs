@@ -1,10 +1,17 @@
 // Start network work while the much larger Wasm module is compiling.
-export async function readAssets(read,log=()=>{}) {
+export async function readAssets(read,log=()=>{},useSkyboxes=false) {
   let response;
   try{response=await read('./assets.json');}catch(error){if(error.code==='ENOENT')return null;throw error;}
   if(response.status===404)return null;
   if(!response.ok)throw new Error(`Unable to load assets: HTTP ${response.status}`);
   const index=await response.json();
+  const skyboxes={available:!!index.skyboxes?.length,enabled:false};
+  if(useSkyboxes&&skyboxes.available){
+    const entries=new Map(index.entries.map(entry=>[entry.path.toLowerCase(),entry]));
+    for(const entry of index.skyboxes)entries.set(entry.path.toLowerCase(),entry);
+    index.entries=[...entries.values()];
+    skyboxes.enabled=true;
+  }
   const pack=index.preload?read(index.preload.url).then(async response=>{
     if(!response.ok)throw new Error(`HTTP ${response.status}`);
     const bytes=new Uint8Array(await response.arrayBuffer());
@@ -13,7 +20,7 @@ export async function readAssets(read,log=()=>{}) {
     if(digest!==index.preload.sha256)throw new Error('Invalid startup pack hash');
     return bytes;
   }).catch(error=>{log(`Startup preload unavailable: ${error.message}`);return null;}):null;
-  return {index,pack};
+  return {index,pack,skyboxes};
 }
 
 export async function preloadAssets(module,assets,ids) {

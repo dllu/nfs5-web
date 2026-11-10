@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Package a clean direct-launch release from dist/ and a pinned completed save."""
+import argparse
 import ctypes
 import ctypes.util
 import hashlib
@@ -10,10 +11,38 @@ from pathlib import Path
 import shutil
 import struct
 import urllib.request
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SAVE_URL = 'https://www.nfs-cars.com/files/download/send/13891/100_completed_save_game.-20150916112323.rar'
 SAVE_SHA256 = '27e75bb42c84d19ca389b2648ec6e3f59b2807a83d548891adb0ca670a61d133'
+SPOILER_MODELS = {'gamedata/carmodel/964.crp', 'gamedata/carmodel/993.crp', 'gamedata/carmodel/996.crp'}
+
+
+def addon_entries(archive, destination, originals, include):
+    entries = []
+    with zipfile.ZipFile(archive) as addon:
+        for member in addon.infolist():
+            path = member.filename
+            original = originals.get(path.lower())
+            if member.is_dir() or not include(path.lower()):
+                continue
+            data = addon.read(member)
+            url = './assets/' + hashlib.sha256(data).hexdigest()
+            if original and original['url'] == url:
+                continue
+            target = destination / url
+            if not target.exists():
+                target.write_bytes(data)
+            entries.append({'path': original['path'] if original else path,
+                            'size': len(data), 'attributes': 32, 'modified': 0, 'url': url})
+    return entries
+
+
+def sky_asset(path):
+    parts = path.split('/')
+    return (len(parts) == 4 and parts[:3] == ['gamedata', 'track', 'sky']
+            and re.fullmatch(r'[a-z0-9_]+\.(bin|fsh)', parts[3]))
 
 
 def completed_files():
@@ -83,6 +112,12 @@ def property_value(data, name, value):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--spoiler-fix', type=Path, help='Zolee’s rear spoiler fix ZIP')
+    parser.add_argument('--skyboxes', type=Path, help='AndrewD’s New Atmospheric Skyboxes ZIP')
+    args = parser.parse_args()
+    spoiler_fix = args.spoiler_fix or ROOT / '.cache/mods/spoiler-fix.zip'
+    skyboxes = args.skyboxes or ROOT / '.cache/mods/atmospheric-skyboxes.zip'
     source, destination = ROOT / 'dist', ROOT / 'build/public'
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'assets').mkdir(exist_ok=True)
@@ -116,6 +151,18 @@ def main():
         target = destination / entry['url']
         if not target.exists():
             shutil.copyfile(source / entry['url'], target)
+    originals = {e['path'].lower(): e for e in index['entries']}
+    if args.spoiler_fix or spoiler_fix.is_file():
+        replacements = addon_entries(spoiler_fix, destination, originals, SPOILER_MODELS.__contains__)
+        if {e['path'].lower() for e in replacements} != SPOILER_MODELS:
+            raise ValueError('Expected replacement CRPs for the 964, 993 and 996')
+        for entry in replacements:
+            originals[entry['path'].lower()].update(entry)
+    if args.skyboxes or skyboxes.is_file():
+        replacements = addon_entries(skyboxes, destination, originals, sky_asset)
+        if not any(e['path'].lower().endswith('.fsh') for e in replacements):
+            raise ValueError('Expected replacement sky textures')
+        index['skyboxes'] = replacements
     wasm=(source/'engine.wasm').read_bytes()
     wasm_name=hashlib.sha256(wasm).hexdigest()+'.wasm'
     wasm_path=destination/'assets'/wasm_name
@@ -123,6 +170,7 @@ def main():
         wasm_path.write_bytes(wasm)
         wasm_path.with_suffix('.wasm.gz').write_bytes(gzip.compress(wasm,compresslevel=9,mtime=0))
     referenced = {Path(e['url']).name for e in index['entries'] if e.get('url', '').startswith('./assets/')}
+    referenced.update(Path(e['url']).name for e in index.get('skyboxes', []))
     referenced.update([wasm_name,wasm_name+'.gz'])
     for path in (destination / 'assets').iterdir():
         if path.name not in referenced:
