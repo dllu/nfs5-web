@@ -5,6 +5,7 @@
 #define FS_NODES 4096
 #define FS_WRITE_LIMIT (64u * 1024u * 1024u)
 #define FS_CHUNK 262144u
+#define FS_CACHE_PAGES 8u
 typedef struct {
     char path[PATH_CAPACITY], url[PATH_CAPACITY];
     uint32_t attributes, size, capacity, live, dirty, version;
@@ -19,7 +20,7 @@ typedef struct { uint32_t live, generation, cursor; char directory[PATH_CAPACITY
 static fs_node fs_nodes[FS_NODES];
 static fs_object fs_objects[256];
 static fs_handle fs_handles[512];
-static fs_cache_entry fs_cache[8];
+static fs_cache_entry fs_cache[FS_CACHE_PAGES];
 static fs_search fs_searches[64];
 static uint32_t fs_count, fs_cache_stamp, fs_written, fs_reads, fs_fetches, fs_revision;
 static uint64_t fs_fetch_bytes,fs_preload_reads,fs_preload_bytes;
@@ -115,7 +116,7 @@ static void fs_uncache(fs_node *node) {
     fs_stream_detach(node);
     uint32_t id = (uint32_t)(node - fs_nodes) + 1;
     fs_drop_ranges(node);
-    for (unsigned i = 0; i < 8; i++) if (fs_cache[i].node == id) fs_cache[i].node = fs_cache[i].stamp = 0;
+    for (unsigned i = 0; i < FS_CACHE_PAGES; i++) if (fs_cache[i].node == id) fs_cache[i].node = fs_cache[i].stamp = 0;
 }
 static fs_node *fs_new(const char *path, uint32_t attributes) {
     fs_node *node = NULL;
@@ -158,6 +159,63 @@ static void fs_reset(void) {
     fs_new("C:\\", 16); fs_new("D:\\", 16); fs_new("C:\\nfs5", 16);
     for (unsigned i = 0; i < fs_count; i++) fs_nodes[i].dirty = 0;
 }
+static fs_cache_entry *fs_cached_page(uint32_t id, uint32_t offset) {
+    for (unsigned i = 0; i < FS_CACHE_PAGES; i++)
+        if (fs_cache[i].node == id && fs_cache[i].offset == offset) return &fs_cache[i];
+    return NULL;
+}
+static int fs_download(fs_node *node, uint32_t start, uint32_t size, uint8_t *bytes) {
+    /* The staging buffer belongs to this reader. The source may change
+     * while another client owns the VM, so check its version before use. */
+    char url[PATH_CAPACITY]; strcpy(url, node->url);
+    uint32_t version = node->version, thread = guest_tid(), caller = g_cur_func;
+    double began = emscripten_get_now(), wall = emscripten_date_now();
+    machine_release();
+    int got = fs_asset_read(url, start, size, bytes);
+    double elapsed = emscripten_get_now() - began;
+    machine_acquire();
+    fs_fetches++; fs_fetch_ms += elapsed;
+    if (elapsed > fs_fetch_max_ms) fs_fetch_max_ms = elapsed;
+    double event[] = {wall, elapsed, (uint32_t)(node - fs_nodes) + 1, start, got > 0 ? got : 0, thread, caller};
+    memcpy(fs_events[fs_event_count++ % 32], event, sizeof event);
+    if (got > 0) fs_fetch_bytes += got;
+    if (got == (int)size && node->version == version && node->live) return 1;
+    last_error = 30;
+    return 0;
+}
+static fs_cache_entry *fs_load_pages(fs_node *node, uint32_t id, uint32_t start, uint32_t end) {
+    uint32_t pages = 1;
+    if (!atomic_load(&fs_stream.attached) || fs_stream.node != id) {
+        /* Combine the consecutive cold pages of a single ReadFile into one
+         * transfer. Keep the cache bound and stop at already resident data. */
+        while (pages < FS_CACHE_PAGES && end - start > pages * FS_CHUNK &&
+               !fs_cached_page(id, start + pages * FS_CHUNK)) pages++;
+    }
+    uint32_t size = node->size - start;
+    if (size > pages * FS_CHUNK) size = pages * FS_CHUNK;
+    uint8_t *bytes = malloc(size);
+    if (!bytes) { last_error = 8; return NULL; }
+    if (!fs_stream_read(id, start, size, bytes) && !fs_download(node, start, size, bytes)) {
+        free(bytes);
+        return NULL;
+    }
+    fs_cache_entry *cached = NULL;
+    /* Install the first requested page last so it remains the most recent. */
+    while (pages) {
+        uint32_t offset = --pages * FS_CHUNK;
+        cached = fs_cached_page(id, start + offset);
+        if (!cached) {
+            cached = &fs_cache[0];
+            for (unsigned i = 1; i < FS_CACHE_PAGES; i++)
+                if (fs_cache[i].stamp < cached->stamp) cached = &fs_cache[i];
+        }
+        cached->node = id; cached->offset = start + offset; cached->stamp = ++fs_cache_stamp;
+        cached->size = size - offset < FS_CHUNK ? size - offset : FS_CHUNK;
+        memcpy(cached->bytes, bytes + offset, cached->size);
+    }
+    free(bytes);
+    return cached;
+}
 static int fs_read_node(fs_node *node, uint32_t offset, uint32_t count, uint8_t *destination) {
     if (offset > node->size || count > node->size - offset) { last_error = 87; return 0; }
     fs_reads++;
@@ -177,33 +235,11 @@ static int fs_read_node(fs_node *node, uint32_t offset, uint32_t count, uint8_t 
         }
         if(preloaded)continue;
         uint32_t start = offset / FS_CHUNK * FS_CHUNK;
-        fs_cache_entry *cached = NULL;
-        for (unsigned i = 0; i < 8; i++) if (fs_cache[i].node == id && fs_cache[i].offset == start) { cached = &fs_cache[i]; break; }
+        fs_cache_entry *cached = fs_cached_page(id, start);
         if (!cached) {
-            uint32_t size=node->size-start;if(size>FS_CHUNK)size=FS_CHUNK;
-            /* A download must never hold the VM or borrow a shared cache slot:
-             * music I/O otherwise stops simulation, audio and graphics together.
-             * Stage privately, then revalidate the immutable source and choose
-             * a cache victim after reacquiring ownership. */
-            uint8_t *bytes=malloc(size);
-            if(!bytes){last_error=8;return 0;}
-            if(!fs_stream_read(id,start,size,bytes)){
-                char url[PATH_CAPACITY];strcpy(url,node->url);
-                uint32_t version=node->version,thread=guest_tid(),caller=g_cur_func;
-                double began=emscripten_get_now(),wall=emscripten_date_now();
-                machine_release();int got=fs_asset_read(url,start,size,bytes);
-                double elapsed=emscripten_get_now()-began;machine_acquire();
-                fs_fetches++;fs_fetch_ms+=elapsed;if(elapsed>fs_fetch_max_ms)fs_fetch_max_ms=elapsed;
-                double event[]={wall,elapsed,id,start,got>0?got:0,thread,caller};
-                memcpy(fs_events[fs_event_count++%32],event,sizeof event);
-                if(got>0)fs_fetch_bytes+=got;
-                if(got!=(int)size||node->version!=version||!node->live){free(bytes);last_error=30;return 0;}
-            }
-            cached=&fs_cache[0];
-            for(unsigned i=1;i<8;i++)if(fs_cache[i].stamp<cached->stamp)cached=&fs_cache[i];
-            memcpy(cached->bytes,bytes,size);free(bytes);cached->size=size;
-            fs_stream_hint(id,offset);
-            cached->node = id; cached->offset = start;
+            cached = fs_load_pages(node, id, start, offset + count);
+            if (!cached) return 0;
+            fs_stream_hint(id, offset);
         }
         cached->stamp = ++fs_cache_stamp;
         uint32_t available = cached->size - (offset - start), n = count < available ? count : available;

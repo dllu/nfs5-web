@@ -23,7 +23,7 @@ typedef struct {
 _Static_assert(sizeof(nfspu_gpu_vertex) == 32, "Thrash vertex ABI");
 _Static_assert(sizeof(nfspu_gpu_state) == 164, "GPU state ABI");
 enum { GPU_RESIZE=1, GPU_CLEAR, GPU_PRESENT, GPU_DRAW, GPU_TEXTURE_CREATE, GPU_TEXTURE_WRITE,
-       GPU_TEXTURE_DESTROY, GPU_READ_PIXELS, GPU_FLUSH, GPU_RESET };
+       GPU_TEXTURE_DESTROY, GPU_READ_PIXELS, GPU_FLUSH, GPU_RESET, GPU_READ_SCALED };
 static struct {
     _Atomic uint32_t write,read,completed,attached,failed;
     uint32_t capacity,version;
@@ -154,6 +154,11 @@ static int gpu_read_pixels(uint8_t *rgba,uint32_t width,uint32_t height) {
     if(width!=gpu_width||height!=gpu_height)return 0;
     return gpu_read_rect(rgba,0,0,width,height);
 }
+static int gpu_read_scaled(uint8_t *rgba,uint32_t width,uint32_t height) {
+    if(!width||!height||width>gpu_width||height>gpu_height)return 0;
+    uint32_t args[]={(uint32_t)(uintptr_t)rgba,width,height};
+    gpu_wait(gpu_send(GPU_READ_SCALED,args,sizeof args,NULL,0,NULL,0));return 1;
+}
 static void gpu_close(void) {
     gpu_wait(gpu_send(GPU_RESET,NULL,0,NULL,0,NULL,0));memset(gpu_textures,0,sizeof gpu_textures);
 }
@@ -165,9 +170,10 @@ static const struct {
     int(*read_pixels)(uint8_t*,uint32_t,uint32_t);
     int(*read_rect)(uint8_t*,uint32_t,uint32_t,uint32_t,uint32_t);
     int(*read_visibility)(uint8_t*,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
-} web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels,gpu_read_rect,gpu_read_visibility};
+    int(*read_scaled)(uint8_t*,uint32_t,uint32_t);
+} web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels,gpu_read_rect,gpu_read_visibility,gpu_read_scaled};
 static void gpu_reset(void) {
-    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=10;
+    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=11;
     gpu_sequence=gpu_packets=gpu_notifications=0;
     memset(gpu_textures,0,sizeof gpu_textures);gpu_width=gpu_height=gpu_next_texture=0;gpu_error[0]=0;
 }

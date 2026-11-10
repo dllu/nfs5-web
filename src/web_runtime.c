@@ -10,6 +10,7 @@
 #include "web_ui.h"
 
 #define GUEST_SIZE WEB_GUEST_SIZE
+#define HEAP_START (16u * 1024u * 1024u)
 #define HEAP_LIMIT (224u * 1024u * 1024u)
 #define STACK_TOP (GUEST_SIZE - 16u)
 #define TRACE_SIZE 1024u
@@ -153,46 +154,80 @@ static guest_block *find_block(uint32_t address, uint32_t kind) {
     return NULL;
 }
 
+static void heap_snapshot(uint32_t stats[12]) {
+    memset(stats, 0, 12 * sizeof(uint32_t));
+    stats[0] = HEAP_START; stats[1] = heap_next; stats[2] = HEAP_LIMIT;
+    stats[7] = HEAP_LIMIT - heap_next; stats[10] = block_count;
+    for (uint32_t i = 0; i < block_count; i++) {
+        const guest_block *block = &blocks[i];
+        if (!block->span) continue;
+        if (block->live) {
+            stats[3] += block->size; stats[4] += block->span; stats[8]++;
+        } else {
+            stats[5] += block->span; stats[9]++;
+            if (block->span > stats[6]) stats[6] = block->span;
+        }
+    }
+    stats[11] = heap_next - HEAP_START - stats[4] - stats[5];
+}
+static void heap_exhausted(uint32_t size) {
+    uint32_t stats[12]; heap_snapshot(stats);
+    uint32_t largest = stats[6] > stats[7] ? stats[6] : stats[7];
+    fail(g_cur_func, "Guest heap exhausted (%u bytes; %u bytes free, largest span %u, live %u)",
+         size, stats[5] + stats[7], largest, stats[4]);
+}
+
 static uint32_t allocate_kind(uint32_t size, uint32_t alignment, uint32_t kind) {
     uint32_t mask = kind == 2 ? 4095 : 15;
-    if (size > HEAP_LIMIT - mask) fail(g_cur_func, "Guest heap exhausted (%u bytes)", size);
+    if (size > HEAP_LIMIT - mask) heap_exhausted(size);
     uint32_t span = ((size ? size : 1) + mask) & ~mask;
+    guest_block *best = NULL;
     for (uint32_t i = 0; i < block_count; i++) {
         guest_block *block = &blocks[i];
-        if (block->live || block->span < span || block->address % alignment) continue;
-        if (block->span > span) {
-            guest_block *remainder = block_slot();
-            *remainder = (guest_block){block->address + span, 0, block->span - span, 0, 0};
-        }
-        *block = (guest_block){block->address, size, span, kind, 1};
-        memory_claim(block->address,span,4,kind==2?block->address:1);
-        memset((void *)ADDR(block->address), 0, span);
-        return block->address;
+        if (block->live || block->span < span) continue;
+        uint32_t address = (block->address + alignment - 1) & ~(alignment - 1);
+        if (address - block->address > block->span - span) continue;
+        if (!best || block->span < best->span ||
+            (block->span == best->span && block->address < best->address)) best = block;
     }
-    uint32_t address = (heap_next + alignment - 1) & ~(alignment - 1);
-    if (address > HEAP_LIMIT - span) fail(g_cur_func, "Guest heap exhausted (%u bytes)", size);
-    guest_block *block = block_slot();
+    uint32_t address;
+    guest_block *block = best;
+    if (best) {
+        address = (best->address + alignment - 1) & ~(alignment - 1);
+        uint32_t before = address - best->address, after = best->span - before - span;
+        if (before) *block_slot() = (guest_block){.address = best->address, .span = before};
+        if (after) *block_slot() = (guest_block){.address = address + span, .span = after};
+    } else {
+        address = (heap_next + alignment - 1) & ~(alignment - 1);
+        if (span > HEAP_LIMIT - HEAP_START || address > HEAP_LIMIT - span) heap_exhausted(size);
+        if (address > heap_next) *block_slot() = (guest_block){.address = heap_next, .span = address - heap_next};
+        block = block_slot();
+        heap_next = address + span;
+    }
     *block = (guest_block){address, size, span, kind, 1};
     memory_claim(address,span,4,kind==2?address:1);
-    heap_next = address + span;
     memset((void *)ADDR(address), 0, span);
     return address;
 }
 
 static void release_block(guest_block *block) {
     if(block->kind==2)memory_claim(block->address,block->span,0,0);
-    block->live = 0;
-    /* Reclaim the tail, including previously freed adjacent blocks. */
-    int changed;
-    do {
-        changed = 0;
-        for (uint32_t i = 0; i < block_count; i++) {
-            guest_block *candidate = &blocks[i];
-            if (candidate->span && !candidate->live && candidate->address + candidate->span == heap_next) {
-                heap_next = candidate->address; candidate->span = 0; changed = 1;
-            }
-        }
-    } while (changed);
+    uint32_t address = block->address, span = block->span;
+    /* Free extents are disjoint and never touch: at most one neighbor on
+     * each side. Preserve metadata slots of every live allocation. */
+    for (uint32_t i = 0; i < block_count; i++) {
+        guest_block *neighbor = &blocks[i];
+        if (neighbor == block || neighbor->live || !neighbor->span) continue;
+        if (neighbor->address + neighbor->span == address) {
+            address = neighbor->address; span += neighbor->span;
+        } else if (address + span == neighbor->address) span += neighbor->span;
+        else continue;
+        *neighbor = (guest_block){0};
+    }
+    if (address + span == heap_next) {
+        heap_next = address; *block = (guest_block){0};
+    } else *block = (guest_block){.address = address, .span = span};
+    while (block_count && !blocks[block_count - 1].span) block_count--;
 }
 
 static uint32_t allocate(uint32_t size) {
@@ -568,7 +603,7 @@ uint32_t web_init(void) {
     MEM32(g_fs_base + 0x18) = g_fs_base;
     MEM32(g_fs_base + 0x30) = 0xA000;
     memcpy((void *)ADDR(0xB000), "C:\\nfs5\\nfs5.exe", 17);
-    heap_next = 0x1000000;
+    heap_next = HEAP_START;
     block_count = 0; memset(blocks, 0, sizeof blocks);
     g_enter_idx = calls = g_icall_count = g_icall_trace_idx = 0;
     win_clock_origin=emscripten_get_now();
@@ -713,6 +748,9 @@ int web_has_entered(uint32_t va) {
 }
 uint32_t *web_last_import(void) { return fatal_pending ? error_import : cpu.import; }
 uint32_t web_heap(void) { return heap_next; }
+uint32_t *web_heap_stats(void) {
+    static uint32_t stats[12];machine_acquire();heap_snapshot(stats);machine_release();return stats;
+}
 uint32_t web_memory_size(void) { return GUEST_SIZE; }
 uint32_t web_pointer(uint32_t address,uint32_t size) {
     machine_acquire();uint32_t pointer=web_guest_range(address,size)?(uint32_t)ADDR(address):0;machine_release();return pointer;

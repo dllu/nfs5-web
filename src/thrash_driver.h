@@ -35,7 +35,11 @@ static uint32_t th_guest_string(const char *text){uint32_t p=allocate((uint32_t)
 static void nfspu_thrash_pump(void){machine_yield();}
 static int open_gpu(void){if(!opened){if(!gpu->open(width,height))return 0;opened=1;}return 1;}
 static void hle_set_screen_size(uint32_t w,uint32_t h){win_render_size(w,h);}
-static void nfspu_thrash_shutdown(void){if(opened){gpu->close();opened=0;for(unsigned i=0;i<MAX_TEXTURES;i++)textures[i].gpu_id=0;render_state.texture=0;}}
+static void discard_framebuffer(void){
+    if(framebuffer)th_guest_free((void*)ADDR(framebuffer));
+    framebuffer=framebuffer_capacity=0;if(lockdesc)MEM32(lockdesc)=0;
+}
+static void nfspu_thrash_shutdown(void){if(opened){gpu->close();opened=0;for(unsigned i=0;i<MAX_TEXTURES;i++)textures[i].gpu_id=0;render_state.texture=0;}discard_framebuffer();}
 #define RET(value,argc) do {result((uint32_t)(value),(argc));return;}while(0)
 #define A32(i) argument(i)
 #define APTR(i) ((void*)ADDR(argument(i)))
@@ -116,6 +120,7 @@ static void r_mode(void) {
     framebuffer_width=width;framebuffer_height=height;framebuffer_ui=0;
     uint32_t bits=A32(2);color_bits=bits==2||bits==32?32:16;
     if(color_bits>MEM32(modes+i*40+8))color_bits=16;
+    if(framebuffer_capacity>(uint64_t)width*height*(color_bits/8))discard_framebuffer();
     if(opened){if(!gpu->resize(width,height))RET(0,3);}else if(!open_gpu())RET(0,3);
     hle_set_screen_size(width,height);
     web_projection_update(width,height);
@@ -426,18 +431,16 @@ static void r_lock(void) {
      * Reading physical pixels and enlarging them again at Unlock recursively
      * copies the previous loading image into its otherwise black margins. */
     uint32_t w=ui_draw_depth?ui_size[0]:width,h=ui_draw_depth?ui_size[1]:height;
-    uint32_t required=w*h*color_bits/8;
+    uint32_t required=w*h*(color_bits/8);
     if(required>framebuffer_capacity){if(framebuffer)hle_free(hle_ptr(framebuffer));framebuffer=hle_va(hle_alloc(required));framebuffer_capacity=required;}
-    uint8_t *rgba=malloc((size_t)width*height*4);if(!rgba)RET(0,0);
-    int ok=gpu->read_pixels(rgba,width,height);
-    if(ok)for(uint32_t y=0;y<h;y++) {
-        uint32_t sy=h==height?y:(uint64_t)(2*y+1)*height/(2*h);
-        for(uint32_t x=0;x<w;x++) {
-            uint32_t sx=w==width?x:(uint64_t)(2*x+1)*width/(2*w);
-            uint32_t i=y*w+x;const uint8_t *s=rgba+((size_t)sy*width+sx)*4;
-            if(color_bits==16)MEM16(framebuffer+i*2)=((s[0]>>3)<<11)|((s[1]>>2)<<5)|(s[2]>>3);
-            else MEM32(framebuffer+i*4)=0xFF000000u|s[0]<<16|s[1]<<8|s[2];
-        }
+    uint8_t *rgba=malloc((size_t)w*h*4);if(!rgba)RET(0,0);
+    /* Resample on the GPU before transfer. Loading artwork needs only its
+     * logical surface, even when the race uses tens of millions of pixels. */
+    int ok=w==width&&h==height?gpu->read_pixels(rgba,w,h):gpu->read_scaled(rgba,w,h);
+    if(ok)for(uint32_t i=0;i<w*h;i++){
+        const uint8_t *s=rgba+i*4;
+        if(color_bits==16)MEM16(framebuffer+i*2)=((s[0]>>3)<<11)|((s[1]>>2)<<5)|(s[2]>>3);
+        else MEM32(framebuffer+i*4)=0xFF000000u|s[0]<<16|s[1]<<8|s[2];
     }
     free(rgba);framebuffer_width=w;framebuffer_height=h;framebuffer_ui=ui_draw_depth!=0;
     MEM32(lockdesc)=framebuffer;MEM32(lockdesc+4)=w*color_bits/8;MEM32(lockdesc+8)=color_bits==16?4:6;MEM32(lockdesc+12)=w;MEM32(lockdesc+16)=h;

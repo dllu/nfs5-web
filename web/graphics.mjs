@@ -28,7 +28,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
     const version=Atomics.load(header,6);
-    if(![1,2,3,4,5,6,7,8,9,10].includes(version))throw new Error('Unsupported graphics transport version');
+    if(![1,2,3,4,5,6,7,8,9,10,11].includes(version))throw new Error('Unsupported graphics transport version');
     roomWaiters=version>=10;
     stateSize=version>=7?41:version>=6?40:version>=5?31:version>=4?30:version>=3?26:25;
     const size=Atomics.load(header,5)>>>0;
@@ -139,6 +139,13 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
         // native scene preparation. Reads and mutations flush in order too.
         case 9:renderer.flushHint();break;
         case 10:renderer.reset();uploads.clear();states.clear();stateOrder.fill(null);stateCursor=0;stateWords=stateCache=null;visibilitySamples.clear();break;
+        case 11:{
+          const [destination,width,height]=data;
+          if(data.length!==3||!width||!height||width>renderer.width||height>renderer.height||destination+width*height*4>module.HEAPU8.length)
+            throw new Error(`Invalid scaled readback: ${width}x${height}, framebuffer ${renderer.width}x${renderer.height}, destination ${destination}`);
+          const pixels=await renderer.readPixels({scaled:{width,height}});if(closed)return;
+          module.HEAPU8.set(pixels,destination);break;
+        }
         default:throw new Error(`Unsupported graphics command ${opcode}`);
       }
       views();

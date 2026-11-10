@@ -184,6 +184,12 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     loading:{runtimeMs:performance.now()-started,preloadBytes:assetMemory.bytes,preloadedFiles:assetMemory.files},
     audioStats:()=>detachAudio?.stats?.(),
     streamingStats:()=>streaming.stats(),
+    heapStats:()=>{
+      const pointer=module._web_heap_stats();
+      const values=Array.from(new Uint32Array(module.HEAPU8.buffer,pointer,12));
+      const keys=['start','highWater','limit','liveBytes','liveSpan','freeSpan','largestFreeSpan','tailBytes','liveBlocks','freeBlocks','slots','alignmentWaste'];
+      return Object.fromEntries(keys.map((key,i)=>[key,values[i]]));
+    },
     fileActivity:()=>{
       const pointer=module._web_fs_io_events(),values=new Float64Array(module.HEAPU8.buffer,pointer,2+32*7);
       const paths=new Map([...ids].map(([path,id])=>[id,path]));

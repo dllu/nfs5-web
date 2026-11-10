@@ -43,6 +43,19 @@ struct Output { @builtin(position) position: vec4f, @location(0) uv: vec2f };
 }
 @fragment fn fs(input: Output) -> @location(0) vec4f { return textureSample(image, image_sampler, input.uv); }
 `;
+// Match the old CPU resampler's integer center-of-pixel rule, including ties.
+const scaledRead = `
+@group(0) @binding(0) var image: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> extent: vec2u;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2.0 - 1.0, 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) p: vec4f) -> @location(0) vec4f {
+  let texel = (vec2u(p.xy) * 2u + 1u) * textureDimensions(image) / (extent * 2u);
+  return textureLoad(image, vec2i(texel), 0);
+}
+`;
 
 export async function selectAdapter(gpu) {
   let fallback;
@@ -97,7 +110,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     const percentile=f=>values[Math.min(values.length-1,Math.floor(values.length*f))]??0;
     return {samples:values.length,p50:percentile(.5),p95:percentile(.95),p99:percentile(.99),max:values.at(-1)??0,over33ms:values.filter(v=>v>1000/30).length,recentLongFrames:longFrames.slice()};
   }
-  let width = 0, height = 0, outputWidth=0, outputHeight=0, color, depth, presentGroup, readSurface;
+  let width = 0, height = 0, outputWidth=0, outputHeight=0, color, depth, presentGroup, readSurface,readGroup,readWidth=0,readHeight=0;
   let vertices = new Uint8Array(512 * 1024), indices = new Uint32Array(32768), uniforms = new Float32Array(64 * 1024);
   let vertexBytes = 0, indexCount = 0, uniformBytes = 0, operations = [], imageStrip;
   const uniformOffsets=new Map();
@@ -109,7 +122,9 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   context.configure({ device, format, alphaMode: 'opaque' });
   const presentShader = device.createShaderModule({ code: presentation });
   const presentPipeline = device.createRenderPipeline({ layout: 'auto', vertex: { module: presentShader, entryPoint: 'vs' }, fragment: { module: presentShader, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
-  const readPipeline = device.createRenderPipeline({layout:'auto',vertex:{module:presentShader,entryPoint:'vs'},fragment:{module:presentShader,entryPoint:'fs',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list'}});
+  const readShader=device.createShaderModule({code:scaledRead});
+  const readPipeline = device.createRenderPipeline({layout:'auto',vertex:{module:readShader,entryPoint:'vs'},fragment:{module:readShader,entryPoint:'fs',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list'}});
+  const readExtent=device.createBuffer({size:8,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
   const presentSampler = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
 
   function check() { if (closed) throw new Error('Renderer is closed'); if (errors.length) throw new Error(errors[0]); }
@@ -362,18 +377,24 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   }
   async function frameBudget() { if(frames.length>=2){const start=performance.now();await frames[0];stats.gpuWaitMs+=performance.now()-start;}check(); }
   function flushHint(){if(vertexBytes>=256*1024)flush();}
-  async function readPixels({x=0,y=0,output=false,width:w=output?outputWidth:width,height:h=output?outputHeight:height}={}) {
+  async function readPixels({x=0,y=0,output=false,scaled,width:w=scaled?.width??(output?outputWidth:width),height:h=scaled?.height??(output?outputHeight:height)}={}) {
     check();
-    if(![x,y,w,h].every(Number.isInteger)||x<0||y<0||w<1||h<1||x+w>(output?outputWidth:width)||y+h>(output?outputHeight:height))throw new Error('Invalid readback rectangle');
+    const sw=scaled?.width??(output?outputWidth:width),sh=scaled?.height??(output?outputHeight:height);
+    const maxSize=device.limits.maxTextureDimension2D;
+    if(![x,y,w,h,sw,sh].every(Number.isInteger)||x<0||y<0||w<1||h<1||x+w>sw||y+h>sh||sw>maxSize||sh>maxSize||(scaled&&output))throw new Error('Invalid readback rectangle');
     const encoder = device.createCommandEncoder(); flush(encoder); const stride = Math.ceil(w*4/256)*256;
     let sourceTexture=color;
-    if(!output&&(outputWidth!==width||outputHeight!==height)) {
-      // Original framebuffer locks still see 640×480. Rasterize geometry at
-      // monitor density, then downsample only for the legacy CPU interface.
-      readSurface??=device.createTexture({size:[width,height],format:'rgba8unorm',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
+    if(sw!==outputWidth||sh!==outputHeight) {
+      // Keep native-density rendering, but transfer only the CPU interface's
+      // logical pixels. This also covers loading art in race-sized surfaces.
+      if(!readSurface||readWidth!==sw||readHeight!==sh){
+        readSurface?.destroy();readWidth=sw;readHeight=sh;
+        readSurface=device.createTexture({size:[sw,sh],format:'rgba8unorm',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
+        device.queue.writeBuffer(readExtent,0,Uint32Array.of(sw,sh));
+        readGroup=device.createBindGroup({layout:readPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:color.createView()},{binding:1,resource:{buffer:readExtent}}]});
+      }
       const pass=encoder.beginRenderPass({colorAttachments:[{view:readSurface.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,1]}]});
-      const group=device.createBindGroup({layout:readPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:color.createView()},{binding:1,resource:presentSampler}]});
-      pass.setPipeline(readPipeline);pass.setBindGroup(0,group);pass.draw(3);pass.end();sourceTexture=readSurface;
+      pass.setPipeline(readPipeline);pass.setBindGroup(0,readGroup);pass.draw(3);pass.end();sourceTexture=readSurface;
     }
     const size=stride*h;
     let entry=size<=65536?readBuffers.find(e=>!e.busy&&e.size>=size):null;
@@ -400,6 +421,6 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     get width() { return width; }, get height() { return height; },
     get outputWidth(){return outputWidth;},get outputHeight(){return outputHeight;},
     async validate() { await device.queue.onSubmittedWorkDone(); check(); },
-    close() { if (closed) return; closed = true; for (const entry of textures.values()) entry.texture.destroy();for(const entry of readBuffers)entry.buffer.destroy(); color.destroy(); depth.destroy();readSurface?.destroy(); vertexBuffer?.destroy(); indexBuffer?.destroy(); uniformBuffer?.destroy(); context.unconfigure(); device.destroy(); },
+    close() { if (closed) return; closed = true; for (const entry of textures.values()) entry.texture.destroy();for(const entry of readBuffers)entry.buffer.destroy(); color.destroy(); depth.destroy();readSurface?.destroy();readExtent.destroy(); vertexBuffer?.destroy(); indexBuffer?.destroy(); uniformBuffer?.destroy(); context.unconfigure(); device.destroy(); },
   };
 }

@@ -76,7 +76,7 @@ try {
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
-  assert.equal(Atomics.load(header,6),10,'Transport v10 registers queue-space waiters');checks++;
+  assert.equal(Atomics.load(header,6),11,'Transport v11 supports scaled readbacks');checks++;
   for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000],[10,3],[36,128],[47,1],[48,5],[52,3],[53,4],[54,6]])assert.equal(await call(methods.setstate,[state,value]),1);
   assert.equal(await call(methods.window,[3]),1);
   const vertex=data+256;

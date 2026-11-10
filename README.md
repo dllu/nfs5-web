@@ -62,6 +62,7 @@ Adapter selection requests high performance and tries other browser preferences
 before accepting a software adapter. Websites cannot override blocked drivers or
 force a particular installed GPU. **Info → Copy diagnostics** includes the actual
 adapter, browser, logical/output sizes, shared Wasm allocation and GPU queue stats.
+Guest heap diagnostics report live allocations, free space and the largest free span.
 It also reports startup/preload timing, file requests, music read-ahead hits,
 audio context/session state, signal peak and refill activity,
 state-cache hits/misses and the last 600 submission intervals
@@ -103,7 +104,8 @@ are combined; larger geometry batches submit early to overlap GPU and game work.
 Small framebuffer reads transfer only their requested rectangle, including the
 sun-visibility sample, instead of a complete 4K/6K frame. Ongoing sun occlusion
 uses the latest completed GPU sample, usually one frame old, with one query in
-flight per sun. Reference captures and ordinary framebuffer reads remain exact.
+flight per sun. Loading-screen locks sample the logical UI pixels on the GPU
+before transfer. Full-resolution framebuffer reads remain available.
 At most four small GPU readback buffers are retained for reuse; large screenshot
 buffers are released after each read.
 Sun/light sprite rotation
@@ -118,9 +120,10 @@ the graphics worker. No Wine reference runs are needed for normal work.
 
 Public startup batches small assets and music headers/tails into an approximately
 10 MiB pack (3.6 MiB compressed), downloaded alongside Wasm compilation.
-Larger files use byte ranges with an eight-page, 256 KiB/page cache. Writable
-browser saves override immutable preloads. Ordinary downloads stage privately
-and release the shared game lock; source changes during I/O reject stale data.
+Larger files use byte ranges with an eight-page, 256 KiB/page cache. Contiguous
+cold pages requested by a single read share one transfer of up to 2 MiB.
+Writable browser saves override immutable preloads. Downloads stage privately
+and release the shared game lock. Source changes during I/O reject stale data.
 First-time download and compilation depend on the connection and device.
 
 Music uses a separate fixed 12 MiB read-ahead cache. It retains the complete
@@ -138,7 +141,8 @@ an eight-worker pool and an approximately 84 MiB Wasm module (8.8 MiB gzip).
 It preserves integer MMX, uses double-precision x87 helpers and retains
 execution diagnostics; complete binary compatibility is not established. Memory
 can grow with a 16 MiB linear step. Browser/GPU/code memory is additional to the
-shared arena.
+shared arena. The guest allocator merges adjacent free spans and reuses alignment
+gaps. Display teardown and smaller modes release oversized framebuffer locks.
 JavaScript consumers refresh their byte view when a game thread grows shared
 memory, including while GPU readbacks are pending. Race loading is tested with
 the 911 GT1 and four opponents on Auvergne at 1280×960, 4K and 6K; the 6K case

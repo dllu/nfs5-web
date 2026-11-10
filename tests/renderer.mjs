@@ -272,6 +272,18 @@ try {
     renderer.clear(0xff000000); const before = renderer.stats.batches;
     for (let i = 0; i < 100; i++) renderer.draw(quad(0,0,64,64,0xff00ffff),mesh);
     pixels = await renderer.readPixels(); expect([renderer.stats.batches-before],[1],'consecutive draw batching'); expect(pixel(pixels,16,16),[0,255,255,255],'batched vertices/indices');
+    renderer.resize(8,6);renderer.clear(0xff000000);
+    for(let y=0;y<6;y++)for(let x=0;x<8;x++)renderer.draw(quad(x,y,1,1,0xff000000|(x*19)<<16|(y*21)<<8),mesh);
+    const sourcePixels=await renderer.readPixels({output:true});
+    for(const [width,height] of [[5,3],[10,3]]){
+      const scaled=await renderer.readPixels({scaled:{width,height}});
+      const expected=[];
+      for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+        const sx=Math.floor((x+.5)*8/width),sy=Math.floor((y+.5)*6/height);
+        expected.push(...pixel(sourcePixels,sx,sy));
+      }
+      expect(scaled,expected,'GPU scaled readback matches CPU pixel-center sampling');
+    }
     renderer.resize(3840,2160); renderer.clear(0xff203040); renderer.draw(quad(3832,2152,8,8,0xffff0000),mesh,{stencil_enable:1,stencil_func:2,stencil_ref:0});
     pixels = await renderer.readPixels(); expect(pixel(pixels,0,0),[32,48,64,255],'4K target'); expect(pixel(pixels,3838,2158),[255,0,0,255],'4K lower-right raster');
     renderer.draw(quad(3838,2158,2,2,0xff00ff00),mesh);
@@ -678,7 +690,9 @@ try {
     await runtime.graphics.renderer.validate();
     const stats=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),5));
     const nativeMode=[runtime.graphics.renderer.width,runtime.graphics.renderer.height];
+    const raceHeap=runtime.heapStats().liveSpan;
     await method('_THRASH_restore@0');await method('_THRASH_setvideomode@12',mode(640,480),0,2);
+    expect(raceHeap-runtime.heapStats().liveSpan,3840*2160*4,'Returning to the menu frees the race framebuffer');
     expect(projection()[0],0x44200000,'menu mode restores virtual width');
     expect(projection()[2],0x42160000,'menu mode restores half-FOV');
     expect(module._web_ui_extent(0),640,'menu mode restores UI width');

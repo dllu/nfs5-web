@@ -136,6 +136,7 @@ def main():
     exports.extend(['_web_fs_preload','_web_fs_preload_range','_web_fs_io_stats','_web_fs_io_events'])
     exports.append('_web_fs_stream')
     exports.extend(['_web_detail_mode','_web_detail_stats'])
+    exports.append('_web_heap_stats')
     exports.append('_web_flare_angle')
     profile_flags = ['--emit-symbol-map'] if args.profile else []
     if not args.profile:

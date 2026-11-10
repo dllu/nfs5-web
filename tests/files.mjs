@@ -60,9 +60,11 @@ try {
   const original = open('ORIGINAL.BIN'); assert.notEqual(original, 0xffffffff);
   assert.equal(invoke('GetFileType', original), 1);
   assert.equal(invoke('GetFileSize', original, output), source.length); assert.equal(get(output), 0);
+  const rangeReadsBefore=runtime.fileActivity().total;
   assert.equal(invoke('SetFilePointer', original, 262138, 0, 0), 262138);
   assert.equal(invoke('ReadFile', original, output, 100, output + 512, 0), 1); assert.equal(get(output + 512), 100);
   assert.deepEqual(module.HEAPU8.subarray(base + output, base + output + 100), source.subarray(262138, 262238));
+  assert.equal(runtime.fileActivity().total-rangeReadsBefore,1,'One asset request covers both cold pages');
   assert.equal(invoke('SetFilePointer', original, -10, 0, 2), source.length - 10);
   assert.equal(invoke('ReadFile', original, output, 50, output + 512, 0), 1); assert.equal(get(output + 512), 10);
   assert.deepEqual(module.HEAPU8.subarray(base + output, base + output + 10), source.subarray(-10));

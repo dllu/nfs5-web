@@ -136,6 +136,8 @@ try {
   assert(diagnostics.transport.stateHits>0&&diagnostics.transport.stateMisses>0,'Diagnostics expose state reuse');
   assert(diagnostics.loading.preloadedFiles>900&&diagnostics.loading.preloadBytes<16*1024*1024,'Small assets are batched in a bounded startup pack');
   assert(diagnostics.files.preloadedReads>0,'The original game reads preloaded assets');
+  const {heap}=diagnostics;
+  assert(heap.liveBytes>0&&heap.liveSpan+heap.freeSpan+heap.tailBytes===heap.limit-heap.start,'Diagnostics account for the guest heap');
   assert(diagnostics.audio.nativeFills>0,'The audio worklet consumes the native refill ring');
   assert.equal(diagnostics.audio.state,'running');assert(diagnostics.audio.rate>0&&diagnostics.audio.peak>=0,'Diagnostics include browser audio state and signal level');
   assert(diagnostics.streaming.enabled&&diagnostics.streaming.failures===0,'The music read-ahead worker is available');

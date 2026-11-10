@@ -42,5 +42,29 @@ try {
   assert.equal(invoke('VirtualProtect',ro,1,2,out),1);assert.equal(old(),1);
   invoke('CloseHandle',mapping);invoke('UnmapViewOfFile',rw);invoke('UnmapViewOfFile',ro);
   invoke('GetSystemInfo',out);assert.equal(view.getUint32(out+4,true),4096);assert.equal(view.getUint32(out+12,true),0x3FFFFFFF);assert.equal(view.getUint32(out+28,true),65536);
-  console.log(`${checks} virtual-memory checks passed (reserve/commit/decommit, page rounding, protection metadata, reservation boundaries, mapped access rights)`);
+
+  const alloc=size=>invoke('HeapAlloc',1,0,size),release=address=>assert.equal(invoke('HeapFree',1,0,address),1);
+  const mib=1024*1024, initial=runtime.heapStats();
+  const left=alloc(4*mib),middle=alloc(4*mib),right=alloc(4*mib),guard=alloc(64);
+  const filler=alloc(runtime.heapStats().tailBytes);
+  module.HEAPU8[base+guard]=0x37;
+  release(left);release(right);release(middle);
+  const holes=runtime.heapStats();
+  assert.equal(holes.tailBytes,0);
+  assert.equal(holes.largestFreeSpan,12*mib,'Adjacent freed blocks merge on both sides');
+  const reused=alloc(10514432);
+  assert.equal(reused,left,'Race allocation fits in the joined extent');
+  assert.equal(module.HEAPU8[base+guard],0x37,'Live neighbor survives reuse');
+  release(reused);release(guard);release(filler);
+  assert.deepEqual(runtime.heapStats(),initial,'Freeing the tail returns the entire extent');
+
+  const prefix=alloc(16),unaligned=alloc(131072),suffix=alloc(16);
+  release(unaligned);
+  const reserved=invoke('VirtualAlloc',0,4096,0x3000,4);
+  assert.equal(reserved,Math.ceil(unaligned/65536)*65536);
+  assert.equal(runtime.heapStats().freeSpan,131072-4096,'Reuse retains both sides of an aligned reservation');
+  assert.equal(invoke('VirtualFree',reserved,0,0x8000),1);
+  release(suffix);release(prefix);
+  assert.deepEqual(runtime.heapStats(),initial);
+  console.log(`${checks} virtual-memory checks passed (reservation boundaries, protections, coalescing and aligned reuse)`);
 }finally{runtime.dispose();}
