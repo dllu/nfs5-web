@@ -184,6 +184,14 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     loading:{runtimeMs:performance.now()-started,preloadBytes:assetMemory.bytes,preloadedFiles:assetMemory.files},
     audioStats:()=>detachAudio?.stats?.(),
     streamingStats:()=>streaming.stats(),
+    fileActivity:()=>{
+      const pointer=module._web_fs_io_events(),values=new Float64Array(module.HEAPU8.buffer,pointer,2+32*7);
+      const paths=new Map([...ids].map(([path,id])=>[id,path]));
+      return {total:values[0],recent:Array.from({length:values[1]},(_,i)=>{
+        const v=values.subarray(2+i*7,2+(i+1)*7);
+        return {at:v[0],ms:v[1],path:paths.get(v[2])??'Mounted file '+v[2],offset:v[3],bytes:v[4],thread:v[5],caller:hex(v[6])};
+      })};
+    },
     setDetail,
     detailStats:()=>{
       const values=new Float64Array(module.HEAPU8.buffer,module._web_detail_stats(),8);

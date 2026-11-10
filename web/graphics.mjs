@@ -1,4 +1,5 @@
 import { createRenderer, mipLayout } from './renderer.mjs';
+import {framePacer} from './pacing.mjs';
 
 const stateFields = ['texture','depth_test','depth_write','blend_enable','src_blend','dst_blend','filter_linear','address_wrap','cull',
   'alpha_test','alpha_ref','fog_enable','fog_color','fog_near','fog_far','primitive','depth_func',
@@ -17,20 +18,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   let closed=false, pumping=null, failure=null, stateCache=null, stateWords=null, serial=0;
   const states=new Map(),stateOrder=new Array(4096);let stateCursor=0;
   const visibilitySamples=new Map();
-  let visible=true,cancelPacing;
-  const backgroundClock=new Int32Array(new SharedArrayBuffer(4));
-  function nextFrame() {
-    return new Promise(resolve=>{
-      let frame,timer,settled=false;
-      const done=()=>{if(settled)return;settled=true;if(frame!==undefined)cancelAnimationFrame(frame);clearTimeout(timer);cancelPacing=null;resolve();};
-      cancelPacing=done;
-      if(visible&&typeof requestAnimationFrame==='function')frame=requestAnimationFrame(done);
-      else if(typeof Atomics.waitAsync==='function') {
-        const wait=Atomics.waitAsync(backgroundClock,0,0,visible?1000/60:1000/30);
-        Promise.resolve(wait.value).then(done);
-      } else timer=setTimeout(done,visible?1000/60:1000/30);
-    });
-  }
+  let visible=true,focused=true;
+  const pacing=framePacer();
   let channel,yieldResolve;
   const stats={packets:0,copiedBytes:0,stateHits:0,stateMisses:0,stateEvictions:0,visibilityQueries:0,visibilityReuses:0};
   const pointer=module._web_gpu_transport(), uploads=new Map();
@@ -113,15 +102,15 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
       stats.packets++;
       const packet=packetView(read,count),opcode=packet[1],sequence=packet[2],data=packet.subarray(3);
       switch(opcode) {
-        case 1:visibilitySamples.clear();renderer.resize(data[0],data[1]);onResize(data[0],data[1]);break;
+        case 1:visibilitySamples.clear();pacing.setState({menu:data[0]===640&&data[1]===480});renderer.resize(data[0],data[1]);onResize(data[0],data[1]);break;
         case 2:{
           const options=data.length===2?undefined:{mask:data[2],stencil:data[3],rect:{x:data[4],y:data[5],width:data[6],height:data[7]}};
           if(data.length!==2&&data.length!==8)throw new Error('Invalid clear packet length');
           renderer.clear(data[0],new Float32Array(data.buffer,data.byteOffset,data.length)[1],options);break;
         }
         case 3:
-          if(pace)await nextFrame();
-          if(closed)return;renderer.present();await renderer.frameBudget();break;
+          if(pace)await pacing.next();
+          if(closed)return;renderer.present(visible,focused);await renderer.frameBudget();break;
         case 4:{
           const vertices=data[stateSize],indices=data[stateSize+1],vertexStart=stateSize+2,vertexEnd=vertexStart+vertices*8;
           if(data.length!==vertexEnd+indices)throw new Error('Invalid draw packet length');
@@ -188,8 +177,9 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   const timer=typeof Atomics.waitAsync==='function'&&Atomics.load(header,6)>=2?null:setInterval(pump,1);
   if(timer===null)consume().catch(fail);
   return {
-    renderer,stats,
-    setVisible(value){visible=Boolean(value);renderer.resetTiming();cancelPacing?.();Atomics.notify(backgroundClock,0);},
+    renderer,stats,pacing:pacing.stats,
+    setVisible(value){visible=Boolean(value);renderer.resetTiming();pacing.setState({visible});},
+    setFocused(value){focused=Boolean(value);renderer.resetTiming();pacing.setState({focused});},
     setFrontendSize(size){if(!frontendSize)return;Object.assign(frontendSize,size);renderer.resize(renderer.width,renderer.height);onResize(renderer.width,renderer.height);},
     async settle() {
       while(!closed && !failure) {
@@ -199,7 +189,7 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     },
     close() {
       if(closed)return;fail(new Error('Renderer detached'));closed=true;
-      if(timer!==null)clearInterval(timer);Atomics.notify(header,0);yieldResolve?.();cancelPacing?.();Atomics.notify(backgroundClock,0);
+      if(timer!==null)clearInterval(timer);Atomics.notify(header,0);yieldResolve?.();pacing.close();
       channel?.port1.close();channel?.port2.close();renderer.close();
     },
   };

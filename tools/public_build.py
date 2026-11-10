@@ -137,16 +137,33 @@ def main():
                 pack.extend((destination/entry['url']).read_bytes())
                 pack.extend(b'\0'*(-len(pack)%4))
             entry['preloadOffset']=packed[entry['url']]
+    # Music selection probes every song's header. Pin those tiny regions so
+    # seeking to a new song never re-fetches metadata or evicts its audio pages.
+    music=next(e for e in index['entries'] if e['path'].lower()=='gamedata/music/zzzymus.viv')
+    data=(destination/music['url']).read_bytes()
+    if data[:4]!=b'BIGF':raise ValueError('Invalid music archive')
+    count=struct.unpack_from('>I',data,8)[0];cursor=16;tracks=[];ranges=[]
+    def pin(offset,size):
+        ranges.append({'path':music['path'],'offset':offset,'size':size,'preloadOffset':len(pack)})
+        pack.extend(data[offset:offset+size]);pack.extend(b'\0'*(-len(pack)%4))
+    for _ in range(count):
+        offset,size=struct.unpack_from('>II',data,cursor);cursor=data.index(0,cursor+8)+1
+        if offset>len(data) or size>len(data)-offset or size<1:raise ValueError('Invalid music directory')
+        tracks.append({'offset':offset,'size':size})
+        pin(offset,min(size,65536))
+        if size>65536:pin(offset+size-4096,4096)
+    pin(0,cursor)
+    index['music']={'path':music['path'],'tracks':tracks}
     digest=hashlib.sha256(pack).hexdigest()
     (destination/'assets'/digest).write_bytes(pack)
     (destination/'assets'/(digest+'.gz')).write_bytes(gzip.compress(pack,compresslevel=9,mtime=0))
-    index['preload']={'url':'./assets/'+digest,'size':len(pack),'sha256':digest}
+    index['preload']={'url':'./assets/'+digest,'size':len(pack),'sha256':digest,'ranges':ranges}
     (destination / 'assets.json').write_text(json.dumps(index, separators=(',', ':')) + '\n')
     static = ['engine.js', 'engine.wasm', 'manifest.json', 'game.exe']
     for name in static:
         shutil.copyfile(source / name, destination / name)
     web = ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'config.mjs',
-           'input.mjs', 'controls.mjs', 'memory.mjs', 'assets.mjs', 'streaming.mjs', 'stream-worker.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']
+           'input.mjs', 'controls.mjs', 'memory.mjs', 'assets.mjs', 'streaming.mjs', 'stream-worker.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'pacing.mjs', 'renderer.mjs', 'thrash.wgsl']
     for name in web:
         shutil.copyfile(ROOT / 'web' / name, destination / name)
     shutil.copyfile(ROOT / 'web/play.html', destination / 'index.html')

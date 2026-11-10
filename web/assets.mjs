@@ -20,13 +20,17 @@ export async function preloadAssets(module,assets,ids) {
   const bytes=await assets?.pack;
   if(!bytes||!module._web_fs_preload)return {bytes:0,files:0,release(){}};
   const entries=assets.index.entries.filter(e=>e.preloadOffset!==undefined);
+  const ranges=assets.index.preload?.ranges??[];
   for(const e of entries)if(!Number.isInteger(e.preloadOffset)||e.preloadOffset<0||e.preloadOffset+e.size>bytes.length)throw new Error('Invalid startup pack entry');
+  if(ranges.length>128)throw new Error('Too many startup ranges');
+  for(const e of ranges)if(!ids.has(e.path)||![e.offset,e.size,e.preloadOffset].every(Number.isInteger)||e.offset<0||e.size<1||e.preloadOffset<0||e.preloadOffset+e.size>bytes.length)throw new Error('Invalid startup range');
   const pointer=module._malloc(bytes.length);if(!pointer)throw new Error('Unable to allocate startup pack');
-  const loaded=[];
-  const release=()=>{for(const id of loaded)module._web_fs_preload(id,0,0);module._free(pointer);};
+  const loaded=[],loadedRanges=[];
+  const release=()=>{for(const [id,offset]of loadedRanges)module._web_fs_preload_range(id,offset,0,0);for(const id of loaded)module._web_fs_preload(id,0,0);module._free(pointer);};
   try{
     module.HEAPU8.set(bytes,pointer);
     for(const e of entries){const id=ids.get(e.path);if(!module._web_fs_preload(id,pointer+e.preloadOffset,e.size))throw new Error(`Unable to preload ${e.path}`);loaded.push(id);}
+    for(const e of ranges){const id=ids.get(e.path);if(!module._web_fs_preload_range(id,e.offset,pointer+e.preloadOffset,e.size))throw new Error(`Unable to preload range ${e.path}`);loadedRanges.push([id,e.offset]);}
     return {bytes:bytes.length,files:loaded.length,release};
   }catch(error){release();throw error;}
 }

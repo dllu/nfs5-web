@@ -52,3 +52,28 @@ try{
  assert.equal(h[0],0,'Changing an asset invalidates its read-ahead session');
 }finally{m._web_fs_stream(0);runtime.dispose();}
 console.log('Bounded music read-ahead, concurrency, eviction ownership, tail bytes, range fallback and native reads without network passed');
+
+// Song-aware layout: cache complete songs in coalesced ranges. Advancing within
+// a song must not require any more HTTP requests after the initial warmup.
+const songBuffer=new SharedArrayBuffer(64+48*(chunk+16)),songHeader=new Int32Array(songBuffer,0,16);
+songHeader.set([1,0,1,chunk*100-17,-1,0,0,0,0,2,chunk,48]);
+const songs=[{offset:chunk*3+128,size:chunk*23+19},{offset:chunk*30+512,size:chunk*21+333},{offset:chunk*73+256,size:chunk*7+27}];
+const songRequests=[];
+const songRun=streamAssets({buffer:songBuffer,offset:0,url:'https://test.invalid/music',ranges:songs},{read:async(url,{headers})=>{
+ const [start,end]=headers.Range.slice(6).split('-').map(Number);songRequests.push([start,end]);
+ const bytes=new Uint8Array(end-start+1);for(let at=start;at<=end;at+=chunk)bytes.fill(at/chunk,at-start,Math.min(at-start+chunk,bytes.length));
+ return new Response(bytes,{status:206,headers:{'Content-Range':`bytes ${start}-${end}/${songHeader[3]}`}});
+}});
+const hint=offset=>{Atomics.store(songHeader,4,offset);Atomics.add(songHeader,1,1);Atomics.notify(songHeader,1);};
+try{
+ hint(songs[0].offset+4096);await until(()=>songHeader[7]>=chunk*46);
+ assert(songRequests.some(([start,end])=>end-start+1===4*chunk),'Adjacent pages share a 1 MiB request');
+ const requests=songRequests.length;
+ for(let i=0;i<5;i++){hint(songs[0].offset+i*chunk+4096);await delay(5);}
+ assert.equal(songRequests.length,requests,'A warmed song plays without additional network requests');
+ for(const song of songs.slice(0,2))for(let at=Math.floor(song.offset/chunk)*chunk;at<song.offset+song.size;at+=chunk){
+  let page;for(let i=0;i<48;i++){const s=new Int32Array(songBuffer,64+i*(chunk+16),4);if(s[0]===2&&s[1]===at)page={s,data:new Uint8Array(songBuffer,80+i*(chunk+16),chunk)};}
+  assert(page,`Current and next songs retain page ${at}`);assert.equal(page.data[chunk-1],at/chunk);
+ }
+}finally{Atomics.store(songHeader,0,0);Atomics.add(songHeader,1,1);Atomics.notify(songHeader,1);await songRun;}
+console.log('Complete current/next-song caching, coalesced 1 MiB reads and network-free playback of warmed songs passed');

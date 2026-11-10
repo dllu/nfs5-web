@@ -9,7 +9,7 @@ const require=createRequire(import.meta.url),{ws:WebSocket}=require('../node_mod
 process.env.TMPDIR=resolve('.cache/tmp');process.env.XDG_CACHE_HOME=resolve('.cache/xdg');process.env.__GL_SHADER_DISK_CACHE_PATH=resolve('.cache/nvidia');await mkdir(process.env.TMPDIR,{recursive:true});
 await copyFile('tests/race-worker.mjs','dist/race-check-worker.mjs');
 const reservation=createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));const port=reservation.address().port;await new Promise(r=>reservation.close(r));
-const child=spawn('/usr/bin/google-chrome',['--remote-debugging-port='+port,'--remote-allow-origins=http://localhost','--user-data-dir='+resolve('.cache/chrome-race-usability-raw'),'--no-sandbox','--no-first-run','--disable-dev-shm-usage','--disable-breakpad','--crash-dumps-dir='+resolve('.cache/crashes'),'about:blank'],{stdio:'ignore'});
+const child=spawn(process.env.NFS5_CHROME??'/usr/bin/google-chrome',['--remote-debugging-port='+port,'--remote-allow-origins=http://localhost','--user-data-dir='+resolve('.cache/chrome-race-usability-raw'),'--no-sandbox','--no-first-run','--disable-dev-shm-usage','--disable-breakpad','--crash-dumps-dir='+resolve('.cache/crashes'),'about:blank'],{stdio:'ignore'});
 let socket,next=0;const pending=new Map(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(fn,timeout=90000){const end=Date.now()+timeout;while(Date.now()<end){const value=await fn();if(value)return value;await sleep(100);}throw new Error('Browser race condition timed out');}
 try {
@@ -29,6 +29,7 @@ try {
   window.worker=new Worker('./race-check-worker.mjs',{type:'module'});window.worker.onmessage=({data})=>{window.messages.push(data);if(data.type==='screen')canvas.style.setProperty('--game-aspect',data.width/data.height);};
   window.input=attachInput(window,e=>window.worker.postMessage(e),{viewport:canvas,keepRunningOnBlur:true});
   document.addEventListener('visibilitychange',()=>window.worker.postMessage({type:'visibility',visible:!document.hidden}));
+  for(const type of ['focus','blur'])window.addEventListener(type,()=>window.worker.postMessage({type:'focus',focused:document.hasFocus()}));
   const offscreen=canvas.transferControlToOffscreen();window.worker.postMessage({type:'start',canvas:offscreen,display:{width:1280,height:720}},[offscreen]);
  })()`);
  async function sample(id){await evaluate(`window.worker.postMessage({type:'sample',id:${JSON.stringify(id)}})`);return until(()=>evaluate(`window.messages.find(m=>m.type==='sample'&&m.id===${JSON.stringify(id)})`));}
@@ -43,7 +44,7 @@ try {
  async function capture(path){const {data}=await command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(path,Buffer.from(data,'base64'));}
  await sleep(6000);
  const racing=await sample('racing'),away=await send('Target.createTarget',{url:'about:blank'});await send('Target.activateTarget',{targetId:away.targetId});
- await until(()=>evaluate('document.hidden'),10000);await sleep(4000);const backgroundRace=await sample('background-race');assert(backgroundRace.frames>racing.frames+30,'A hidden race continues simulating and presenting');
+ await until(()=>evaluate('document.hidden'),10000);await sleep(Number(process.env.NFS5_BACKGROUND_MS??65000));const backgroundRace=await sample('background-race');assert(backgroundRace.frames>racing.frames+30,'A hidden race continues simulating and presenting');assert(backgroundRace.stats.canvasFrames<=racing.stats.canvasFrames+2,'Hidden frames must not depend on the compositor surface');
  await send('Target.activateTarget',{targetId});await send('Target.closeTarget',{targetId:away.targetId});
  await key('ArrowUp','ArrowUp',38,true);await sleep(2000);await key('ArrowUp','ArrowUp',38,false);
  await capture('build/race-before-pause.png');

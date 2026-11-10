@@ -37,5 +37,18 @@ try{
   assert.equal(await corrupt.pack,null);assert(warnings.some(s=>s.includes('hash')));
   const absent=await readAssets(async path=>path==='./assets.json'?Response.json(index):new Response('',{status:404}),message=>warnings.push(message));
   assert.equal(await absent.pack,null);
+  const rangeId=runtime.mount('C:\\nfs5\\Ranges.bin',{url:'file:///deliberately-not-present',size:32});
+  const rangeSource={index:{entries:[],preload:{ranges:[{path:'Ranges.bin',offset:0,size:16,preloadOffset:0},{path:'Ranges.bin',offset:16,size:16,preloadOffset:16}]}},pack:Promise.resolve(bytes)};
+  cached=await preloadAssets(m,rangeSource,new Map([['Ranges.bin',rangeId]]));
+  const initial=stats();m.HEAPU8.set(new TextEncoder().encode('C:\\nfs5\\Ranges.bin\0'),data);
+  const ranged=await call('CreateFileA',[0x800000,0xc0000000,3,0,3,128,0]);
+  assert.equal(await call('ReadFile',[ranged,0x800100,32,0x800200,0]),1);
+  assert.deepEqual(m.HEAPU8.slice(data+256,data+288),bytes,'One native read crosses adjacent pinned ranges');
+  assert.equal(stats()[0],initial[0]);assert.equal(stats()[5],32);
+  await call('SetFilePointer',[ranged,0,0,0]);m.HEAPU8[data+256]=71;
+  assert.equal(await call('WriteFile',[ranged,0x800100,1,0x800200,0]),1);assert.equal(stats()[5],0,'Writable overlays release every pinned range');
+  await call('SetFilePointer',[ranged,0,0,0]);await call('ReadFile',[ranged,0x800100,32,0x800200,0]);
+  assert.deepEqual(m.HEAPU8.slice(data+256,data+288),Uint8Array.from([71,...bytes.slice(1)]));
+  await call('CloseHandle',[ranged]);cached.release();cached=null;
   console.log('Startup pack hash/bounds, native reads without HTTP, immutable backing, writable overlay and fallback passed');
 }finally{cached?.release();runtime.dispose();}

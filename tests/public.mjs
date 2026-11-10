@@ -141,6 +141,7 @@ try {
   assert(diagnostics.streaming.enabled&&diagnostics.streaming.failures===0,'The music read-ahead worker is available');
   assert(diagnostics.transport.producerPackets>=diagnostics.transport.producerNotifications&&diagnostics.transport.producerNotifications>0,'Diagnostics expose actual queue notifications');
   assert(diagnostics.submissionIntervalsMs.samples>0&&diagnostics.submissionIntervalsMs.samples<=600);
+  assert(diagnostics.submissionIntervalsMs.p50>=1000/70,'Menu redraws are capped near 60 Hz on a high-refresh display');
   assert(diagnostics.submissionIntervalsMs.p99>=diagnostics.submissionIntervalsMs.p50);
   await page.getByRole('button',{name:'Close',exact:true}).click();
   await page.getByRole('button',{name:'Controls',exact:true}).click();

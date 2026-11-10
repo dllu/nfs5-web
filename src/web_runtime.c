@@ -854,17 +854,38 @@ uint32_t web_fs_preload(uint32_t id,const uint8_t *data,uint32_t size) {
     node->asset_data=data;if(data)fs_preload_bytes+=size;
     machine_release();return 1;
 }
+uint32_t web_fs_preload_range(uint32_t id,uint32_t offset,const uint8_t *bytes,uint32_t size) {
+    machine_acquire();
+    if(!id||id>fs_count||!fs_nodes[id-1].live||(fs_nodes[id-1].attributes&16)){machine_release();return 0;}
+    fs_node *node=fs_nodes+id-1;
+    if(bytes&&(!size||offset>node->size||size>node->size-offset||node->data||!node->url[0])){machine_release();return 0;}
+    unsigned slot=128;
+    for(unsigned i=0;i<128;i++)if(fs_ranges[i].node==id&&fs_ranges[i].offset==offset){slot=i;break;}
+    if(slot==128&&bytes)for(unsigned i=0;i<128;i++)if(!fs_ranges[i].node){slot=i;break;}
+    if(slot==128){machine_release();return !bytes;}
+    if(fs_ranges[slot].node)fs_preload_bytes-=fs_ranges[slot].size;
+    fs_ranges[slot].node=bytes?id:0;fs_ranges[slot].offset=offset;fs_ranges[slot].size=bytes?size:0;fs_ranges[slot].bytes=bytes;
+    if(bytes)fs_preload_bytes+=size;
+    machine_release();return 1;
+}
 double *web_fs_io_stats(void) {
     static double stats[6];machine_acquire();
     stats[0]=fs_fetches;stats[1]=fs_fetch_bytes;stats[2]=fs_fetch_ms;stats[3]=fs_fetch_max_ms;stats[4]=fs_preload_reads;stats[5]=fs_preload_bytes;
     machine_release();return stats;
+}
+double *web_fs_io_events(void) {
+    static double events[2+32*7];machine_acquire();
+    uint32_t count=fs_event_count<32?fs_event_count:32;
+    events[0]=fs_event_count;events[1]=count;
+    for(uint32_t i=0;i<count;i++)memcpy(events+2+i*7,fs_events[(fs_event_count-count+i)%32],7*sizeof(double));
+    machine_release();return events;
 }
 uint32_t web_fs_stream(uint32_t id) {
     machine_acquire();
     if(!id){atomic_store(&fs_stream.attached,0);atomic_fetch_add(&fs_stream.epoch,1);emscripten_futex_wake(&fs_stream.epoch,1);machine_release();return 0;}
     if(id>fs_count||!fs_nodes[id-1].live||(fs_nodes[id-1].attributes&16)||!fs_nodes[id-1].url[0]||fs_nodes[id-1].data||atomic_load(&fs_stream.attached)){machine_release();return 0;}
     memset(&fs_stream,0,sizeof fs_stream);fs_stream.node=id;fs_stream.size=fs_nodes[id-1].size;
-    fs_stream.version=1;fs_stream.chunk=FS_CHUNK;fs_stream.pages=4;atomic_store(&fs_stream.start,UINT32_MAX);
+    fs_stream.version=2;fs_stream.chunk=FS_CHUNK;fs_stream.pages=48;atomic_store(&fs_stream.start,UINT32_MAX);
     atomic_store(&fs_stream.attached,1);machine_release();return (uint32_t)(uintptr_t)&fs_stream;
 }
 uint32_t *web_fs_snapshot(void) {

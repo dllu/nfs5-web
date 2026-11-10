@@ -281,6 +281,13 @@ try {
     expect(Array.from(region.slice(0,4)),[255,0,0,255],'partial readback preserves nonzero origin');
     expect(Array.from(region.slice(-4)),[0,255,0,255],'partial readback removes row padding');
     expect([renderer.stats.readbackBytes-readBefore.bytes,renderer.stats.readbackBufferBytes-readBefore.buffer],[32,1024],'small readback bounds CPU and aligned GPU allocations');
+    const allocations=renderer.stats.readbackAllocations;
+    for(let i=0;i<12;i++){
+      renderer.clear(i%2?0xff112233:0xff445566);
+      const bytes=await renderer.readPixels({x:3838,y:2156,width:2,height:4});
+      expect(Array.from(bytes.slice(0,4)),i%2?[17,34,51,255]:[68,85,102,255],'reused readback maps fresh pixels');
+    }
+    expect([renderer.stats.readbackAllocations],[allocations],'ongoing small readbacks reuse GPU buffers');
     let invalid=false;try{await renderer.readPixels({x:3839,y:2159,width:2,height:2});}catch(error){invalid=/rectangle/.test(error.message);}
     expect([Number(invalid)],[1],'out-of-bounds readback is rejected before GPU submission');
     renderer.resize(640,360); renderer.clear(0xff102030);
@@ -818,6 +825,9 @@ try {
       for(let i=0;i<8;i++){r.present();await r.frameBudget();}
       await r.validate();if(r.stats.peakPendingFrames>2)throw new Error('GPU frame budget exceeded');
       if(r.timing().samples!==7||r.timing().p99<0)throw new Error('Submission timing history is invalid');
+      const canvasFrames=r.stats.canvasFrames;
+      for(let i=0;i<4;i++){r.present(false);await r.frameBudget();}
+      if(r.stats.canvasFrames!==canvasFrames||r.stats.frames!==12)throw new Error('Hidden frames must retain GPU progress without acquiring a compositor surface');
       const result={logical:[r.width,r.height],output:[canvas.width,canvas.height],peakPendingFrames:r.stats.peakPendingFrames,errors:r.errors.slice()};
       r.resize(1920,1080);if(canvas.width!==1920||canvas.height!==1080)throw new Error('Race geometry was resized as frontend');
       if(r.timing().samples!==0)throw new Error('Race timing retained menu/loading intervals');

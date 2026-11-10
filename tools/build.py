@@ -133,7 +133,7 @@ def main():
     exports.extend(['_web_intro_config','_web_intro_skipped'])
     exports.extend(['_web_process_exited','_web_exit_code'])
     exports.extend(['_web_input_analog','_web_analog_state'])
-    exports.extend(['_web_fs_preload','_web_fs_io_stats'])
+    exports.extend(['_web_fs_preload','_web_fs_preload_range','_web_fs_io_stats','_web_fs_io_events'])
     exports.append('_web_fs_stream')
     exports.extend(['_web_detail_mode','_web_detail_stats'])
     exports.append('_web_flare_angle')
@@ -143,6 +143,7 @@ def main():
     subprocess.run([str(compiler), *map(str, compiled), optimization, '-pthread', *profile_flags, '-o', str(ROOT / 'dist/engine.js'),
                     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=web,worker,node', '-sPTHREAD_POOL_SIZE=8',
                     '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=402653184',
+                    '-sMEMORY_GROWTH_GEOMETRIC_STEP=0', '-sMEMORY_GROWTH_LINEAR_STEP=16777216',
                     '-sSTACK_SIZE=8388608', '-sEXPORTED_FUNCTIONS=' + json.dumps(exports),
                     '-sEXPORTED_RUNTIME_METHODS=["UTF8ToString","HEAPU8","wasmMemory","PThread"]', '-sASSERTIONS=1',
                     '-lm'], env=env, check=True)

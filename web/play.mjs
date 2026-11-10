@@ -70,6 +70,8 @@ try {
     display:displaySize(),canvas:offscreen},[offscreen,audio.configuration.port]);
   window.addEventListener('beforeunload',warnBeforeLeaving);
   worker.postMessage({type:'visibility',visible:!document.hidden});
+  const updateFocus=()=>{if(!finished)worker.postMessage({type:'focus',focused:document.hasFocus()});};
+  window.addEventListener('focus',updateFocus);window.addEventListener('blur',updateFocus);updateFocus();
   let resizeTimer;
   window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(!finished)worker.postMessage({type:'viewport',display:displaySize()});},150);});
   // Flush files already serialized by the game when the tab is backgrounded.

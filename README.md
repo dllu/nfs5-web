@@ -29,9 +29,12 @@ serialize career progress.** Written files checkpoint every second and when
 the tab is hidden. Clearing site data deletes local progress; closing abruptly
 can lose unsaved changes. A browser confirmation guards tab close/reload until
 the game exits normally; browsers control its wording and may omit it on mobile.
-Deleting a supplied profile is persistent too. Switching tabs releases held
-controls but keeps loading and simulation running, paced at 30 Hz in the
-background. Browser/OS suspension can still stop background tabs.
+Deleting a supplied profile is persistent too. Losing focus releases held
+controls and keeps loading/simulation running at 30 Hz using an independent
+worker clock. Hidden tabs render offscreen without acquiring a compositor
+surface. An animation-callback watchdog handles obscured windows too. Menus
+redraw at up to 60 Hz; focused races follow the display refresh. Browser/OS
+suspension can still stop background tabs.
 
 A browser with WebGPU and shared-memory Wasm is required. Chrome and Firefox
 159 with WebGPU enabled are tested on the NVIDIA GB10. Performance on other
@@ -63,6 +66,8 @@ It also reports startup/preload timing, file requests, music read-ahead hits,
 audio context/session state, signal peak and refill activity,
 state-cache hits/misses and the last 600 submission intervals
 (median, p95, p99, maximum and counts over 33 ms), reset on size/visibility changes.
+The last 32 long frames include GPU/readback wait measurements; recent ordinary
+file reads include paths, timestamps, durations and calling guest threads.
 When WebGPU reports a software adapter, the public page reduces the default
 race mode to about 720p worth of pixels, preserving aspect and the minimum
 640×480 mode, and briefly explains that hardware acceleration is preferable.
@@ -99,6 +104,8 @@ Small framebuffer reads transfer only their requested rectangle, including the
 sun-visibility sample, instead of a complete 4K/6K frame. Ongoing sun occlusion
 uses the latest completed GPU sample, usually one frame old, with one query in
 flight per sun. Reference captures and ordinary framebuffer reads remain exact.
+At most four small GPU readback buffers are retained for reuse; large screenshot
+buffers are released after each read.
 Sun/light sprite rotation
 uses the original 640×480 angular scale rather than increasing with resolution.
 **Sustained 4K/120 Hz remains a target, not a verified result.** Microstutters,
@@ -109,30 +116,33 @@ overhead, but occasional long frames remain. Audio refills reuse the thread
 already holding the VM lock; host refill ticks skip a busy VM instead of blocking
 the graphics worker. No Wine reference runs are needed for normal work.
 
-Public startup batches small assets into an approximately 8 MiB pack (2.5 MiB
-compressed), downloaded alongside Wasm compilation. Larger files use byte ranges
-with an eight-page, 256 KiB/page cache. The pack adds about 8 MiB of Wasm memory;
-writable browser saves override it. A controlled 50 ms network-latency check
-reached the profile chooser in 13.7 seconds versus 27.2 seconds, with 34 versus
-291 asset requests. First-time download and compilation still depend on the
-connection and device.
+Public startup batches small assets and music headers/tails into an approximately
+10 MiB pack (3.6 MiB compressed), downloaded alongside Wasm compilation.
+Larger files use byte ranges with an eight-page, 256 KiB/page cache. Writable
+browser saves override immutable preloads. Ordinary downloads stage privately
+and release the shared game lock; source changes during I/O reject stale data.
+First-time download and compilation depend on the connection and device.
 
-Music uses a separate 1 MiB read-ahead cache with at most two background HTTP
-requests and three future 256 KiB ranges. Ready pages bypass synchronous reads;
-seeks and unavailable pages retain the ordinary file path. Invalid responses or
-worker failures disable read-ahead without changing file semantics. The entire
-117 MiB music archive is never preloaded. Cold reads and occasional GPU readback
-stalls remain possible.
+Music uses a separate fixed 12 MiB read-ahead cache. It retains the complete
+current song and prefetches a candidate next song, with at most two background
+HTTP requests, each combining up to four 256 KiB pages. Resident song headers
+avoid metadata downloads on selection; warmed songs play without further HTTP.
+Music prefetch can continue during play. The complete 112 MiB archive is never
+loaded into memory. Track/car geometry and sound effects are loaded by the
+original loading routines; a three-minute race network capture showed music
+requests only. Invalid responses or worker failures retain ordinary file I/O.
+Cold reads, CPU scheduling and occasional GPU stalls remain possible.
 
 The engine uses a 256 MiB guest arena in initially 384 MiB shared Wasm memory,
 an eight-worker pool and an approximately 84 MiB Wasm module (8.8 MiB gzip).
 It preserves integer MMX, uses double-precision x87 helpers and retains
 execution diagnostics; complete binary compatibility is not established. Memory
-can grow if needed. Browser/GPU/code memory is additional to the shared arena.
+can grow with a 16 MiB linear step. Browser/GPU/code memory is additional to the
+shared arena.
 JavaScript consumers refresh their byte view when a game thread grows shared
 memory, including while GPU readbacks are pending. Race loading is tested with
 the 911 GT1 and four opponents on Auvergne at 1280×960, 4K and 6K; the 6K case
-uses about 461 MiB of shared Wasm memory.
+uses about 453 MiB of shared Wasm memory.
 
 ## Development
 
@@ -158,6 +168,7 @@ npm run test:navigation
 npm run test:loading
 npm run test:races
 npm run test:detail
+npm run test:io
 npm run test:renderer
 npm run test:usability
 ```
@@ -185,6 +196,10 @@ Auvergne, and record geometry counts, submission intervals and Wasm memory.
 `NFS5_RACE_DETAIL=very-far npm run test:races` exercises four opponents through
 6K with the maximum override. `NFS5_CHROME` selects the executable for the
 scene-detail browser check, including an isolated Wayland wrapper.
+The I/O concurrency check holds real HTTP responses for 600 ms, verifies that
+other VM clients can run, and replaces a source mid-read to reject stale bytes.
+Pacing checks cover missing animation callbacks, focus transitions and menu caps;
+the raw-CDP race usability check keeps a race hidden for over a minute.
 `NFS5_GPU_SOFTWARE=1 npm run test:loading` selects SwiftShader explicitly.
 `python3 tools/build.py --profile` emits a Wasm symbol map.
 

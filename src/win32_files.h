@@ -7,12 +7,12 @@
 #define FS_CHUNK 262144u
 typedef struct {
     char path[PATH_CAPACITY], url[PATH_CAPACITY];
-    uint32_t attributes, size, capacity, live, dirty;
+    uint32_t attributes, size, capacity, live, dirty, version;
     uint64_t modified;
     uint8_t *data;
     const uint8_t *asset_data; /* Borrowed immutable startup pack, not a save. */
 } fs_node;
-typedef struct { uint32_t node, references, access, share, flags; uint64_t position; } fs_object;
+typedef struct { uint32_t node, references, access, share, flags, busy; uint64_t position; } fs_object;
 typedef struct { uint32_t object, generation; } fs_handle;
 typedef struct { uint32_t node, offset, size, stamp; uint8_t bytes[FS_CHUNK]; } fs_cache_entry;
 typedef struct { uint32_t live, generation, cursor; char directory[PATH_CAPACITY], pattern[260]; } fs_search;
@@ -24,6 +24,9 @@ static fs_search fs_searches[64];
 static uint32_t fs_count, fs_cache_stamp, fs_written, fs_reads, fs_fetches, fs_revision;
 static uint64_t fs_fetch_bytes,fs_preload_reads,fs_preload_bytes;
 static double fs_fetch_ms,fs_fetch_max_ms;
+static uint32_t fs_version,fs_event_count;
+static double fs_events[32][7];
+static struct {uint32_t node,offset,size;const uint8_t *bytes;} fs_ranges[128];
 static uint32_t *fs_snapshot_buffer;
 
 /* One bounded background reader for the immutable music archive. The VM owns
@@ -37,12 +40,12 @@ static struct {
     uint32_t version,chunk,pages;
     _Atomic uint32_t misses;
     uint32_t reserved[3];
-    struct { _Atomic uint32_t state;uint32_t offset,size,reserved;uint8_t bytes[FS_CHUNK]; } page[4];
+    struct { _Atomic uint32_t state;uint32_t offset,size,reserved;uint8_t bytes[FS_CHUNK]; } page[48];
 } fs_stream;
 _Static_assert(offsetof(__typeof__(fs_stream),page)==64,"Read-ahead header ABI");
 static int fs_stream_read(uint32_t node,uint32_t offset,uint32_t size,uint8_t *destination) {
     if(!atomic_load(&fs_stream.attached)||fs_stream.node!=node)return 0;
-    for(unsigned i=0;i<4;i++){
+    for(unsigned i=0;i<48;i++){
         uint32_t expected=STREAM_READY;
         if(!atomic_compare_exchange_strong(&fs_stream.page[i].state,&expected,STREAM_READING))continue;
         int match=fs_stream.page[i].offset==offset&&fs_stream.page[i].size==size;
@@ -103,9 +106,15 @@ static fs_node *fs_find(const char *path) {
     for (uint32_t i = 0; i < fs_count; i++) if (fs_nodes[i].live && fs_equal(fs_nodes[i].path, path)) return &fs_nodes[i];
     return NULL;
 }
+static void fs_drop_ranges(fs_node *node) {
+    uint32_t id=(uint32_t)(node-fs_nodes)+1;
+    for(unsigned i=0;i<128;i++)if(fs_ranges[i].node==id){fs_preload_bytes-=fs_ranges[i].size;memset(fs_ranges+i,0,sizeof fs_ranges[i]);}
+}
 static void fs_uncache(fs_node *node) {
+    node->version=++fs_version;
     fs_stream_detach(node);
     uint32_t id = (uint32_t)(node - fs_nodes) + 1;
+    fs_drop_ranges(node);
     for (unsigned i = 0; i < 8; i++) if (fs_cache[i].node == id) fs_cache[i].node = fs_cache[i].stamp = 0;
 }
 static fs_node *fs_new(const char *path, uint32_t attributes) {
@@ -116,6 +125,7 @@ static fs_node *fs_new(const char *path, uint32_t attributes) {
     fs_uncache(node);
     if(node->asset_data)fs_preload_bytes-=node->size;
     memset(node, 0, sizeof *node); strcpy(node->path, path); node->attributes = attributes; node->live = 1;
+    node->version=++fs_version;
     fs_touch(node); return node;
 }
 static int fs_resolve(uint32_t address, char path[PATH_CAPACITY]) {
@@ -138,8 +148,10 @@ static void fs_reset(void) {
     memset(fs_nodes, 0, sizeof fs_nodes); memset(fs_objects, 0, sizeof fs_objects);
     memset(fs_handles, 0, sizeof fs_handles); memset(fs_cache, 0, sizeof fs_cache);
     memset(fs_searches, 0, sizeof fs_searches);
+    memset(fs_ranges,0,sizeof fs_ranges);
     fs_count = fs_written = fs_reads = fs_fetches = fs_cache_stamp = fs_revision = 0;
     fs_fetch_bytes=fs_preload_reads=fs_preload_bytes=0;fs_fetch_ms=fs_fetch_max_ms=0;
+    fs_version=fs_event_count=0;memset(fs_events,0,sizeof fs_events);
     if(atomic_exchange(&fs_stream.attached,0))emscripten_futex_wake(&fs_stream.epoch,1);
     memset(&fs_stream,0,sizeof fs_stream);
     free(fs_snapshot_buffer); fs_snapshot_buffer = NULL;
@@ -154,22 +166,43 @@ static int fs_read_node(fs_node *node, uint32_t offset, uint32_t count, uint8_t 
     if (!count) return 1;
     if (!node->url[0]) { last_error = 30; return 0; }
     while (count) {
-        uint32_t start = offset / FS_CHUNK * FS_CHUNK, id = (uint32_t)(node - fs_nodes) + 1;
+        uint32_t id=(uint32_t)(node-fs_nodes)+1;int preloaded=0;
+        for(unsigned i=0;i<128;i++)if(fs_ranges[i].node==id&&offset>=fs_ranges[i].offset&&offset-fs_ranges[i].offset<fs_ranges[i].size){
+            uint32_t n=fs_ranges[i].size-(offset-fs_ranges[i].offset);if(n>count)n=count;
+            memcpy(destination,fs_ranges[i].bytes+offset-fs_ranges[i].offset,n);fs_preload_reads++;
+            /* Header probes do not cancel useful song read-ahead. A real
+             * audio block starts warming the complete current/next songs. */
+            if(n>=4096)fs_stream_hint(id,offset);
+            destination+=n;offset+=n;count-=n;preloaded=1;break;
+        }
+        if(preloaded)continue;
+        uint32_t start = offset / FS_CHUNK * FS_CHUNK;
         fs_cache_entry *cached = NULL;
         for (unsigned i = 0; i < 8; i++) if (fs_cache[i].node == id && fs_cache[i].offset == start) { cached = &fs_cache[i]; break; }
         if (!cached) {
-            cached = &fs_cache[0];
-            for (unsigned i = 1; i < 8; i++) if (fs_cache[i].stamp < cached->stamp) cached = &fs_cache[i];
-            cached->node = 0; cached->size = node->size - start;
-            if (cached->size > FS_CHUNK) cached->size = FS_CHUNK;
-            if(!fs_stream_read(id,start,cached->size,cached->bytes)){
-                fs_fetches++;
-                double began=emscripten_get_now();int got=fs_asset_read(node->url,start,cached->size,cached->bytes);
-                double elapsed=emscripten_get_now()-began;fs_fetch_ms+=elapsed;if(elapsed>fs_fetch_max_ms)fs_fetch_max_ms=elapsed;
+            uint32_t size=node->size-start;if(size>FS_CHUNK)size=FS_CHUNK;
+            /* A download must never hold the VM or borrow a shared cache slot:
+             * music I/O otherwise stops simulation, audio and graphics together.
+             * Stage privately, then revalidate the immutable source and choose
+             * a cache victim after reacquiring ownership. */
+            uint8_t *bytes=malloc(size);
+            if(!bytes){last_error=8;return 0;}
+            if(!fs_stream_read(id,start,size,bytes)){
+                char url[PATH_CAPACITY];strcpy(url,node->url);
+                uint32_t version=node->version,thread=guest_tid(),caller=g_cur_func;
+                double began=emscripten_get_now(),wall=emscripten_date_now();
+                machine_release();int got=fs_asset_read(url,start,size,bytes);
+                double elapsed=emscripten_get_now()-began;machine_acquire();
+                fs_fetches++;fs_fetch_ms+=elapsed;if(elapsed>fs_fetch_max_ms)fs_fetch_max_ms=elapsed;
+                double event[]={wall,elapsed,id,start,got>0?got:0,thread,caller};
+                memcpy(fs_events[fs_event_count++%32],event,sizeof event);
                 if(got>0)fs_fetch_bytes+=got;
-                if (got != (int)cached->size) { last_error = 30; return 0; }
+                if(got!=(int)size||node->version!=version||!node->live){free(bytes);last_error=30;return 0;}
             }
-            fs_stream_hint(id,start);
+            cached=&fs_cache[0];
+            for(unsigned i=1;i<8;i++)if(fs_cache[i].stamp<cached->stamp)cached=&fs_cache[i];
+            memcpy(cached->bytes,bytes,size);free(bytes);cached->size=size;
+            fs_stream_hint(id,offset);
             cached->node = id; cached->offset = start;
         }
         cached->stamp = ++fs_cache_stamp;
@@ -191,6 +224,8 @@ static int fs_resize(fs_node *node, uint32_t size, int preserve) {
     if (size > node->size) memset(node->data + node->size, 0, size - node->size);
     if(node->asset_data){fs_preload_bytes-=node->size;node->asset_data=NULL;}
     fs_stream_detach(node);
+    fs_drop_ranges(node);
+    node->version=++fs_version;
     node->size = size; node->url[0] = 0; fs_touch(node); return 1;
 }
 static fs_object *fs_get(uint32_t handle) {
@@ -206,14 +241,18 @@ static uint32_t fs_reference(uint32_t object) {
     }
     last_error = 4; return 0;
 }
-static void fs_close(uint32_t handle) {
-    fs_object *object = fs_get(handle); fs_handles[(handle & 0xFFF) / 4].object = 0;
+static void fs_release_object(fs_object *object) {
     if (!--object->references && (object->flags & 0x04000000)) {
         fs_node *node = &fs_nodes[object->node - 1]; node->live = 0;
         fs_touch(node);
         fs_written -= node->capacity; free(node->data); node->data = NULL; node->capacity = 0;
     }
 }
+static void fs_close(uint32_t handle) {
+    fs_object *object=fs_get(handle);fs_handles[(handle&0xFFF)/4].object=0;fs_release_object(object);
+}
+static void fs_io_begin(fs_object *object){object->busy=1;object->references++;}
+static void fs_io_end(fs_object *object){object->busy=0;fs_release_object(object);}
 static int fs_shares(fs_node *node, uint32_t access, uint32_t share) {
     uint32_t id = (uint32_t)(node - fs_nodes) + 1;
     for (unsigned i = 0; i < 256; i++) {
@@ -369,7 +408,11 @@ static int fs_import(const char *name) {
     }
     if (!strcmp(name, "ReadFile") || !strcmp(name, "WriteFile") || !strcmp(name, "SetFilePointer") || !strcmp(name, "SetEndOfFile") || !strcmp(name, "GetFileSize") || !strcmp(name, "FlushFileBuffers") || (!strcmp(name, "GetFileType") && (argument(0) & 0xFF000000) == 0x72000000)) {
         unsigned argc = !strcmp(name, "ReadFile") || !strcmp(name, "WriteFile") ? 5 : !strcmp(name, "SetFilePointer") ? 4 : !strcmp(name, "GetFileSize") ? 2 : 1;
-        fs_object *object = fs_get(argument(0));
+        uint32_t file_handle=argument(0);
+        fs_object *object = fs_get(file_handle);
+        /* Synchronous file objects serialize their shared offset, including
+         * duplicated handles, while an I/O worker has released the VM. */
+        while(object&&object->busy){machine_pause(500);object=fs_get(file_handle);}
         if (!object) { last_error = 6; result(!strcmp(name, "SetFilePointer") || !strcmp(name, "GetFileSize") ? 0xFFFFFFFF : 0, argc); return 1; }
         fs_node *node = &fs_nodes[object->node - 1];
         if (!strcmp(name, "GetFileType")) { result(1, 1); return 1; }
@@ -385,7 +428,7 @@ static int fs_import(const char *name) {
         }
         int write = !strcmp(name, "WriteFile") || !strcmp(name, "SetEndOfFile");
         if (!(object->access & (write ? 2 : 1))) { last_error = 5; result(0, argc); return 1; }
-        if (!strcmp(name, "SetEndOfFile")) { result(fs_resize(node, (uint32_t)object->position, 1), 1); return 1; }
+        if (!strcmp(name, "SetEndOfFile")) {fs_io_begin(object);int ok=fs_resize(node,(uint32_t)object->position,1);fs_io_end(object);result(ok,1);return 1;}
         uint32_t buffer = argument(1), size = argument(2), transferred = argument(3), overlapped = argument(4);
         if (transferred) MEM32(transferred) = 0;
         if (overlapped) { last_error = 50; result(0, 5); return 1; }
@@ -393,13 +436,16 @@ static int fs_import(const char *name) {
         uint32_t n = size, offset = (uint32_t)object->position;
         if (write) {
             if (size > UINT32_MAX - offset) { last_error = 112; result(0, 5); return 1; }
-            if (size && !fs_resize(node, offset + size > node->size ? offset + size : node->size, 1)) { result(0, 5); return 1; }
+            fs_io_begin(object);
+            if (size && !fs_resize(node, offset + size > node->size ? offset + size : node->size, 1)) {fs_io_end(object);result(0, 5); return 1; }
             if (size) memcpy(node->data + offset, (void *)ADDR(buffer), size);
         } else {
             if (offset >= node->size) n = 0; else if (n > node->size - offset) n = node->size - offset;
-            if (n && !fs_read_node(node, offset, n, (uint8_t *)ADDR(buffer))) { result(0, 5); return 1; }
+            fs_io_begin(object);
+            if (n && !fs_read_node(node, offset, n, (uint8_t *)ADDR(buffer))) {fs_io_end(object);result(0, 5); return 1; }
+            if(fs_get(file_handle)!=object||object->position!=offset){fs_io_end(object);last_error=995;result(0,5);return 1;}
         }
-        object->position += n; MEM32(transferred) = n; result(1, 5); return 1;
+        object->position += n;fs_io_end(object); MEM32(transferred) = n; result(1, 5); return 1;
     }
     if (!strcmp(name, "FindFirstFileA")) {
         char path[PATH_CAPACITY]; uint32_t out = argument(1);

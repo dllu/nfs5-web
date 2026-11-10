@@ -87,14 +87,15 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [uniformLayout, textureLayout] });
   const textures = new Map(), samplers = new Map(), pipelines = new Map();
   const normalized=new WeakMap();
-  const stats = { frames: 0, draws: 0, batches: 0, vertices: 0, submissions: 0, readbackBytes: 0, readbackBufferBytes: 0, pendingFrames:0, peakPendingFrames:0, pipelineBinds:0,uniformBinds:0,textureBinds:0 };
+  const stats = { frames: 0, canvasFrames:0,draws: 0, batches: 0, vertices: 0, submissions: 0, readbackBytes: 0, readbackBufferBytes: 0, pendingFrames:0, peakPendingFrames:0, pipelineBinds:0,uniformBinds:0,textureBinds:0,readbackAllocations:0,gpuWaitMs:0,readbackWaitMs:0 };
+  const readBuffers=[],longFrames=[];let previousGpuWait=0,previousReadbackWait=0;
   const frames=[];
   const intervals=new Float64Array(600);let intervalCount=0,lastPresent=0;
   function resetTiming(){intervalCount=0;lastPresent=0;}
   function timing(){
     const values=Array.from(intervals.subarray(0,Math.min(intervalCount,intervals.length))).sort((a,b)=>a-b);
     const percentile=f=>values[Math.min(values.length-1,Math.floor(values.length*f))]??0;
-    return {samples:values.length,p50:percentile(.5),p95:percentile(.95),p99:percentile(.99),max:values.at(-1)??0,over33ms:values.filter(v=>v>1000/30).length};
+    return {samples:values.length,p50:percentile(.5),p95:percentile(.95),p99:percentile(.99),max:values.at(-1)??0,over33ms:values.filter(v=>v>1000/30).length,recentLongFrames:longFrames.slice()};
   }
   let width = 0, height = 0, outputWidth=0, outputHeight=0, color, depth, presentGroup, readSurface;
   let vertices = new Uint8Array(512 * 1024), indices = new Uint32Array(32768), uniforms = new Float32Array(64 * 1024);
@@ -336,16 +337,30 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   }
   function textureDestroy(id) { check(); if (!id) return; flush(); textures.get(id)?.texture.destroy(); textures.delete(id); }
   function reset() { flush();for(const [id,entry] of textures)if(id){entry.texture.destroy();textures.delete(id);}clear(0xff000000); }
-  function present() {
-    const now=performance.now();if(lastPresent)intervals[intervalCount++%intervals.length]=now-lastPresent;lastPresent=now;
+  function present(visible=true,focused=true) {
+    const now=performance.now();
+    if(lastPresent){
+      const interval=now-lastPresent;intervals[intervalCount++%intervals.length]=interval;
+      if(visible&&focused&&interval>1000/30){
+        if(longFrames.length===32)longFrames.shift();
+        longFrames.push({at:performance.timeOrigin+now,ms:interval,gpuWaitMs:stats.gpuWaitMs-previousGpuWait,completedReadbackWaitMs:stats.readbackWaitMs-previousReadbackWait,pendingFrames:stats.pendingFrames,width,height});
+      }
+    }
+    lastPresent=now;previousGpuWait=stats.gpuWaitMs;previousReadbackWait=stats.readbackWaitMs;
     const encoder = device.createCommandEncoder(); flush(encoder);
-    const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0,0,0,1] }] });
-    pass.setPipeline(presentPipeline); pass.setBindGroup(0,presentGroup); pass.draw(3); pass.end(); device.queue.submit([encoder.finish()]); stats.frames++; stats.submissions++;
+    // Hidden tabs keep the offscreen framebuffer and native simulation alive
+    // without requesting a compositor surface that the browser may suspend.
+    if(visible){
+      const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0,0,0,1] }] });
+      pass.setPipeline(presentPipeline); pass.setBindGroup(0,presentGroup); pass.draw(3); pass.end();
+      stats.canvasFrames++;
+    }
+    device.queue.submit([encoder.finish()]); stats.frames++; stats.submissions++;
     const done=device.queue.onSubmittedWorkDone();frames.push(done);stats.pendingFrames++;
     stats.peakPendingFrames=Math.max(stats.peakPendingFrames,stats.pendingFrames);
     done.then(()=>{stats.pendingFrames--;if(frames[0]===done)frames.shift();},()=>{stats.pendingFrames--;if(frames[0]===done)frames.shift();});
   }
-  async function frameBudget() { if(frames.length>=2)await frames[0];check(); }
+  async function frameBudget() { if(frames.length>=2){const start=performance.now();await frames[0];stats.gpuWaitMs+=performance.now()-start;}check(); }
   function flushHint(){if(vertexBytes>=256*1024)flush();}
   async function readPixels({x=0,y=0,output=false,width:w=output?outputWidth:width,height:h=output?outputHeight:height}={}) {
     check();
@@ -360,16 +375,23 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
       const group=device.createBindGroup({layout:readPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:color.createView()},{binding:1,resource:presentSampler}]});
       pass.setPipeline(readPipeline);pass.setBindGroup(0,group);pass.draw(3);pass.end();sourceTexture=readSurface;
     }
-    const buffer = device.createBuffer({ size: stride*h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const size=stride*h;
+    let entry=size<=65536?readBuffers.find(e=>!e.busy&&e.size>=size):null;
+    if(!entry){
+      entry={buffer:device.createBuffer({size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),size,busy:false,pooled:size<=65536&&readBuffers.length<4};
+      stats.readbackAllocations++;if(entry.pooled)readBuffers.push(entry);
+    }
+    entry.busy=true;const buffer=entry.buffer;
     encoder.copyTextureToBuffer({ texture: sourceTexture,origin:[x,y,0] }, { buffer, bytesPerRow: stride, rowsPerImage: h }, [w,h]);
     device.queue.submit([encoder.finish()]);
     stats.submissions++;
     try {
-      await buffer.mapAsync(GPUMapMode.READ); const source = new Uint8Array(buffer.getMappedRange()), pixels = new Uint8Array(w*h*4);
+      const started=performance.now();await buffer.mapAsync(GPUMapMode.READ);stats.readbackWaitMs+=performance.now()-started;
+      const source = new Uint8Array(buffer.getMappedRange()), pixels = new Uint8Array(w*h*4);
       for (let row = 0; row < h; row++) pixels.set(source.subarray(row*stride,row*stride+w*4),row*w*4);
       stats.readbackBytes+=pixels.length;stats.readbackBufferBytes+=stride*h;
-      buffer.unmap(); check(); return pixels;
-    } finally { buffer.destroy(); }
+      check(); return pixels;
+    } finally {if(!entry.pooled||closed)buffer.destroy();else{buffer.unmap();entry.busy=false;}}
   }
   textureCreate(0,1,1,Uint8Array.of(255,255,255,255)); resize(canvas.width || 640, canvas.height || 480);
   return {
@@ -378,6 +400,6 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     get width() { return width; }, get height() { return height; },
     get outputWidth(){return outputWidth;},get outputHeight(){return outputHeight;},
     async validate() { await device.queue.onSubmittedWorkDone(); check(); },
-    close() { if (closed) return; closed = true; for (const entry of textures.values()) entry.texture.destroy(); color.destroy(); depth.destroy();readSurface?.destroy(); vertexBuffer?.destroy(); indexBuffer?.destroy(); uniformBuffer?.destroy(); context.unconfigure(); device.destroy(); },
+    close() { if (closed) return; closed = true; for (const entry of textures.values()) entry.texture.destroy();for(const entry of readBuffers)entry.buffer.destroy(); color.destroy(); depth.destroy();readSurface?.destroy(); vertexBuffer?.destroy(); indexBuffer?.destroy(); uniformBuffer?.destroy(); context.unconfigure(); device.destroy(); },
   };
 }
