@@ -98,3 +98,7 @@ pending query, exact ordinary reads, reset/resize and asynchronous errors.
 The final Wasm matches the tested profiled build byte for byte:
 `8aec4e60438031351b85916474fd913be1c3123cdce57e70b3298a2530eb4664`.
 Public revision `c0390e2bf5263acd` is deployed to pupserver.linode:/www/misc/nfs5.
+The live Chrome public check passes launch, completed seed, fresh profile,
+diagnostics, tab-close confirmation and persistence across a browser restart.
+Both daniel.lawrence.lu and lawrence.lu serve the release's matching modules and
+styles; the HTTPS response retains the required isolation headers.
