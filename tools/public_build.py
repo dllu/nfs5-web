@@ -146,7 +146,7 @@ def main():
     for name in static:
         shutil.copyfile(source / name, destination / name)
     web = ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'config.mjs',
-           'input.mjs', 'controls.mjs', 'memory.mjs', 'assets.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']
+           'input.mjs', 'controls.mjs', 'memory.mjs', 'assets.mjs', 'streaming.mjs', 'stream-worker.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'renderer.mjs', 'thrash.wgsl']
     for name in web:
         shutil.copyfile(ROOT / 'web' / name, destination / name)
     shutil.copyfile(ROOT / 'web/play.html', destination / 'index.html')

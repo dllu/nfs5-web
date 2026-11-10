@@ -26,6 +26,42 @@ static uint64_t fs_fetch_bytes,fs_preload_reads,fs_preload_bytes;
 static double fs_fetch_ms,fs_fetch_max_ms;
 static uint32_t *fs_snapshot_buffer;
 
+/* One bounded background reader for the immutable music archive. The VM owns
+ * normal file/cache state; a JS worker only publishes these independent pages.
+ * Claim a READY page before inspecting it so eviction cannot race a copy. */
+enum { STREAM_EMPTY,STREAM_FETCHING,STREAM_READY,STREAM_READING };
+static struct {
+    _Atomic uint32_t attached,epoch;
+    uint32_t node,size;
+    _Atomic uint32_t start,hits,requests,bytes,failures;
+    uint32_t version,chunk,pages;
+    _Atomic uint32_t misses;
+    uint32_t reserved[3];
+    struct { _Atomic uint32_t state;uint32_t offset,size,reserved;uint8_t bytes[FS_CHUNK]; } page[4];
+} fs_stream;
+_Static_assert(offsetof(__typeof__(fs_stream),page)==64,"Read-ahead header ABI");
+static int fs_stream_read(uint32_t node,uint32_t offset,uint32_t size,uint8_t *destination) {
+    if(!atomic_load(&fs_stream.attached)||fs_stream.node!=node)return 0;
+    for(unsigned i=0;i<4;i++){
+        uint32_t expected=STREAM_READY;
+        if(!atomic_compare_exchange_strong(&fs_stream.page[i].state,&expected,STREAM_READING))continue;
+        int match=fs_stream.page[i].offset==offset&&fs_stream.page[i].size==size;
+        if(match)memcpy(destination,fs_stream.page[i].bytes,size);
+        atomic_store(&fs_stream.page[i].state,STREAM_READY);
+        if(match){atomic_fetch_add(&fs_stream.hits,1);return 1;}
+    }
+    atomic_fetch_add(&fs_stream.misses,1);return 0;
+}
+static void fs_stream_hint(uint32_t node,uint32_t offset) {
+    if(!atomic_load(&fs_stream.attached)||fs_stream.node!=node)return;
+    atomic_store(&fs_stream.start,offset);atomic_fetch_add(&fs_stream.epoch,1);
+    emscripten_futex_wake(&fs_stream.epoch,1);
+}
+static void fs_stream_detach(fs_node *node) {
+    if(fs_stream.node!=(uint32_t)(node-fs_nodes)+1)return;
+    atomic_store(&fs_stream.attached,0);atomic_fetch_add(&fs_stream.epoch,1);emscripten_futex_wake(&fs_stream.epoch,1);
+}
+
 /* Runs on the native worker performing ReadFile. HTTP Range keeps large VIV
  * archives out of startup memory; ordinary static hosts returning 200 also work.
  * The Node branch reads only the staged URL, never the original installation. */
@@ -68,6 +104,7 @@ static fs_node *fs_find(const char *path) {
     return NULL;
 }
 static void fs_uncache(fs_node *node) {
+    fs_stream_detach(node);
     uint32_t id = (uint32_t)(node - fs_nodes) + 1;
     for (unsigned i = 0; i < 8; i++) if (fs_cache[i].node == id) fs_cache[i].node = fs_cache[i].stamp = 0;
 }
@@ -103,6 +140,8 @@ static void fs_reset(void) {
     memset(fs_searches, 0, sizeof fs_searches);
     fs_count = fs_written = fs_reads = fs_fetches = fs_cache_stamp = fs_revision = 0;
     fs_fetch_bytes=fs_preload_reads=fs_preload_bytes=0;fs_fetch_ms=fs_fetch_max_ms=0;
+    if(atomic_exchange(&fs_stream.attached,0))emscripten_futex_wake(&fs_stream.epoch,1);
+    memset(&fs_stream,0,sizeof fs_stream);
     free(fs_snapshot_buffer); fs_snapshot_buffer = NULL;
     fs_new("C:\\", 16); fs_new("D:\\", 16); fs_new("C:\\nfs5", 16);
     for (unsigned i = 0; i < fs_count; i++) fs_nodes[i].dirty = 0;
@@ -123,11 +162,14 @@ static int fs_read_node(fs_node *node, uint32_t offset, uint32_t count, uint8_t 
             for (unsigned i = 1; i < 8; i++) if (fs_cache[i].stamp < cached->stamp) cached = &fs_cache[i];
             cached->node = 0; cached->size = node->size - start;
             if (cached->size > FS_CHUNK) cached->size = FS_CHUNK;
-            fs_fetches++;
-            double began=emscripten_get_now();int got=fs_asset_read(node->url,start,cached->size,cached->bytes);
-            double elapsed=emscripten_get_now()-began;fs_fetch_ms+=elapsed;if(elapsed>fs_fetch_max_ms)fs_fetch_max_ms=elapsed;
-            if(got>0)fs_fetch_bytes+=got;
-            if (got != (int)cached->size) { last_error = 30; return 0; }
+            if(!fs_stream_read(id,start,cached->size,cached->bytes)){
+                fs_fetches++;
+                double began=emscripten_get_now();int got=fs_asset_read(node->url,start,cached->size,cached->bytes);
+                double elapsed=emscripten_get_now()-began;fs_fetch_ms+=elapsed;if(elapsed>fs_fetch_max_ms)fs_fetch_max_ms=elapsed;
+                if(got>0)fs_fetch_bytes+=got;
+                if (got != (int)cached->size) { last_error = 30; return 0; }
+            }
+            fs_stream_hint(id,start);
             cached->node = id; cached->offset = start;
         }
         cached->stamp = ++fs_cache_stamp;
@@ -148,6 +190,7 @@ static int fs_resize(fs_node *node, uint32_t size, int preserve) {
     }
     if (size > node->size) memset(node->data + node->size, 0, size - node->size);
     if(node->asset_data){fs_preload_bytes-=node->size;node->asset_data=NULL;}
+    fs_stream_detach(node);
     node->size = size; node->url[0] = 0; fs_touch(node); return 1;
 }
 static fs_object *fs_get(uint32_t handle) {

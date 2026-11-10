@@ -21,6 +21,7 @@ side for the left hand, gas above brake for the right, and handbrake between.
 The selected layout stays in this browser. **Keyboard** opens a name-entry field
 for creating profiles.
 Holding driving controls suppresses text selection and the iOS touch callout.
+Safari uses the playback audio-session type for sound with Silent Mode enabled.
 
 Profiles, graphics preferences and other file changes stay in IndexedDB in
 this browser, per site and executable. **Exit through the game's menus to
@@ -48,7 +49,8 @@ Adapter selection requests high performance and tries other browser preferences
 before accepting a software adapter. Websites cannot override blocked drivers or
 force a particular installed GPU. **Info → Copy diagnostics** includes the actual
 adapter, browser, logical/output sizes, shared Wasm allocation and GPU queue stats.
-It also reports startup/preload timing, file requests, audio refill activity,
+It also reports startup/preload timing, file requests, music read-ahead hits,
+audio context/session state, signal peak and refill activity,
 state-cache hits/misses and the last 600 submission intervals
 (median, p95, p99, maximum and counts over 33 ms), reset on size/visibility changes.
 When WebGPU reports a software adapter, the public page reduces the default
@@ -78,6 +80,9 @@ framebuffer transfers. The frontend's nearly touching picture strips share
 edges to prevent subpixel black seams. Graphics queue packets are consumed
 without copying contiguous payloads. A bounded cache reuses immutable rendering
 states, uniforms and pipeline references, reducing allocations during play.
+Graphics producers notify a consumer that may be waiting on an empty queue;
+space notifications occur only while producers wait for room. Registration and
+rechecks preserve wakeups, barriers and backpressure.
 Identical uniform blocks and consecutive bindings are reused. Small flush hints
 are combined; larger geometry batches submit early to overlap GPU and game work.
 Small framebuffer reads transfer only their requested rectangle, including the
@@ -101,6 +106,13 @@ writable browser saves override it. A controlled 50 ms network-latency check
 reached the profile chooser in 13.7 seconds versus 27.2 seconds, with 34 versus
 291 asset requests. First-time download and compilation still depend on the
 connection and device.
+
+Music uses a separate 1 MiB read-ahead cache with at most two background HTTP
+requests and three future 256 KiB ranges. Ready pages bypass synchronous reads;
+seeks and unavailable pages retain the ordinary file path. Invalid responses or
+worker failures disable read-ahead without changing file semantics. The entire
+117 MiB music archive is never preloaded. Cold reads and occasional GPU readback
+stalls remain possible.
 
 The engine uses a 256 MiB guest arena in initially 384 MiB shared Wasm memory,
 an eight-worker pool and an approximately 84 MiB Wasm module (8.8 MiB gzip).
@@ -142,8 +154,10 @@ npm run test:usability
 Tests cover original-code comparisons, services, threads, input, audio,
 persistence, lifecycle and GPU pixels/transport, including 4K output and
 picture-strip seams and GPU readbacks after another worker grows memory.
-Asset tests cover verified startup packs, writable overrides and range fallback;
+Asset tests cover verified startup packs, writable overrides, bounded read-ahead,
+claimed-page eviction protection, exact tail bytes and range fallback;
 audio checks verify that a busy VM cannot block refill ticks.
+Audio-session checks cover playback routing, resume and cleanup.
 Sun-query checks cover delayed completion, sample reuse, one outstanding query,
 resize/reset invalidation, exact ordinary reads and asynchronous failure handling.
 Public checks cover wide/portrait menu fitting and

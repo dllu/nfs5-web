@@ -5,6 +5,7 @@ import { attachGraphics } from './graphics.mjs';
 import {openingMovies,verokImage,softwareViewport} from './config.mjs';
 import {trackHeap} from './memory.mjs';
 import {readAssets,preloadAssets} from './assets.mjs';
+import {attachStream} from './streaming.mjs';
 
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
@@ -62,9 +63,9 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
       return id;
     } finally { module._free(name); module._free(source); }
   }
-  let startupConfig,assetMemory={bytes:0,files:0,release(){}};
+  let startupConfig,assetMemory={bytes:0,files:0,release(){}};const ids=new Map();
   if (assets) {
-    const {index}=assets,ids=new Map();
+    const {index}=assets;
     if (index.executable !== sha256) throw new Error('Asset index does not match the translated executable');
     for (const item of index.entries) ids.set(item.path,mount('C:\\nfs5\\' + item.path.replaceAll('/', '\\'), {
       ...item, url: item.url ? new URL(item.url, import.meta.url).href : '',
@@ -120,6 +121,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     intro??=openingMovies(startupConfig);
     if(sha256===verokImage)module._web_intro_config(intro?1:0);
   } catch (error) { storage?.close(); module.PThread.terminateAllThreads(); throw error; }
+  const streaming=await attachStream(module,assets,ids,log);
   let saving = Promise.resolve(), disposed = false;
   function checkpoint() {
     if (!storage || disposed) return Promise.resolve();
@@ -135,7 +137,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   const detachAudio = audio ? attachAudio(module, audio) : null;
   let graphics;
   try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace,frontendSize:display?{...display}:null}):null; }
-  catch(error) {clearInterval(storageTimer);detachAudio?.();storage?.close();module.PThread.terminateAllThreads();throw error;}
+  catch(error) {clearInterval(storageTimer);detachAudio?.();streaming.close();storage?.close();module.PThread.terminateAllThreads();throw error;}
   const originalDisplay=display;
   const pixelLimit=graphics?.renderer.info.software?(softwarePixelLimit||touchPixelLimit):touchPixelLimit;
   if(graphics&&pixelLimit&&display) {
@@ -176,6 +178,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
   return { module, manifest, base, memorySize, graphics, display, reducedResolution,
     loading:{runtimeMs:performance.now()-started,preloadBytes:assetMemory.bytes,preloadedFiles:assetMemory.files},
     audioStats:()=>detachAudio?.stats?.(),
+    streamingStats:()=>streaming.stats(),
     mount,
     checkpoint,
     input(event) {
@@ -199,7 +202,7 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     dispose: () => {
       if(disposed)return;
       disposed=true;
-      clearInterval(storageTimer);graphics?.close();detachAudio?.();storage?.close();
+      clearInterval(storageTimer);graphics?.close();detachAudio?.();streaming.close();storage?.close();
       module._web_shutdown();assetMemory.release();module.PThread.terminateAllThreads();
     },
     run: (milliseconds = 2000) => snapshot(module._web_run(manifest.entry, milliseconds)),

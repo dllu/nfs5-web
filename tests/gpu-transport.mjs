@@ -63,17 +63,20 @@ try {
   module._web_gpu_attach();
   assert.equal(await call(methods.flushwindow),1,'Flush returns while the consumer is idle');
   const flush=await packet(9);
+  const beforeQueue=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),7));
   assert.equal(Atomics.load(header,1),0);assert.equal(Atomics.load(header,2),0);checks++;
   // Leave flush queued: the next barrier must follow it in the same stream.
   start(methods.setvideomode,[1,0,2]);
   await until(()=>Atomics.load(header,0)>flush.end,'No mode-change packet after flush');
+  const afterQueue=Array.from(new Uint32Array(module.HEAPU8.buffer,module._web_gpu_stats(),7));
+  assert.equal(afterQueue[5],beforeQueue[5]+1);assert.equal(afterQueue[6],beforeQueue[6],'A nonempty queue needs no extra consumer wake');checks++;
   assert.equal(module._web_async_status(),1);checks++;
   acknowledge(flush);
   const resize=await packet(1);assert.deepEqual(Array.from(resize.words.slice(3)),[640,480]);checks++;
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(module._web_async_status(),1,'Flush acknowledgement must not release resize');checks++;
   acknowledge(resize);assert.equal(await finish(),1);
-  assert.equal(Atomics.load(header,6),9,'Visibility hints use transport v9');checks++;
+  assert.equal(Atomics.load(header,6),10,'Transport v10 registers queue-space waiters');checks++;
   for(const [state,value] of [[7,1],[11,2],[13,1],[66,2],[8,0xbf800000],[10,3],[36,128],[47,1],[48,5],[52,3],[53,4],[54,6]])assert.equal(await call(methods.setstate,[state,value]),1);
   assert.equal(await call(methods.window,[3]),1);
   const vertex=data+256;
@@ -117,6 +120,11 @@ try {
   module.HEAPU8.fill(0,visibility.words[3],visibility.words[3]+64);acknowledge(visibility);assert.equal(await finish(),1);
   const reset=await barrier(methods.restore,[],10);acknowledge(reset);assert.equal(await finish(),1);
   assert.equal(Atomics.load(header,0),Atomics.load(header,1));checks++;
+  const write=Atomics.load(header,0);Atomics.store(header,1,write-ring.length);
+  start(methods.flushwindow);await until(()=>Atomics.load(header,7)>0,'A full queue must register its room waiter');
+  assert.equal(module._web_async_status(),1);Atomics.store(header,1,write);Atomics.notify(header,1);
+  await until(()=>Atomics.load(header,0)!==write,'Producer did not wake when queue space became available');
+  assert.equal(await finish(),1);assert.equal(Atomics.load(header,7),0);acknowledge(await packet(9));checks++;
   const timed=await runtime.invokeAsync(methods.setvideomode,[1,0,2],30);
   assert.equal(timed.status,1);assert.match(timed.error,/Graphics wait budget reached/);checks++;
   console.log(`${checks} graphics-transport checks passed (asynchronous flush, ordered resize, present/readback/reset barriers, finite deadline)`);

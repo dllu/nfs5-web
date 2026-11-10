@@ -34,12 +34,13 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
   let channel,yieldResolve;
   const stats={packets:0,copiedBytes:0,stateHits:0,stateMisses:0,stateEvictions:0,visibilityQueries:0,visibilityReuses:0};
   const pointer=module._web_gpu_transport(), uploads=new Map();
-  let header,ring,stateSize;
+  let header,ring,stateSize,roomWaiters=false;
   function views() {
     if(header?.buffer===module.HEAPU8.buffer)return;
     header=new Int32Array(module.HEAPU8.buffer,pointer,8);
     const version=Atomics.load(header,6);
-    if(![1,2,3,4,5,6,7,8,9].includes(version))throw new Error('Unsupported graphics transport version');
+    if(![1,2,3,4,5,6,7,8,9,10].includes(version))throw new Error('Unsupported graphics transport version');
+    roomWaiters=version>=10;
     stateSize=version>=7?41:version>=6?40:version>=5?31:version>=4?30:version>=3?26:25;
     const size=Atomics.load(header,5)>>>0;
     if(!size || (size&(size-1)))throw new Error('Invalid graphics queue size');
@@ -152,7 +153,8 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
         default:throw new Error(`Unsupported graphics command ${opcode}`);
       }
       views();
-      Atomics.store(header,1,(read+count)|0);Atomics.notify(header,1);
+      Atomics.store(header,1,(read+count)|0);
+      if(!roomWaiters||Atomics.load(header,7))Atomics.notify(header,1);
       Atomics.store(header,2,sequence|0);
       if(opcode===1||opcode===3||opcode>=8)Atomics.notify(header,2);
       if(performance.now()>until)return;

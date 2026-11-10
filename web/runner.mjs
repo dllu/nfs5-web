@@ -8,7 +8,8 @@ self.onmessage = async ({ data }) => {
     const r=runtime?.graphics?.renderer;
     const m=runtime?.module,values=m&&Array.from(new Float64Array(m.HEAPU8.buffer,m._web_fs_io_stats(),6));
     const files=values&&Object.fromEntries(['rangeRequests','rangeBytes','rangeWaitMs','maxRangeWaitMs','preloadedReads','preloadedBytes'].map((key,i)=>[key,values[i]]));
-    self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:m?.HEAPU8.byteLength,stats:r?.stats,transport:runtime?.graphics?.stats,submissionIntervalsMs:r?.timing(),loading:runtime?.loading,files,audio:runtime?.audioStats(),capabilities:{waitAsync:typeof Atomics.waitAsync==='function',schedulerYield:typeof scheduler!=='undefined'&&!!scheduler.yield}});return;
+    const queue=m&&Array.from(new Uint32Array(m.HEAPU8.buffer,m._web_gpu_stats(),7));
+    self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:m?.HEAPU8.byteLength,stats:r?.stats,transport:{...runtime?.graphics?.stats,producerPackets:queue?.[5],producerNotifications:queue?.[6]},submissionIntervalsMs:r?.timing(),loading:runtime?.loading,files,streaming:runtime?.streamingStats(),audio:runtime?.audioStats(),capabilities:{waitAsync:typeof Atomics.waitAsync==='function',schedulerYield:typeof scheduler!=='undefined'&&!!scheduler.yield}});return;
   }
   if (data.type === 'input') { runtime?.input(data); return; }
   if(data.type==='checkpoint'){await runtime?.checkpoint().catch(error=>self.postMessage({type:'save-error',error:String(error)}));return;}

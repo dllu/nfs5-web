@@ -769,9 +769,10 @@ void web_gpu_fail(const char *message) {
     snprintf(gpu_error,sizeof gpu_error,"%s",message); atomic_store(&gpu_transport.failed,1);gpu_wake_waiters();
 }
 uint32_t *web_gpu_stats(void) {
-    static uint32_t stats[5]; machine_acquire();
+    static uint32_t stats[7]; machine_acquire();
     stats[0]=thrash_calls;stats[1]=draws;stats[2]=uploads;stats[3]=frames+software_frames;
     stats[4]=atomic_load(&gpu_transport.write)-atomic_load(&gpu_transport.read);
+    stats[5]=gpu_packets;stats[6]=gpu_notifications;
     machine_release(); return stats;
 }
 /* Read-only driver metadata for native visual comparisons. Header words:
@@ -855,6 +856,14 @@ double *web_fs_io_stats(void) {
     static double stats[6];machine_acquire();
     stats[0]=fs_fetches;stats[1]=fs_fetch_bytes;stats[2]=fs_fetch_ms;stats[3]=fs_fetch_max_ms;stats[4]=fs_preload_reads;stats[5]=fs_preload_bytes;
     machine_release();return stats;
+}
+uint32_t web_fs_stream(uint32_t id) {
+    machine_acquire();
+    if(!id){atomic_store(&fs_stream.attached,0);atomic_fetch_add(&fs_stream.epoch,1);emscripten_futex_wake(&fs_stream.epoch,1);machine_release();return 0;}
+    if(id>fs_count||!fs_nodes[id-1].live||(fs_nodes[id-1].attributes&16)||!fs_nodes[id-1].url[0]||fs_nodes[id-1].data||atomic_load(&fs_stream.attached)){machine_release();return 0;}
+    memset(&fs_stream,0,sizeof fs_stream);fs_stream.node=id;fs_stream.size=fs_nodes[id-1].size;
+    fs_stream.version=1;fs_stream.chunk=FS_CHUNK;fs_stream.pages=4;atomic_store(&fs_stream.start,UINT32_MAX);
+    atomic_store(&fs_stream.attached,1);machine_release();return (uint32_t)(uintptr_t)&fs_stream;
 }
 uint32_t *web_fs_snapshot(void) {
     machine_acquire();

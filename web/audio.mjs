@@ -1,6 +1,11 @@
 // VM owners produce into a shared ring; idle host ticks only try the VM lock.
 // The real-time AudioWorklet consumer never enters Wasm or waits for the game.
 export async function openAudio({waitForResume=true}={}) {
+  // Safari's default Web Audio session is ambient and obeys Silent Mode.
+  // This game also streams music; request the ordinary media playback route.
+  let session,previousType;
+  try{session=navigator.audioSession;previousType=session?.type;if(session)session.type='playback';}catch{}
+  const restoreSession=()=>{try{if(session?.type==='playback')session.type=previousType;}catch{}};
   const context = new AudioContext({ latencyHint: 'interactive' });
   try {
     const resume = context.resume();
@@ -14,10 +19,10 @@ export async function openAudio({waitForResume=true}={}) {
     return {
       configuration: { buffer, rate: context.sampleRate,port:channel.port2 },
       resume: () => context.resume(),
-      stats: () => ({ rendered: Atomics.load(state, 3) >>> 0, missing: Atomics.load(state, 2) >>> 0, peak: Atomics.load(state, 4) / 32767, state: context.state }),
-      async close() { Atomics.store(state, 5, 0);channel.port1.close();channel.port2.close(); node.disconnect(); await context.close(); },
+      stats: () => ({ rendered: Atomics.load(state, 3) >>> 0, missing: Atomics.load(state, 2) >>> 0, peak: Atomics.load(state, 4) / 32767, state: context.state, rate:context.sampleRate,sessionType:navigator.audioSession?.type??null,sessionState:navigator.audioSession?.state??null }),
+      async close() { Atomics.store(state, 5, 0);channel.port1.close();channel.port2.close(); node.disconnect(); await context.close();restoreSession(); },
     };
-  } catch (error) { await context.close(); throw error; }
+  } catch (error) { await context.close();restoreSession();throw error; }
 }
 
 export function attachAudio(module, { buffer, rate,port }) {
@@ -26,7 +31,7 @@ export function attachAudio(module, { buffer, rate,port }) {
     port.postMessage({buffer:module.HEAPU8.buffer,offset,capacity:4096});
     const timer=setInterval(()=>module._web_audio_tick(),4);
     const close=()=>{clearInterval(timer);module._web_audio_stop();port.close();};
-    close.stats=()=>{const s=new Int32Array(module.HEAPU8.buffer,offset,8);return {missing:Atomics.load(s,2)>>>0,rendered:Atomics.load(s,3)>>>0,skippedBusyTicks:Atomics.load(s,6)>>>0,nativeFills:Atomics.load(s,7)>>>0};};
+    close.stats=()=>{const s=new Int32Array(module.HEAPU8.buffer,offset,8);return {missing:Atomics.load(s,2)>>>0,rendered:Atomics.load(s,3)>>>0,peak:Atomics.load(s,4)/32767,skippedBusyTicks:Atomics.load(s,6)>>>0,nativeFills:Atomics.load(s,7)>>>0};};
     return close;
   }
   const state = new Int32Array(buffer, 0, 8), samples = new Float32Array(buffer, 32), capacity = samples.length / 2;

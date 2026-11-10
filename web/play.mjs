@@ -55,7 +55,7 @@ try {
       // focused when the renderer acknowledges that resize.
       if(!document.activeElement?.matches('input,textarea'))canvas.focus({preventScroll:true});
     }
-    if(data.type==='diagnostics')controls?.diagnostics({...data,type:undefined});
+    if(data.type==='diagnostics')controls?.diagnostics({...data,audio:{...data.audio,...audio?.stats()},type:undefined});
     if(data.type==='save-error'){sound.hidden=false;sound.textContent='Local save failed. Keep this tab open and free some browser storage.';}
     if(data.type==='result'){
       data.frame?.close();

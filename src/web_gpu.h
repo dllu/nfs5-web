@@ -26,10 +26,12 @@ enum { GPU_RESIZE=1, GPU_CLEAR, GPU_PRESENT, GPU_DRAW, GPU_TEXTURE_CREATE, GPU_T
        GPU_TEXTURE_DESTROY, GPU_READ_PIXELS, GPU_FLUSH, GPU_RESET };
 static struct {
     _Atomic uint32_t write,read,completed,attached,failed;
-    uint32_t capacity,version,sequence;
+    uint32_t capacity,version;
+    _Atomic uint32_t room_waiter;
     uint32_t words[GPU_QUEUE_WORDS];
 } gpu_transport;
 static char gpu_error[256];
+static uint32_t gpu_sequence,gpu_packets,gpu_notifications;
 static uint32_t gpu_width,gpu_height,gpu_next_texture;
 static struct { uint32_t id,width,height,mip_levels; } gpu_textures[8192];
 static uint32_t gpu_texture_pixels(uint32_t width,uint32_t height,uint32_t levels) {
@@ -78,13 +80,21 @@ static uint32_t gpu_send(uint32_t opcode, const void *a, uint32_t an, const void
     for(;;) {
         uint32_t read=atomic_load(&gpu_transport.read);
         if(GPU_QUEUE_WORDS-(uint32_t)(atomic_load(&gpu_transport.write)-read)>=count)break;
-        gpu_park(&gpu_transport.read,read);gpu_check();
+        atomic_fetch_add(&gpu_transport.room_waiter,1);
+        /* Register before rechecking: a consumer must not free space between
+         * the test and waiter publication without a matching wake. */
+        read=atomic_load(&gpu_transport.read);
+        if(GPU_QUEUE_WORDS-(uint32_t)(atomic_load(&gpu_transport.write)-read)<count)gpu_park(&gpu_transport.read,read);
+        atomic_fetch_sub(&gpu_transport.room_waiter,1);gpu_check();
     }
-    uint32_t cursor = atomic_load(&gpu_transport.write), sequence = ++gpu_transport.sequence;
+    uint32_t previous=atomic_load(&gpu_transport.write),cursor=previous,sequence=++gpu_sequence;
     uint32_t header[] = {count,opcode,sequence};
     gpu_copy(&cursor,header,12); gpu_copy(&cursor,a,an); gpu_copy(&cursor,b,bn); gpu_copy(&cursor,c,cn);
     atomic_store(&gpu_transport.write,cursor);
-    emscripten_futex_wake(&gpu_transport.write,1);
+    gpu_packets++;
+    /* A consumer behind this packet will observe the new write itself. Check
+     * after publication so draining the previous packet cannot lose a wake. */
+    if(atomic_load(&gpu_transport.read)==previous){emscripten_futex_wake(&gpu_transport.write,1);gpu_notifications++;}
     return sequence;
 }
 static int gpu_resize(uint32_t width,uint32_t height) {
@@ -157,7 +167,8 @@ static const struct {
     int(*read_visibility)(uint8_t*,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
 } web_gpu_api={gpu_open,gpu_close,gpu_resize,gpu_clear,gpu_present,gpu_texture_create,gpu_texture_write,gpu_texture_destroy,gpu_draw,gpu_read_pixels,gpu_read_rect,gpu_read_visibility};
 static void gpu_reset(void) {
-    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=9;
+    memset(&gpu_transport,0,sizeof gpu_transport);gpu_transport.capacity=GPU_QUEUE_WORDS;gpu_transport.version=10;
+    gpu_sequence=gpu_packets=gpu_notifications=0;
     memset(gpu_textures,0,sizeof gpu_textures);gpu_width=gpu_height=gpu_next_texture=0;gpu_error[0]=0;
 }
 #endif
