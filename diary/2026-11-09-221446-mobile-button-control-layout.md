@@ -41,3 +41,11 @@ Public revision: 2486591fd8989cea. This is a UI-only release; the content-hashed
 Wasm remains f3086de1b91316bae708a9ae57c9f14cf4e91d18a10b10315bb719799bf87cb7,
 so an existing browser can retain its engine download/compilation cache.
 No Wine process was launched or installation modified.
+
+The final held-input test also verifies the centered handbrake can be pressed
+and released while gas remains held. Revision 2486591fd8989cea is deployed to
+pupserver.linode:/www/misc/nfs5. Both public hostnames serve the new controls
+and stylesheet with the unchanged immutable Wasm URL. The live Chrome public
+test passes the new layout switch and preference after a full browser restart,
+alongside profile persistence, launch and audio checks. Source implementation
+is committed and pushed as e99166f.
