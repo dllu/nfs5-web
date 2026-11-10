@@ -105,3 +105,12 @@ The final packaged local public test passes direct launch, preload/native audio
 diagnostics, completed seed, fresh-profile defaults, tab-close confirmation and
 byte-identical profile persistence across a browser restart. Packaged revision:
 8ee4754e2229ccca.
+
+Revision 8ee4754e2229ccca is deployed to pupserver.linode:/www/misc/nfs5.
+The live Chrome public check passes launch, resident pack reads, native audio,
+Showroom, fresh-profile defaults, tab-close confirmation and full browser-restart
+save persistence. Both daniel.lawrence.lu and lawrence.lu serve this revision,
+the content-hashed Wasm and startup pack with gzip/immutable caching, and the
+required cross-origin isolation headers. Owned preview servers and Firefox
+WebDriver were stopped; the existing development server on port 8000 remains.
+Source implementation is committed and pushed as f3583ff.
