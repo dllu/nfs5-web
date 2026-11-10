@@ -5,6 +5,16 @@ The original PC executable is statically translated from x86 to C with
 pcrecomp and compiled to WebAssembly. Rendering uses WebGPU; the game and
 its workers run on Wasm threads. The deployment is entirely static.
 
+## Screenshots
+
+[![Yellow Porsche 935 “Moby Dick” in the Quick Race garage](docs/screenshots/935-garage.webp)](docs/screenshots/935-garage.webp)
+
+*Quick Race garage · 4404 × 3294*
+
+[![Porsche 935 chasing the pack through a mountain pass](docs/screenshots/935-mountain-race.webp)](docs/screenshots/935-mountain-race.webp)
+
+*Mountain race · 5781 × 3291*
+
 ## Playing
 
 The public page launches directly into the original game. Click or press a key
