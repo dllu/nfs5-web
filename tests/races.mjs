@@ -15,13 +15,13 @@ try {
  page=await browser.newPage();page.on('pageerror',e=>errors.push(String(e)));
  for(const [width,height]of [[1280,960],[3840,2160],[6144,3456]]) {
   await page.goto(process.env.NFS5_TEST_URL??'http://127.0.0.1:8000');
-  await page.evaluate(({width,height,assetsUrl})=>{
+  await page.evaluate(({width,height,assetsUrl,detail})=>{
    document.body.innerHTML='<canvas id="game" width="640" height="480"></canvas>';document.querySelector('#viewport-style').media='all';
    const canvas=document.querySelector('#game'),worker=new Worker('./race-check-worker.mjs',{type:'module'});
    window.raceCheck={worker,events:[]};worker.onmessage=({data})=>{raceCheck.events.push(data);if(data.type==='screen')canvas.style.setProperty('--game-aspect',data.width/data.height);};
-   const offscreen=canvas.transferControlToOffscreen();worker.postMessage({type:'start',canvas:offscreen,display:{width,height},assetsUrl,track:'castle',opponents:4,
+   const offscreen=canvas.transferControlToOffscreen();worker.postMessage({type:'start',canvas:offscreen,display:{width,height},assetsUrl,detail,track:'castle',opponents:4,
     car:{filename:'gt1',spec:'GT1race',ai:'Gt1',sound:'GT1race'}},[offscreen]);
-  },{width,height,assetsUrl:process.env.NFS5_TEST_ASSETS_URL});
+  },{width,height,assetsUrl:process.env.NFS5_TEST_ASSETS_URL,detail:process.env.NFS5_RACE_DETAIL});
   await page.waitForFunction(()=>{
    const failure=raceCheck.events.find(e=>e.type==='error'||e.type==='result');if(failure)throw new Error(JSON.stringify(failure));
    return raceCheck.events.some(e=>e.type==='ready');
@@ -38,6 +38,8 @@ try {
   const driven=await page.evaluate(()=>raceCheck.events.find(e=>e.id==='driven'));
   assert(driven.frames>loaded.frames+30,'The original race must continue presenting after loading');
   assert(driven.stats.peakPendingFrames<=2);
+  assert(driven.detail.cars>loaded.detail.cars&&driven.detail.models>loaded.detail.models,'Car/scenery LOD decisions continue during the race');
+  if(process.env.NFS5_RACE_DETAIL==='very-far')assert.equal(driven.detail.multiplier,4);
   if(width===6144)assert(driven.memory>384*1024*1024,'The 6K race must exercise actual pthread heap growth');
   await page.locator('#game').screenshot({path:`build/gt1-auvergne-${width}x${height}.png`});
   await page.evaluate(()=>raceCheck.worker.postMessage({type:'stop'}));

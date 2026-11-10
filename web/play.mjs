@@ -1,6 +1,7 @@
 import {attachInput} from './input.mjs';
 import {openAudio} from './audio.mjs';
 import {attachControls} from './controls.mjs';
+import {savedSceneDetail} from './config.mjs';
 
 const loading=document.querySelector('#loading'), status=document.querySelector('#status');
 const retry=document.querySelector('#retry'), failure=document.querySelector('#failure');
@@ -46,7 +47,7 @@ try {
         }
         worker.postMessage(event);
       },{viewport:canvas,keepRunningOnBlur:true});
-      controls=attachControls(detach,{onDiagnostics:()=>worker.postMessage({type:'diagnostics'})});
+      controls=attachControls(detach,{onDiagnostics:()=>worker.postMessage({type:'diagnostics'}),onDetailChange:value=>{worker.postMessage({type:'detail',value});worker.postMessage({type:'diagnostics'});}});
       if(screen)controls.setScreen(screen);
     }
     if(data.type==='screen'){
@@ -65,7 +66,7 @@ try {
   };
   const offscreen=canvas.transferControlToOffscreen();
   worker.postMessage({type:'start',milliseconds:0,intro:false,softwarePixelLimit:1280*720,audio:audio.configuration,
-    touchPixelLimit:matchMedia('(pointer: coarse)').matches?1440*810:0,
+    detail:savedSceneDetail(),touchPixelLimit:matchMedia('(pointer: coarse)').matches?1440*810:0,
     display:displaySize(),canvas:offscreen},[offscreen,audio.configuration.port]);
   window.addEventListener('beforeunload',warnBeforeLeaving);
   worker.postMessage({type:'visibility',visible:!document.hidden});

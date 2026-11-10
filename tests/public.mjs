@@ -69,6 +69,7 @@ try {
   // Reset only this dedicated test browser's game database before autostart.
   await page.goto(new URL('THIRD_PARTY_NOTICES.md',url).href);
   await page.evaluate(async()=>{
+    localStorage.removeItem('nfs5-scene-detail');
     const {sha256}=await (await fetch('./manifest.json')).json();
     await new Promise((resolve,reject)=>{const r=indexedDB.deleteDatabase('nfs5-web-files-'+sha256);r.onsuccess=resolve;r.onerror=()=>reject(r.error);r.onblocked=()=>reject(new Error('Test save database is blocked'));});
   });
@@ -127,6 +128,10 @@ try {
   await page.getByRole('button',{name:'Info',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#game-info pre').textContent.includes('wasmBytes'));
   const diagnostics=JSON.parse(await page.locator('#game-info pre').textContent());
+  assert.equal(diagnostics.detail.multiplier,await page.evaluate(()=>matchMedia('(pointer: coarse)').matches?1:2),'Automatic adapts to desktop/touch input');
+  await page.getByLabel('View distance').selectOption('very-far');
+  await page.waitForFunction(()=>JSON.parse(document.querySelector('#game-info pre').textContent).detail.multiplier===4);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('nfs5-scene-detail')),'very-far');
   assert.equal(diagnostics.wasmBytes,384*1024*1024);assert.equal(diagnostics.info.software,false);
   assert(diagnostics.transport.stateHits>0&&diagnostics.transport.stateMisses>0,'Diagnostics expose state reuse');
   assert(diagnostics.loading.preloadedFiles>900&&diagnostics.loading.preloadBytes<16*1024*1024,'Small assets are batched in a bounded startup pack');
@@ -150,6 +155,12 @@ try {
   await page.screenshot({path:'build/public-test-created.png'});
   await browser.close();browser=null;
   await open();await ready();
+  await page.getByRole('button',{name:'Info',exact:true}).click();
+  assert.equal(await page.getByLabel('View distance').inputValue(),'very-far','Scene detail survives a full browser restart');
+  await page.waitForFunction(()=>document.querySelector('#game-info pre').textContent.includes('wasmBytes'));
+  assert.equal(JSON.parse(await page.locator('#game-info pre').textContent()).detail.multiplier,4);
+  await page.getByLabel('View distance').selectOption('auto');
+  await page.getByRole('button',{name:'Close',exact:true}).click();
   assert.equal(await page.locator('#touch-pad').getAttribute('data-layout'),'buttons','Touch layout survives a full browser restart');
   const restored=await saved();assert.deepEqual(restored,first,'Profile bytes survive a full browser restart');
   await page.screenshot({path:'build/public-test-restored.png'});

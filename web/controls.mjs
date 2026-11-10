@@ -1,5 +1,7 @@
 // Choose continuous native joystick axes or separate virtual arrow keys.
-export function attachControls(input,{onDiagnostics=()=>{}}={}) {
+import {savedSceneDetail,sceneDetail} from './config.mjs';
+
+export function attachControls(input,{onDiagnostics=()=>{},onDetailChange=()=>{}}={}) {
   let layout='joystick';
   try{if(localStorage.getItem('nfs5-touch-layout')==='buttons')layout='buttons';}catch{}
   const root=document.createElement('div');root.id='controls';
@@ -14,9 +16,18 @@ export function attachControls(input,{onDiagnostics=()=>{}}={}) {
     <div id="steering-buttons" role="group" aria-label="Steering" hidden><button data-scan="203" aria-label="Steer left">◀</button><button data-scan="205" aria-label="Steer right">▶</button></div>
     <div id="pedals"><button id="gas" data-scan="200"><span aria-hidden="true">▲</span> Gas</button><button id="brake" data-scan="208"><span aria-hidden="true">▼</span> Brake</button><button id="handbrake" data-scan="57">Handbrake</button><button id="camera" data-pulse="46">Camera</button></div></div>
   <form id="game-keyboard" hidden><input aria-label="Type player name" placeholder="Type player name" autocomplete="off" autocapitalize="off" spellcheck="false"><button>Enter</button></form>
-  <section id="game-info" hidden><button id="close-info">Close</button><button id="copy-info">Copy diagnostics</button><p>Exit through the game's Quit to Windows option to save career progress. Profiles stay in this browser.</p><pre></pre></section>`;
+  <section id="game-info" hidden><button id="close-info">Close</button><button id="copy-info">Copy diagnostics</button>
+    <p><label>View distance <select id="scene-detail"><option value="auto">Automatic</option><option value="original">Original</option><option value="far">Far (2×)</option><option value="very-far">Very far (4×)</option></select></label></p>
+    <p>Farther scenery and higher model detail can reduce performance. Automatic uses Far on desktop GPUs and Original on touch devices and software renderers.</p>
+    <p>Exit through the game's Quit to Windows option to save career progress. Profiles stay in this browser.</p><pre></pre></section>`;
   document.body.append(root);
   const find=id=>root.querySelector('#'+id),pad=find('touch-pad'),joystick=find('joystick'),knob=joystick.firstElementChild;
+  find('scene-detail').value=savedSceneDetail();
+  find('scene-detail').onchange=event=>{
+    const value=sceneDetail(event.target.value);
+    try{localStorage.setItem('nfs5-scene-detail',value);}catch{}
+    onDetailChange(value);
+  };
   const releaseButtons=[];
   let manual=null,racing=false,coarse=matchMedia('(pointer: coarse)'),stickPointer=null,textQueue=Promise.resolve(),closed=false;
   function update(){const show=manual??(coarse.matches&&racing);pad.hidden=!show;find('touch-layout').hidden=!show;find('toggle-pad').setAttribute('aria-pressed',String(show));if(!show)blur();}

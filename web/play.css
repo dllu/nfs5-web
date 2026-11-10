@@ -30,3 +30,4 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; font-siz
 #game-keyboard input { width:150px; font-size:16px; }
 #game-info { position:fixed; right:8px; top:48px; width:min(520px,calc(100vw - 48px)); max-height:70dvh; overflow:auto; padding:16px; background:#161616f5; border:1px solid #777; font-size:13px; }
 #game-info pre { user-select:text; }
+#scene-detail { font:inherit; font-size:16px; max-width:100%; }

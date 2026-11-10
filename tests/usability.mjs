@@ -107,6 +107,12 @@ try {
  assert.equal(events.filter(e=>e.key===200).at(-1).down,false);
  assert(!events.some(e=>e.focus===false),'Losing browser focus releases controls without pausing the guest');
  await page.keyboard.up('ArrowUp');
+ await page.getByRole('button',{name:'Info',exact:true}).click();
+ await page.getByLabel('View distance').focus();
+ const steering=await page.evaluate(()=>window.inputs.filter(e=>[200,203,205,208].includes(e.key)&&e.down).length);
+ await page.keyboard.press('ArrowDown');
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>[200,203,205,208].includes(e.key)&&e.down).length),steering,'Using the detail selector must not drive the car');
+ await page.getByRole('button',{name:'Close',exact:true}).click();
  await page.getByRole('button',{name:'Keyboard',exact:true}).click();
  await page.getByRole('textbox',{name:'Type player name'}).fill('Ab9');await page.waitForTimeout(500);
  const text=await page.evaluate(()=>window.inputs.filter(e=>e.down&&[30,48,10].includes(e.key)).map(e=>e.key));assert.deepEqual(text,[30,48,10]);

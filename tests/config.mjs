@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {openingMovies,softwareViewport} from '../web/config.mjs';
+import {openingMovies,softwareViewport,sceneDetail,sceneDetailMode,savedSceneDetail} from '../web/config.mjs';
 import {selectAdapter} from '../web/renderer.mjs';
 const bytes=s=>new TextEncoder().encode(s);
 for(const [text,expected] of [
@@ -29,3 +29,14 @@ assert.equal(await selectAdapter({requestAdapter:async()=>softwareAdapter}),soft
 assert.equal(await selectAdapter({requestAdapter:async options=>{if(options.featureLevel)return hardwareAdapter;throw new Error('Unavailable');}}),hardwareAdapter);
 assert.equal(await selectAdapter({requestAdapter:async()=>null}),undefined);
 console.log('Adapter selection prefers hardware across browser hints and retains software only as a fallback');
+
+for(const touch of [false,true])for(const software of [false,true]) {
+  const device={touch,software};
+  assert.equal(sceneDetailMode('auto',device),touch||software?0:1);
+  for(const [setting,mode]of [['original',0],['far',1],['very-far',2]])assert.equal(sceneDetailMode(setting,device),mode);
+}
+assert.equal(sceneDetail('corrupt'),'auto');
+assert.equal(savedSceneDetail({getItem:()=>{throw new Error('Storage blocked');}}),'auto');
+assert.equal(savedSceneDetail({getItem:()=>null}),'auto');
+assert.equal(savedSceneDetail({getItem:key=>key==='nfs5-scene-detail'?'very-far':null}),'very-far');
+console.log('Scene-detail defaults protect touch/software devices; explicit overrides and unavailable storage are supported');

@@ -17,6 +17,7 @@ from tools.lift.translator import load_pe, discover_functions
 from tools.lift.lift32 import Lifter
 from verok_quality import IMAGE_SHA, LIBRARY_SHA, QualityHooks
 from ui_layout import UiHooks
+from detail_hooks import DetailHooks
 
 
 def main():
@@ -36,6 +37,7 @@ def main():
         path.unlink()
     quality = None
     ui = None
+    detail = None
     if image_sha == IMAGE_SHA:
         library = args.patch_library or image.with_name('nfs5.dll')
         try:
@@ -49,6 +51,8 @@ def main():
         patches.append('browser-ui-layout')
         patches.append('browser-scaled-ui')
         patches.append('browser-logical-framebuffer')
+        detail = DetailHooks()
+        patches.append('browser-extended-detail')
     functions = discover_functions(data, info, iat)
     lifter = Lifter(iat_map=iat, lifted=set(functions))
     unsupported = Counter()
@@ -72,6 +76,8 @@ def main():
             # Keep logical x87 indices independent of the physical stack file.
             source = re.sub(r'\b_st\[([0-7])\]',r'FP_ST(\1)',source)
             source = re.sub(r'\bg_st_i64\[([0-7])\]',r'FP_I64(\1)',source)
+            if detail:
+                source = detail.apply(source)
             if re.search(r'\b(?:_st|g_st_i64)\[',re.sub(r'/\*.*?\*/','',source,flags=re.S)):
                 parser.error('Unexpected x87 register subscript; review logical indexing')
             if address==0x004DD600 and image_sha=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906':
@@ -102,6 +108,8 @@ def main():
         quality.validate()
     if ui:
         ui.validate()
+    if detail:
+        detail.validate()
     dispatch = ['#include "web_runtime.h"', '#include "functions.h"',
                 'const recomp_dispatch_entry_t recomp_dispatch_table[] = {']
     dispatch += [f"{{0x{a:08X}u, sub_{a:08X}}}," for a in addresses]

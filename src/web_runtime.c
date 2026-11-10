@@ -229,6 +229,7 @@ static uint32_t module_handle(const char *name) {
 #include "win32_timers.h"
 #include "win32_dinput.h"
 #include "win32_dsound.h"
+#include "web_detail.h"
 #include "web_audio.h"
 #include "win32_paths.h"
 #include "win32_files.h"
@@ -546,6 +547,7 @@ void recomp_dump_trace(const char *why) { (void)why; }
 
 uint32_t web_init(void) {
     stop_guest_workers();
+    detail_reset();
     audio_reset();
     if (!g_mem_base) g_mem_base = (ptrdiff_t)calloc(1, GUEST_SIZE);
     else memset((void *)g_mem_base, 0, GUEST_SIZE);

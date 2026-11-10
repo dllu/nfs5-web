@@ -27,3 +27,15 @@ export function softwareViewport(display, pixelLimit) {
   const scale=Math.min(1,Math.max(Math.sqrt(pixelLimit/(width*height)),640/width,480/height));
   return {width:Math.floor(width*scale),height:Math.floor(height*scale)};
 }
+
+// This browser preference leaves the career's original graphics settings intact.
+export function sceneDetail(value) {
+  return ['auto','original','far','very-far'].includes(value)?value:'auto';
+}
+export function savedSceneDetail(storage) {
+  try{return sceneDetail((storage??globalThis.localStorage)?.getItem('nfs5-scene-detail'));}catch{return 'auto';}
+}
+export function sceneDetailMode(value,{touch=false,software=false}={}) {
+  value=sceneDetail(value);
+  return value==='very-far'?2:value==='far'?1:value==='original'||touch||software?0:1;
+}

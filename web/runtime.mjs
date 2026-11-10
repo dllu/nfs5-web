@@ -2,7 +2,7 @@ import createEngine from './engine.js';
 import { openStorage } from './storage.mjs';
 import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
-import {openingMovies,verokImage,softwareViewport} from './config.mjs';
+import {openingMovies,verokImage,softwareViewport,sceneDetail,sceneDetailMode} from './config.mjs';
 import {trackHeap} from './memory.mjs';
 import {readAssets,preloadAssets} from './assets.mjs';
 import {attachStream} from './streaming.mjs';
@@ -10,7 +10,7 @@ import {attachStream} from './streaming.mjs';
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
+export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, detail='auto', softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
   const started=performance.now();
   const [module, manifest, response, assets] = await Promise.all([
     createEngine({ print: log, printErr: log }).then(trackHeap),
@@ -145,6 +145,11 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     module._web_display_size(display.width,display.height);
   }
   const reducedResolution=!!(display&&originalDisplay&&(display.width!==originalDisplay.width||display.height!==originalDisplay.height));
+  function setDetail(value) {
+    detail=sceneDetail(value);
+    module._web_detail_mode(sceneDetailMode(detail,{touch:!!touchPixelLimit,software:!graphics||graphics.renderer.info.software}));
+  }
+  setDetail(detail);
   function snapshot(status) {
     const registers = Array.from(new Uint32Array(module.HEAPU8.buffer, module._web_registers(), 8));
     const count = module._web_trace_count();
@@ -179,6 +184,11 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     loading:{runtimeMs:performance.now()-started,preloadBytes:assetMemory.bytes,preloadedFiles:assetMemory.files},
     audioStats:()=>detachAudio?.stats?.(),
     streamingStats:()=>streaming.stats(),
+    setDetail,
+    detailStats:()=>{
+      const values=new Float64Array(module.HEAPU8.buffer,module._web_detail_stats(),8);
+      return {setting:detail,...Object.fromEntries(['mode','multiplier','originalRange','range','views','cars','models','squaredMultiplier'].map((key,i)=>[key,values[i]]))};
+    },
     mount,
     checkpoint,
     input(event) {

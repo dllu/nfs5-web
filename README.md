@@ -45,6 +45,16 @@ the selected resolution’s aspect, including a widescreen browser-sized mode.
 Mouse coordinates follow the fitted canvas. The system cursor is hidden over
 the game.
 
+**Info → View distance** extends the original track visibility, roadside-object
+cutoffs and car/scenery LOD distances. **Automatic** uses **Far (2×)** on desktop
+hardware adapters and **Original** on touch devices and software renderers.
+**Very far (4×)** is available on any device. Changes apply during play and stay
+in this browser, separately from career saves and the game's graphics sliders.
+Higher settings retain detailed models farther away and draw more scenery;
+they can reduce performance. Track-authored visibility and fog still apply, so
+some transitions remain. Diagnostic reports include the selected multiplier and
+original/effective section range.
+
 Adapter selection requests high performance and tries other browser preferences
 before accepting a software adapter. Websites cannot override blocked drivers or
 force a particular installed GPU. **Info → Copy diagnostics** includes the actual
@@ -147,6 +157,7 @@ npm run test:browser
 npm run test:navigation
 npm run test:loading
 npm run test:races
+npm run test:detail
 npm run test:renderer
 npm run test:usability
 ```
@@ -168,6 +179,12 @@ presses, held pedals without text selection, mobile typing and real hidden-tab
 loading/racing; the latter uses raw Chrome CDP because Playwright forces tab
 visibility. Python Pillow is required for screenshot checks. Reports and
 screenshots go to ignored `build/` files.
+Scene-detail checks compare native section ranges against independent x86
+execution, switch Original/2×/4× in live races on Normandie, Côte d'Azur and
+Auvergne, and record geometry counts, submission intervals and Wasm memory.
+`NFS5_RACE_DETAIL=very-far npm run test:races` exercises four opponents through
+6K with the maximum override. `NFS5_CHROME` selects the executable for the
+scene-detail browser check, including an isolated Wayland wrapper.
 `NFS5_GPU_SOFTWARE=1 npm run test:loading` selects SwiftShader explicitly.
 `python3 tools/build.py --profile` emits a Wasm symbol map.
 
