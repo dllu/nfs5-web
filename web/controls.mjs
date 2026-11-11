@@ -26,6 +26,9 @@ export function attachControls(input,{skyboxes,onDiagnostics=()=>{},onDetailChan
     <div id="pedals"><button id="gas" data-scan="200"><span aria-hidden="true">▲</span> Gas</button><button id="brake" data-scan="208"><span aria-hidden="true">▼</span> Brake</button></div></div>
   <form id="game-keyboard" hidden><input aria-label="Game text" autocomplete="off" autocapitalize="off" enterkeyhint="done" spellcheck="false"><button>Enter</button><button type="button" id="close-keyboard" aria-label="Close keyboard">×</button></form>
   <section id="game-info" hidden><button id="close-info">Close</button><button id="copy-info">Copy diagnostics</button>
+    <p>This is an independent, fan-made project to preserve abandonware and keep Need for Speed: Porsche Unleashed playable. It is not affiliated with, sponsored by, or endorsed by Electronic Arts (EA) or Porsche.</p>
+    <p>Original game content, trademarks, logos, model names, and vehicle designs belong to their respective owners. Names and marks are used for reference only.</p>
+    <p><a href="https://github.com/dllu/nfs5-web" target="_blank" rel="noopener noreferrer">Source code on GitHub</a></p>
     <p id="skybox-settings" hidden><label><input id="atmospheric-skyboxes" type="checkbox"> Atmospheric skyboxes</label><small>Applies next launch.</small></p>
     <p><label>View distance <select id="scene-detail"><option value="auto">Automatic</option><option value="original">Original</option><option value="far">Far (2×)</option><option value="very-far">Very far (4×)</option></select></label></p>
     <p>Farther scenery and higher model detail can reduce performance. Automatic uses Far on desktop GPUs and Original on touch devices and software renderers.</p>

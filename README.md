@@ -5,6 +5,12 @@ The original PC executable is statically translated from x86 to C with
 pcrecomp and compiled to WebAssembly. Rendering uses WebGPU; the game and
 its workers run on Wasm threads. The deployment is entirely static.
 
+This is an independent, fan-made project to preserve abandonware and keep
+Need for Speed: Porsche Unleashed playable. It is not affiliated with,
+sponsored by, or endorsed by Electronic Arts (EA) or Porsche. Original game
+content, trademarks, logos, model names, and vehicle designs belong to their
+respective owners. Names and marks are used for reference only.
+
 ## Screenshots
 
 [![Yellow Porsche 935 “Moby Dick” in the Quick Race garage](docs/screenshots/935-garage.webp)](docs/screenshots/935-garage.webp)
