@@ -26,4 +26,42 @@ static void web_ui_update(uint32_t w,uint32_t h) {
         ui_scale[axis]=(float)ui_pixels[axis]/ui_size[axis];
     }
 }
+
+/* H321Go caches its center and the two ends of its animated motion. Move
+ * both ends by the same offset so resizing preserves animation progress. */
+static void web_ui_countdown(uint32_t hud) {
+    if(!hud||(MEM32(hud+0x4C)==ui_size[0]&&MEM32(hud+0x50)==ui_size[1]))return;
+    uint32_t dx=ui_size[0]/2-MEM32(hud+0x54),dy=ui_size[1]/2-MEM32(hud+0x58);
+    MEM32(hud+0x4C)=ui_size[0];MEM32(hud+0x50)=ui_size[1];
+    MEM32(hud+0x54)=ui_size[0]/2;MEM32(hud+0x58)=ui_size[1]/2;
+    MEM32(hud+0x5C)+=dx;MEM32(hud+0x60)+=dy;
+    MEM32(hud+0x64)+=dx;MEM32(hud+0x68)+=dy;
+    MEM32(hud+0xB4)+=dx;MEM32(hud+0xB8)+=dy;
+}
+
+/* The singleplayer start overlay also caches the countdown sprites and
+ * keyframe positions for the four quadrants of the screen. */
+static void web_ui_countdown_overlay(uint32_t hud) {
+    if(!hud)return;
+    uint32_t old_w=MEM32(hud+0x4A4),old_h=MEM32(hud+0x4A8);
+    if(!old_w||!old_h||(old_w==ui_size[0]&&old_h==ui_size[1]))return;
+    int32_t dx=(int32_t)(ui_size[0]/2)-(int32_t)(old_w/2);
+    int32_t dy=(int32_t)(ui_size[1]/2)-(int32_t)(old_h/2);
+    MEM32(hud+0x4A4)=ui_size[0];MEM32(hud+0x4A8)=ui_size[1];
+    MEM32(hud+0x4AC)=ui_size[0]/2;MEM32(hud+0x4B0)=ui_size[1]/2;
+    MEM32(hud+0x4B4)+=dx;MEM32(hud+0x4B8)+=dy;
+    for(unsigned key=0xC8;key<=0x334;key+=20) {
+        MEM32(hud+key)=(MEM32(hud+key)*ui_size[0]+old_w/2)/old_w;
+        MEM32(hud+key+4)=(MEM32(hud+key+4)*ui_size[1]+old_h/2)/old_h;
+    }
+    for(unsigned offset=0x484;offset<=0x4A0;offset+=4) {
+        uint32_t sprite=MEM32(hud+offset);
+        if(!sprite)continue;
+        MEM32(sprite+4)+=dx;MEM32(sprite+8)+=dy;
+        for(unsigned vertex=0x1C;vertex<=0x4C;vertex+=16) {
+            float *xy=(float*)ADDR(sprite+vertex);
+            xy[0]+=dx;xy[1]+=dy;
+        }
+    }
+}
 #endif

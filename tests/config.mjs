@@ -21,7 +21,9 @@ for(const [display,expected] of [
 ])assert.deepEqual(softwareViewport(display,1280*720),expected);
 assert.equal(softwareViewport(null,1280*720),null);
 const hardware={width:6144,height:3456};assert.equal(softwareViewport(hardware,0),hardware);
-console.log('7 software-adapter display checks passed (pixel budget, aspect, minimum size and opt-in)');
+assert.deepEqual(softwareViewport({width:320,height:568},Infinity),{width:640,height:1136});
+assert.deepEqual(softwareViewport({width:7680,height:4320},Infinity,4096),{width:4096,height:2304});
+console.log('9 viewport display checks passed (pixel budget, aspect, minimum size and adapter limits)');
 const touchLimit=1440*810;
 assert.deepEqual(touchViewport({width:1290,height:2796},touchLimit),{width:1244,height:933});
 assert.deepEqual(touchViewport({width:2796,height:1290},touchLimit),{width:1244,height:933});

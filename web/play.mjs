@@ -1,7 +1,7 @@
 import {attachInput} from './input.mjs';
 import {openAudio} from './audio.mjs';
 import {attachControls} from './controls.mjs';
-import {savedSceneDetail,savedSkyboxes,touchViewport} from './config.mjs';
+import {savedSceneDetail,savedSkyboxes} from './config.mjs';
 import {openStorage} from './storage.mjs';
 import {createBackup,readBackup} from './backup.mjs';
 
@@ -157,16 +157,17 @@ try {
     }
   };
   const offscreen=canvas.transferControlToOffscreen();
-  const display=displaySize();
   worker.postMessage({type:'start',milliseconds:0,intro:false,softwarePixelLimit:1280*720,audio:audio.configuration,
-    detail:savedSceneDetail(),skyboxes:savedSkyboxes(),touchPixelLimit,
-    display:touchPixelLimit?touchViewport(display,touchPixelLimit):display,canvas:offscreen},[offscreen,audio.configuration.port]);
+    detail:savedSceneDetail(),skyboxes:savedSkyboxes(),touchPixelLimit,resizeRace:true,
+    display:displaySize(),canvas:offscreen},[offscreen,audio.configuration.port]);
   window.addEventListener('beforeunload',warnBeforeLeaving);
   worker.postMessage({type:'visibility',visible:!document.hidden});
   const updateFocus=()=>{if(!finished)worker.postMessage({type:'focus',focused:document.hasFocus()});};
   window.addEventListener('focus',updateFocus);window.addEventListener('blur',updateFocus);updateFocus();
   let resizeTimer;
-  window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(!finished)worker.postMessage({type:'viewport',display:displaySize()});},150);});
+  const updateViewport=()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(!finished)worker.postMessage({type:'viewport',display:displaySize()});},150);};
+  window.addEventListener('resize',updateViewport);
+  for(const event of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(event,updateViewport);
   // Flush files already serialized by the game when the tab is backgrounded.
   document.addEventListener('visibilitychange',()=>{if(!finished){worker.postMessage({type:'visibility',visible:!document.hidden});if(document.hidden)worker.postMessage({type:'checkpoint'});}});
   window.addEventListener('pagehide',()=>{if(!finished)worker.postMessage({type:'checkpoint'});});

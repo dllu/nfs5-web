@@ -1,11 +1,11 @@
 import { loadRuntime } from './runtime.mjs';
 
-let runtime,visible=true,focused=true;
+let runtime,visible=true,focused=true,viewport;
 const log=text=>self.postMessage({type:'log',text});
 self.onmessage = async ({ data }) => {
   if(data.type==='visibility'){visible=data.visible;runtime?.graphics?.setVisible(visible);return;}
   if(data.type==='focus'){focused=data.focused;runtime?.graphics?.setFocused(focused);return;}
-  if(data.type==='viewport'){runtime?.graphics?.setFrontendSize(data.display);return;}
+  if(data.type==='viewport'){viewport=data.display;runtime?.setDisplay(viewport);return;}
   if(data.type==='detail'){runtime?.setDetail(data.value);return;}
   if(data.type==='diagnostics'){
     const r=runtime?.graphics?.renderer;
@@ -31,7 +31,8 @@ self.onmessage = async ({ data }) => {
       log(`Local save failed: ${error.message}`);
       self.postMessage({type:'save-error',error:error.message});
     }, audio: data.audio, display: data.display,
-      intro:data.intro,detail:data.detail,skyboxes:data.skyboxes,softwarePixelLimit:data.softwarePixelLimit,touchPixelLimit:data.touchPixelLimit,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
+      intro:data.intro,detail:data.detail,skyboxes:data.skyboxes,softwarePixelLimit:data.softwarePixelLimit,touchPixelLimit:data.touchPixelLimit,resizeRace:data.resizeRace,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
+    if(viewport)runtime.setDisplay(viewport);
     runtime.graphics?.setVisible(visible);
     runtime.graphics?.setFocused(focused);
     self.postMessage({ type: 'loaded', manifest: runtime.manifest, graphics:runtime.graphics?.renderer.info,

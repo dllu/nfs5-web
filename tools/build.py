@@ -92,6 +92,8 @@ def main():
         parser.error('Run tools/prepare.py again to generate the browser loading-screen and minimap hooks')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'browser-logical-framebuffer' not in metadata.get('patches',[]):
         parser.error('Run tools/prepare.py again to generate the logical loading-framebuffer lock hook')
+    if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'browser-live-viewport' not in metadata.get('patches',[]):
+        parser.error('Run tools/prepare.py again to generate the race viewport refresh hooks')
     if metadata['sha256']=='c318af393d4c2b7071a820ca3d69e956bbd94769b6e5c2e3e49f498ecbc94906' and 'browser-extended-detail' not in metadata.get('patches',[]):
         parser.error('Run tools/prepare.py again to generate the scene-detail hooks')
     configuration = hashlib.sha256(json.dumps([str(compiler), flags]).encode()).hexdigest()

@@ -21,11 +21,12 @@ export function openingMovies(bytes) {
 // Software WebGPU adapters can enqueue frames faster than the CPU rasterizer
 // completes them. Bound the default race mode's pixel count, preserving aspect
 // and the game's minimum display size. Explicit saved race modes stay intact.
-export function softwareViewport(display, pixelLimit) {
+export function softwareViewport(display, pixelLimit, maxDimension=16384) {
   if(!display||!pixelLimit)return display;
-  const width=Math.max(640,display.width),height=Math.max(480,display.height);
-  const scale=Math.min(1,Math.max(Math.sqrt(pixelLimit/(width*height)),640/width,480/height));
-  return {width:Math.floor(width*scale),height:Math.floor(height*scale)};
+  const {width,height}=display;
+  const scale=Math.min(maxDimension/Math.max(width,height),
+    Math.max(Math.min(1,Math.sqrt(pixelLimit/(width*height))),640/width,480/height));
+  return {width:Math.max(640,Math.floor(width*scale)),height:Math.max(480,Math.floor(height*scale))};
 }
 
 // This browser preference leaves the career's original graphics settings intact.

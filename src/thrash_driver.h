@@ -12,6 +12,8 @@ static const __typeof__(web_gpu_api) *gpu=&web_gpu_api;
 static uint32_t descriptor,modes,formats,framebuffer,framebuffer_capacity,lockdesc,surface_info,callbacks;
 static uint32_t framebuffer_width,framebuffer_height,framebuffer_ui;
 static uint32_t width=640,height=480,color_bits=16;
+static uint32_t active_mode,viewport_revision;
+static int resize_viewport;
 static uint32_t window_color_clear=1;
 static int opened,trace;
 static uint32_t state_values[8][1024],clear_color=0xFF000000u;
@@ -101,6 +103,11 @@ static void make_descriptor(void) {
     uint32_t m=modes+VIEWPORT_MODE*40;
     MEM32(m)=win_viewport_width<640?640:win_viewport_width;
     MEM32(m+4)=win_viewport_height<480?480:win_viewport_height;
+    /* The original mode lookup returns the first exact match. Keep the
+     * browser mode distinguishable from a fixed resolution of the same size. */
+    if(resize_viewport)for(unsigned i=0;i<MODE_RESOLUTIONS;i++) {
+        if(MEM32(m)==mode_sizes[i][0]&&MEM32(m+4)==mode_sizes[i][1]){MEM32(m)++;break;}
+    }
     MEM32(m+8)=32;MEM32(m+12)=6;MEM32(m+16)=1;MEM32(m+20)=2;MEM32(m+24)=2;
 }
 static void r_about(void){make_descriptor();RET(descriptor,0);}
@@ -113,21 +120,26 @@ static void r_window(void){
     window_color_clear=id!=3;nfspu_thrash_pump();RET(1,1);
 }
 static void r_selectdisplay(void){RET(A32(0)==0 ? 1:0,1);}
-static void r_mode(void) {
-    make_descriptor();uint32_t i=A32(0);
-    if(!i||i>MODE_COUNT||!MEM32(modes+i*40+16))RET(0,3);
-    width=MEM32(modes+i*40);height=MEM32(modes+i*40+4);
+static int set_surface_size(uint32_t w,uint32_t h) {
+    width=w;height=h;
     framebuffer_width=width;framebuffer_height=height;framebuffer_ui=0;
-    uint32_t bits=A32(2);color_bits=bits==2||bits==32?32:16;
-    if(color_bits>MEM32(modes+i*40+8))color_bits=16;
     if(framebuffer_capacity>(uint64_t)width*height*(color_bits/8))discard_framebuffer();
-    if(opened){if(!gpu->resize(width,height))RET(0,3);}else if(!open_gpu())RET(0,3);
+    if(!(opened?gpu->resize(width,height):open_gpu()))return 0;
     hle_set_screen_size(width,height);
     web_projection_update(width,height);
     web_ui_update(width,height);
     MEM32(lockdesc+4)=width*color_bits/8;MEM32(lockdesc+8)=color_bits==16?4:6;
     MEM32(lockdesc+12)=width;MEM32(lockdesc+16)=height;
-    memcpy(hle_ptr(surface_info),hle_ptr(lockdesc),20);MEM32(surface_info)=0;RET(1,3);
+    memcpy(hle_ptr(surface_info),hle_ptr(lockdesc),20);MEM32(surface_info)=0;
+    return 1;
+}
+static void r_mode(void) {
+    make_descriptor();uint32_t i=A32(0);
+    if(!i||i>MODE_COUNT||!MEM32(modes+i*40+16))RET(0,3);
+    uint32_t bits=A32(2);color_bits=bits==2||bits==32?32:16;
+    if(color_bits>MEM32(modes+i*40+8))color_bits=16;
+    active_mode=i;
+    RET(set_surface_size(MEM32(modes+i*40),MEM32(modes+i*40+4)),3);
 }
 static void r_restore(void){nfspu_thrash_shutdown();RET(1,0);}
 static void r_idle(void){nfspu_thrash_pump();RET(1,0);}
@@ -164,7 +176,87 @@ static void r_clear(void){
 static void r_flush(void){RET(gpu_flush(),0);}
 
 
-static void r_flip(void){int ok=open_gpu()&&gpu->present();frames++;RET(ok,0);}
+uint32_t web_camera_mode(void){return MEM32(0x619780)^(viewport_revision<<8);}
+
+static void resize_race_hud(uint32_t old_w,uint32_t old_h,uint32_t w,uint32_t h) {
+    MEM32(0x60C900)=w;MEM32(0x60C81C)=h;
+    uint32_t layouts=MEM32(0x60C818);
+    if(!layouts)return;
+    uint32_t first=MEM32(layouts),end=MEM32(layouts+4);
+    if(!first||end<=first||MEM32(0x60C95C)>=(end-first)/4)return;
+    /* Each live layout stores normalized widget positions alongside their
+     * logical sizes. Keep offsets from the nearest edge or the horizontal
+     * center, using the game's left/center/right and top/bottom anchors. */
+    static const uint16_t positions[][2]={
+        {0x188,0x94},{0x190,0x9C},{0x198,0xA4},{0x1A0,0xAC},{0x1A8,0xB4},{0x1B0,0xBC},
+        {0x1B8,0xC4},{0x1C0,0xD4},{0x1C8,0xE4},{0x1D0,0xF4},{0x1D8,0xFC},{0x0C,0x04},{0x20,0x14},
+    };
+    for(uint32_t entry=first;entry<end;entry+=4) {
+        uint32_t layout=MEM32(entry);
+        for(unsigned i=0;i<sizeof positions/sizeof positions[0];i++) {
+            float *xy=hle_ptr(layout+positions[i][0]);
+            int32_t widget_w=MEM32(layout+positions[i][1]),widget_h=MEM32(layout+positions[i][1]+4);
+            double x=round((double)xy[0]*old_w),y=round((double)xy[1]*old_h);
+            if(x>old_w/2)x+=(int32_t)w-(int32_t)old_w;
+            else if(x<old_w/2&&x+widget_w>old_w/2)x+=(int32_t)(w/2)-(int32_t)(old_w/2);
+            if(y>old_h/2)y+=(int32_t)h-(int32_t)old_h;
+            xy[0]=fmin(x,(double)w-widget_w)/w;
+            xy[1]=fmin(y,(double)h-widget_h)/h;
+        }
+    }
+    /* Refresh the game's cached pixel anchors from the updated live layouts. */
+    guest_callback(0x0041FB40,0,NULL);
+    /* Refresh the enabled widgets just as the game's HUD settings handler does. */
+    uint32_t widgets=MEM32(0x60C9F4);
+    if(widgets) {
+        uint32_t saved_ecx=g_ecx;
+        uint32_t end=MEM32(widgets+4);
+        for(uint32_t entry=MEM32(widgets);entry<end;entry+=8) {
+            if(!MEM8(entry+4))continue;
+            g_ecx=MEM32(entry);
+            guest_callback(MEM32(MEM32(g_ecx)+8),0,NULL);
+        }
+        g_ecx=saved_ecx;
+    }
+    web_ui_countdown_overlay(MEM32(0x60CA60));
+    web_ui_countdown(MEM32(0x60CA64));
+    web_ui_countdown(MEM32(0x60CA68));
+}
+
+static void resize_race_viewport(void) {
+    if(!resize_viewport||active_mode!=VIEWPORT_MODE||MEM32(0x619780)!=VIEWPORT_MODE)return;
+    uint32_t w=win_viewport_width,h=win_viewport_height;
+    if(w==width&&h==height)return;
+    /* The guest has finished the old frame. Update its surface and clip
+     * bounds together, then invalidate the cameras' cached mode token. */
+    if(MEM32(0x619784)!=width||MEM32(0x619788)!=height)return;
+    const uint32_t extents[][2]={
+        {0x619784,0x619788}, /* active mode */
+        {0x5DEAC8,0x5DEACC}, /* active surface */
+        {0x5DE654,0x5DE658}, /* device mode */
+        {0x69E094,0x69E070}, /* default clip bounds */
+        {0x6A6430,0x6A6434}, /* surface clip bounds */
+        {0x6A6448,0x6A6444}, /* current clip bounds */
+    };
+    for(unsigned i=0;i<sizeof extents/sizeof extents[0];i++) {
+        if(MEM32(extents[i][0])==width&&MEM32(extents[i][1])==height) {
+            MEM32(extents[i][0])=w;MEM32(extents[i][1])=h;
+        }
+    }
+    if(render_state.scissor_x==0&&render_state.scissor_y==0&&render_state.scissor_w==width&&render_state.scissor_h==height){
+        render_state.scissor_w=w;render_state.scissor_h=h;
+    }
+    uint32_t old_ui_w=ui_size[0],old_ui_h=ui_size[1];
+    if(!set_surface_size(w,h))return;
+    viewport_revision++;
+    if((ui_size[0]!=old_ui_w||ui_size[1]!=old_ui_h)&&MEM32(0x60C900)==old_ui_w&&MEM32(0x60C81C)==old_ui_h)
+        resize_race_hud(old_ui_w,old_ui_h,ui_size[0],ui_size[1]);
+}
+static void r_flip(void){
+    int ok=open_gpu()&&gpu->present();frames++;
+    if(ok)resize_race_viewport();
+    RET(ok,0);
+}
 /* The supplied OpenGL driver's sync entry is `mov eax,1; ret 4`. */
 static void r_sync(void){nfspu_thrash_pump();RET(1,1);}
 static void r_clip(void){
@@ -557,6 +649,7 @@ static void thrash_reset(void) {
     memset(textures,0,sizeof textures);memset(state_values,0,sizeof state_values);
     descriptor=modes=formats=framebuffer=framebuffer_capacity=lockdesc=surface_info=callbacks=0;
     framebuffer_width=640;framebuffer_height=480;framebuffer_ui=0;
+    active_mode=viewport_revision=0;resize_viewport=0;
     width=640;height=480;color_bits=16;window_color_clear=1;opened=trace=0;thrash_version=107;
     clear_color=0xFF000000;clear_depth=1;vertex_depth_bias=0;selected_fog_mode=0;
     thrash_configuration_loaded=thrash_environment_loaded=0;thrash_texture_filter=0;thrash_gamma_factor=1;

@@ -58,7 +58,8 @@ keep their original 4:3 aspect, centered with black bars when needed. On hardwar
 adapters, frontend/garage geometry renders at the fitted monitor resolution;
 original bitmap art, videos, UI layout and mouse hitboxes retain their logical
 640×480 coordinates. Frontend density follows browser resize. The default
-race mode fits a 4:3 frame on touch devices and the full viewport on desktop.
+race mode follows window and fullscreen changes during play. It fits a 4:3
+frame on touch devices and the full viewport on desktop.
 Explicit race resolutions retain their aspect within the available frame.
 Mouse coordinates follow the fitted canvas. The system cursor is hidden over
 the game.

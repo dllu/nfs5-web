@@ -832,10 +832,12 @@ uint32_t *web_thrash_textures(void) {
     machine_release();return snapshot;
 }
 uint32_t web_registry_restore(void) { machine_acquire(); int ok = reg_restore(); machine_release(); return ok; }
-void web_display_size(uint32_t width, uint32_t height) {
+void web_display_size(uint32_t width, uint32_t height, uint32_t live) {
     if (!width || !height || width > 16384 || height > 16384) return;
     machine_acquire(); win_viewport_width=width;win_viewport_height=height;
-    win_windows[0].width = width; win_windows[0].height = height; machine_release();
+    resize_viewport=live!=0;
+    if(!live||!opened){win_windows[0].width=width;win_windows[0].height=height;}
+    machine_release();
 }
 uint32_t web_audio_mix(float *output, uint32_t frames, uint32_t rate) {
     if (!frames || frames > 4096 || rate < 8000 || rate > 192000) return 0;

@@ -187,7 +187,11 @@ export async function attachGraphics(module, canvas, { onResize = () => {}, pace
     renderer,stats,pacing:pacing.stats,
     setVisible(value){visible=Boolean(value);renderer.resetTiming();pacing.setState({visible});},
     setFocused(value){focused=Boolean(value);renderer.resetTiming();pacing.setState({focused});},
-    setFrontendSize(size){if(!frontendSize)return;Object.assign(frontendSize,size);renderer.resize(renderer.width,renderer.height);onResize(renderer.width,renderer.height);},
+    setFrontendSize(size){
+      if(!frontendSize)return;
+      Object.assign(frontendSize,size);
+      if(renderer.width===640&&renderer.height===480)renderer.resize(640,480);
+    },
     async settle() {
       while(!closed && !failure) {
         await pump();views();if((Atomics.load(header,0)>>>0)===(Atomics.load(header,1)>>>0))break;

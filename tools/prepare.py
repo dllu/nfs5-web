@@ -51,6 +51,7 @@ def main():
         patches.append('browser-ui-layout')
         patches.append('browser-scaled-ui')
         patches.append('browser-logical-framebuffer')
+        patches.append('browser-live-viewport')
         detail = DetailHooks()
         patches.append('browser-extended-detail')
     functions = discover_functions(data, info, iat)

@@ -47,6 +47,12 @@ class UiHooks:
         # anchoring, custom layout editor and serialization use those same units.
         instruction('41E174', lambda line: line + '''
     { uint32_t w = eax; eax = web_ui_layout(w,ecx,0); ecx = web_ui_layout(w,ecx,1); }''')
+        # The camera normally caches its viewport by mode index. Include
+        # changes to the dimensions of the browser mode in that token.
+        if '/* 0x00466F30:' in source or '/* 0x00467366:' in source:
+            for pc in ['466F30', '467366']:
+                instruction(pc, lambda line: line.replace('MEM32(0x619780)', 'web_camera_mode()'))
+            source = 'uint32_t web_camera_mode(void);\n' + source
         # Original modes assumed width alone indicated a larger screen. A tall
         # logical viewport also needs the original bottom-anchor adjustment.
         instruction('41E4A2', lambda line: '    if ((int32_t)edi <= 640 && (int32_t)ebx <= 480) goto L_0041E50B; /* 0x0041E4A2: browser tall UI anchor */')
@@ -76,6 +82,6 @@ class UiHooks:
         return source
 
     def validate(self):
-        for pc in WIDTH_READS + HEIGHT_READS + DIRECT_DRAWS + MOUSE_READS + ['432B04', '4A5376', '4A537B', '41E174', '41E4A2', '435420', '435428', '41A330', '41A4FA', '41A504']:
+        for pc in WIDTH_READS + HEIGHT_READS + DIRECT_DRAWS + MOUSE_READS + ['432B04', '4A5376', '4A537B', '41E174', '41E4A2', '435420', '435428', '41A330', '41A4FA', '41A504', '466F30', '467366']:
             if not self.counts.get(pc):
                 raise ValueError('Missing browser UI hook at ' + pc)

@@ -2,7 +2,7 @@ import createEngine from './engine.js';
 import { openStorage, SaveReplacedError } from './storage.mjs';
 import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
-import {openingMovies,verokImage,softwareViewport,sceneDetail,sceneDetailMode} from './config.mjs';
+import {openingMovies,verokImage,softwareViewport,sceneDetail,sceneDetailMode,touchViewport} from './config.mjs';
 import {trackHeap} from './memory.mjs';
 import {readAssets,preloadAssets} from './assets.mjs';
 import {attachStream} from './streaming.mjs';
@@ -10,7 +10,7 @@ import {attachStream} from './streaming.mjs';
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
-export async function loadRuntime({ log = () => {}, onSaveError = error => log(`Local save failed: ${error.message}`), read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, detail='auto', skyboxes=false, softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
+export async function loadRuntime({ log = () => {}, onSaveError = error => log(`Local save failed: ${error.message}`), read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, detail='auto', skyboxes=false, softwarePixelLimit=0,touchPixelLimit=0,resizeRace=false } = {}) {
   const started=performance.now();
   const [module, manifest, response, assets] = await Promise.all([
     createEngine({ print: log, printErr: log }).then(trackHeap),
@@ -29,7 +29,6 @@ export async function loadRuntime({ log = () => {}, onSaveError = error => log(`
     width: Math.round(innerWidth * (globalThis.devicePixelRatio || 1)),
     height: Math.round(innerHeight * (globalThis.devicePixelRatio || 1)),
   } : null;
-  if (display) module._web_display_size(display.width, display.height);
   const pe = new DataView(executable.buffer).getUint32(0x3c, true);
   const headerSize = new DataView(executable.buffer).getUint32(pe + 24 + 60, true);
   module.HEAPU8.set(executable.subarray(0, headerSize), base + manifest.imageBase);
@@ -144,14 +143,22 @@ export async function loadRuntime({ log = () => {}, onSaveError = error => log(`
   const storageTimer = storage ? setInterval(() => checkpoint().catch(onSaveError), 1000) : null;
   const detachAudio = audio ? attachAudio(module, audio) : null;
   let graphics;
-  try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace,frontendSize:display?{...display}:null}):null; }
+  const frontendSize=display&&{...(touchPixelLimit?touchViewport(display,touchPixelLimit):display)};
+  try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace,frontendSize}):null; }
   catch(error) {clearInterval(storageTimer);detachAudio?.();streaming.close();storage?.close();module.PThread.terminateAllThreads();throw error;}
   const originalDisplay=display;
-  const pixelLimit=graphics?.renderer.info.software?(softwarePixelLimit||touchPixelLimit):touchPixelLimit;
-  if(graphics&&pixelLimit&&display) {
-    display=softwareViewport(display,pixelLimit);
-    module._web_display_size(display.width,display.height);
+  const adapter=graphics?.renderer.info;
+  const pixelLimit=adapter?.software&&softwarePixelLimit?Math.min(softwarePixelLimit,touchPixelLimit||Infinity):touchPixelLimit;
+  const live=resizeRace&&sha256===verokImage;
+  function setDisplay(size) {
+    if(!size?.width||!size.height)return;
+    display=touchPixelLimit?touchViewport(size,pixelLimit):
+      softwareViewport(size,pixelLimit||(live?Infinity:0),adapter?.maxTextureSize);
+    if(live&&display.width===640&&display.height===480)display={width:644,height:483};
+    module._web_display_size(display.width,display.height,Number(live));
+    graphics?.setFrontendSize(touchPixelLimit?display:size);
   }
+  setDisplay(originalDisplay);
   const reducedResolution=!!(display&&originalDisplay&&(display.width!==originalDisplay.width||display.height!==originalDisplay.height));
   function setDetail(value) {
     detail=sceneDetail(value);
@@ -188,7 +195,7 @@ export async function loadRuntime({ log = () => {}, onSaveError = error => log(`
     const status=module._web_async_finish();await graphics?.settle();const result=snapshot(status);
     await checkpoint();return result;
   }
-  return { module, manifest, base, memorySize, graphics, display, reducedResolution, skyboxes:assets?.skyboxes,
+  return { module, manifest, base, memorySize, graphics, get display(){return display;}, reducedResolution, skyboxes:assets?.skyboxes,
     loading:{runtimeMs:performance.now()-started,preloadBytes:assetMemory.bytes,preloadedFiles:assetMemory.files},
     audioStats:()=>detachAudio?.stats?.(),
     streamingStats:()=>streaming.stats(),
@@ -206,7 +213,7 @@ export async function loadRuntime({ log = () => {}, onSaveError = error => log(`
         return {at:v[0],ms:v[1],path:paths.get(v[2])??'Mounted file '+v[2],offset:v[3],bytes:v[4],thread:v[5],caller:hex(v[6])};
       })};
     },
-    setDetail,
+    setDetail,setDisplay,
     detailStats:()=>{
       const values=new Float64Array(module.HEAPU8.buffer,module._web_detail_stats(),8);
       return {setting:detail,...Object.fromEntries(['mode','multiplier','originalRange','range','views','cars','models','squaredMultiplier'].map((key,i)=>[key,values[i]]))};

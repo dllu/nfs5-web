@@ -56,6 +56,13 @@ async function action(name) {
   await page.getByRole('button',{name:'Game menu'}).click();
   await page.getByRole('button',{name,exact:true}).click();
 }
+async function waitForRaceSize(size) {
+  await page.waitForFunction(({width,height})=>{
+    const canvas=document.querySelector('#game'),box=canvas.getBoundingClientRect();
+    return canvas.width===Math.round(width*devicePixelRatio)&&canvas.height===Math.round(height*devicePixelRatio)&&
+      Math.abs(box.width-width)<1&&Math.abs(box.height-height)<1;
+  },size,{timeout:30000});
+}
 async function backupButton(kind, inGame) {
   if(inGame&&await page.locator('#game-actions').isHidden())await page.getByRole('button',{name:'Game menu'}).click();
   await page.getByRole('button',{name:kind+' save backup',exact:true}).click();
@@ -246,12 +253,38 @@ try {
   const afterQuit=await downloadBackup(false);
   assert(!afterQuit.files.some(record=>record.path===first.path));
   assert.deepEqual(afterQuit.files.find(record=>record.path===deletion.path),deletion,'Backups preserve deletion records');
+  // Start at a resolution also offered as a fixed preset, then narrow the
+  // browser before entering the race and expand it while the race is running.
+  await page.setViewportSize({width:1280,height:720});
   const acceptAfterQuit=confirmRestore(true), relaunch=page.waitForEvent('domcontentloaded');
   await uploadBackup(JSON.stringify(backup),false);await acceptAfterQuit;await relaunch;await waitForChooser();
   assert.deepEqual(await saved(),first,'Uploading from the quit screen restores the exact original profile');
+  const windowed={width:900,height:1100},wide={width:1920,height:1080};
+  await page.setViewportSize(windowed);
+  await click(320,400);
+  await waitForRedButtons([[295,55]],'The main menu did not open');
+  await click(245,55);
+  await waitForRedButtons([[380,264],[380,288],[380,310],[380,360]],'The singleplayer choices did not open');
+  await click(320,265);
+  await waitForRedButtons([[150,105],[500,80],[600,130]],'The quick race garage did not open');
+  await click(356,467);
+  await waitForRaceSize(windowed);
+  const fullscreen=await page.evaluate(()=>document.fullscreenEnabled);
+  if(fullscreen){
+    await action('Fullscreen');
+    await page.waitForFunction(()=>document.fullscreenElement===document.documentElement);
+  }
+  await page.setViewportSize(wide);
+  await waitForRaceSize(wide);
+  if(fullscreen){
+    await action('Exit fullscreen');
+    await page.waitForFunction(()=>!document.fullscreenElement);
+  }
+  await page.setViewportSize(windowed);
+  await waitForRaceSize(windowed);
   assert.deepEqual(errors,[]);
   await writeFile('build/public-test.json',JSON.stringify({url,seed,first,restored,errors},null,2)+'\n');
-  console.log('Public autostart, fullscreen, completed seed, fresh profile, skyboxes, browser-restart persistence and backup/restore passed');
+  console.log('Public autostart, fullscreen race resizing, completed seed, fresh profile, skyboxes, browser-restart persistence and backup/restore passed');
 } catch(error) {
   await page?.screenshot({path:'build/public-test-failure.png'}).catch(()=>{});
   throw error;
