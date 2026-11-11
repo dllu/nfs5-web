@@ -50,9 +50,6 @@ copy. **Upload save backup** restores that file on another browser or device
 running the same game executable. Confirming a restore replaces local profiles
 and in-game settings and restarts the game. Backups also preserve profile
 deletions. View distance, skybox and touch layout choices stay in each browser.
-To move profiles from the previous site, download them from the save export
-page on [daniel.lawrence.lu](https://daniel.lawrence.lu/nfs5-saves/) or
-[lawrence.lu](https://lawrence.lu/nfs5-saves/), then upload the backup at nfspu.com.
 Clearing site data deletes local progress. A browser confirmation guards tab
 close/reload until the game exits normally, though browsers may omit it on mobile.
 Losing focus releases held controls and keeps loading/simulation running at
@@ -271,8 +268,7 @@ Deployment copies `build/public/` to `pupserver.linode:/www/nfspu`.
 headers, precompressed Wasm, and cached content-addressed assets. www.nfspu.com
 redirects to nfspu.com. Cloudflare proxies the domain to the server and uses
 Full (strict) TLS. [The legacy routes](tools/nfs5-redirect.caddy) permanently
-redirect `/nfs5` on the previous hosts and provide `/nfs5-saves/` for exporting
-browser-local profiles from those origins.
+redirect `/nfs5` on the previous hosts to nfspu.com.
 The deploy script backs up and validates Caddy's configuration before reload.
 A different static host must supply `Cross-Origin-Opener-Policy: same-origin`
 and `Cross-Origin-Embedder-Policy: require-corp`; byte ranges are recommended.
