@@ -12,7 +12,8 @@ const saveWarning=document.querySelector('#save-warning'),backupFile=document.qu
 retry.onclick=()=>location.reload();
 let worker,audio,detach,controls,screen,executable,logs=[],finished=false,completeCheckpoint,checkpointId=0,backupBusy=false;
 const warnBeforeLeaving=event=>{if(!finished){event.preventDefault();event.returnValue='';}};
-const displaySize=()=>({width:Math.round(innerWidth*devicePixelRatio),height:Math.round(innerHeight*devicePixelRatio)});
+const displaySize=()=>({width:Math.round(innerWidth*devicePixelRatio),height:Math.round(innerHeight*devicePixelRatio),
+  aspect:Number(getComputedStyle(document.body).getPropertyValue('--race-aspect'))||4/3});
 const touchPixelLimit=matchMedia('(pointer: coarse)').matches?1440*810:0;
 const resume=()=>audio?.resume().then(()=>{sound.hidden=audio.stats().state==='running';}).catch(()=>{});
 window.addEventListener('pointerdown',resume,{capture:true});

@@ -126,14 +126,19 @@ export function attachControls(input,{skyboxes,onDiagnostics=()=>{},onDetailChan
     input.analog(axis(x),-axis(y));
   }
   for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])joystick.addEventListener(type,stick);
-  for(const button of root.querySelectorAll('[data-scan]')) {
+  for(const button of pad.querySelectorAll('button')) {
     const pointers=new Set(),scan=Number(button.dataset.scan);
-    const release=()=>{pointers.clear();input.key(scan,false,button);button.classList.remove('pressed');};releaseButtons.push(release);
-    button.addEventListener('pointerdown',event=>{event.preventDefault();pointers.add(event.pointerId);button.setPointerCapture(event.pointerId);input.key(scan,true,button);button.classList.add('pressed');});
+    const release=()=>{pointers.clear();if(scan)input.key(scan,false,button);button.classList.remove('pressed');};releaseButtons.push(release);
+    button.addEventListener('pointerdown',event=>{
+      event.preventDefault();pointers.add(event.pointerId);button.setPointerCapture(event.pointerId);
+      if(scan)input.key(scan,true,button);
+      else input.pulse(Number(button.dataset.pulse));
+      button.classList.add('pressed');
+    });
     const up=event=>{pointers.delete(event.pointerId);if(!pointers.size)release();};
     for(const type of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(type,up);
   }
-  for(const b of root.querySelectorAll('[data-pulse]'))b.onclick=()=>{focusGame();input.pulse(Number(b.dataset.pulse));};
+  for(const button of pad.querySelectorAll('[data-pulse]'))button.onclick=event=>{if(event.detail===0)input.pulse(Number(button.dataset.pulse));};
   find('pause-game').onclick=()=>{setMenu(false);focusGame();input.pulse(1);};
   find('toggle-pad').onclick=()=>{manual=pad.hidden;update();setMenu(false);focusGame();};
   find('touch-layout').onclick=()=>{

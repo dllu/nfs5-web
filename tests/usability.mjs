@@ -68,10 +68,25 @@ try {
  const boxes=async()=>{
   const out={};for(const name of ['Steer left','Steer right','Gas','Brake','Handbrake','Camera'])out[name]=await page.getByRole('button',{name,exact:true}).boundingBox();return out;
  };
- for(const size of [{width:430,height:932},{width:320,height:568},{width:932,height:430}]){
-  await page.setViewportSize(size);const b=await boxes(),left=b['Steer left'],right=b['Steer right'];
+ for(const size of [{width:430,height:932},{width:390,height:844},{width:375,height:667},{width:320,height:568},{width:932,height:430}]){
+  await page.setViewportSize(size);
+  await page.evaluate(async()=>{
+   const {touchViewport}=await import('./config.mjs');
+   const aspect=Number(getComputedStyle(document.body).getPropertyValue('--race-aspect'));
+   const screen=touchViewport({width:innerWidth*devicePixelRatio,height:innerHeight*devicePixelRatio,aspect},1440*810);
+   document.querySelector('#game').style.setProperty('--game-aspect',screen.width/screen.height);
+   window.controls.setScreen(screen);
+  });
+  const b=await boxes(),left=b['Steer left'],right=b['Steer right'];
   const game=await page.locator('#game').boundingBox();
-  assert(Math.abs(game.width/game.height-4/3)<.001,'Mobile game has a 4:3 picture');
+  const portrait=size.height>size.width,aspect=portrait?(size.height<=700?1:.8):4/3;
+  assert(Math.abs(game.width/game.height-aspect)<.001,'Mobile race uses the selected portrait or landscape aspect');
+  if(portrait){
+   const tools=await page.locator('#toggle-tools').boundingBox();
+   assert(game.y>=tools.y+tools.height&&game.y<=tools.y+tools.height+8,'Portrait game sits just below the hamburger menu');
+   const pad=await page.locator('#touch-pad').boundingBox();
+   assert(left.height>=pad.height-1&&left.width>=60,'Steering fills the available height with wider buttons');
+  }else assert(left.height>size.height/2&&left.width>=75,'Landscape steering fills the space below auxiliary controls');
   assert(left.x+left.width<=right.x&&left.y===right.y,'Left and right sit side by side');
   assert(b.Gas.x===b.Brake.x&&b.Gas.y+b.Gas.height<=b.Brake.y,'Gas sits above brake');
   assert(left.x+left.width/2<b.Handbrake.x+b.Handbrake.width/2&&b.Handbrake.x+b.Handbrake.width/2<b.Gas.x+b.Gas.width/2,'Handbrake sits between the hands');
@@ -86,6 +101,7 @@ try {
  await page.setViewportSize({width:430,height:932});
  const b=await boxes(),point=(box,id)=>({x:box.x+box.width/2,y:box.y+box.height/2,id});
  const leftPoint=point(b['Steer left'],11),gasPoint=point(b.Gas,12);
+ const idleColor=await page.locator('#gas').evaluate(e=>getComputedStyle(e).backgroundColor);
  const gap=await page.evaluate(()=>({x:innerWidth/2,y:innerHeight-4}));
  assert.deepEqual(await page.evaluate(({x,y})=>{
   const target=document.elementFromPoint(x,y);
@@ -101,6 +117,7 @@ try {
  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[leftPoint,gasPoint]});
  await page.waitForTimeout(1000);
  assert.deepEqual(await page.evaluate(()=>[203,200].map(key=>window.inputs.filter(e=>e.key===key).at(-1)?.down)),[true,true],'Steering and gas can be held with separate fingers');
+ for(const selector of ['#gas','#steering-buttons button:first-child'])assert.notEqual(await page.locator(selector).evaluate(e=>getComputedStyle(e).backgroundColor),idleColor,'Held controls visibly change color');
  assert.equal(await page.evaluate(()=>String(getSelection())),'');
  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[leftPoint]});
  assert.deepEqual(await page.evaluate(()=>[203,200].map(key=>window.inputs.filter(e=>e.key===key).at(-1)?.down)),[false,true],'Releasing steering keeps gas held');
@@ -115,6 +132,13 @@ try {
  await page.keyboard.up('ArrowUp');
  assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===200).at(-1).down),false,'Changing layouts releases the virtual pedal');
  await session.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+ assert.equal(await page.locator('#gas').evaluate(e=>getComputedStyle(e).backgroundColor),idleColor,'Cancelled touches clear the pressed color');
+ const camera=await page.locator('#camera').boundingBox();
+ const cameraPulses=await page.evaluate(()=>window.inputs.filter(e=>e.key===46&&e.down).length);
+ await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point(camera,20)]});
+ assert.notEqual(await page.locator('#camera').evaluate(e=>getComputedStyle(e).backgroundColor),idleColor,'Camera has the same pressed feedback as the pedals');
+ await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ assert.equal(await page.evaluate(()=>window.inputs.filter(e=>e.key===46&&e.down).length),cameraPulses+1,'A Camera tap produces one camera change');
  await action('Layout: Joystick');
  const rightPoint=point((await boxes())['Steer right'],13);
  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[rightPoint]});
@@ -149,6 +173,7 @@ try {
  await action('Pause');await page.waitForTimeout(180);
  assert.deepEqual(await page.evaluate(()=>window.inputs.filter(e=>e.key===1).slice(-2).map(e=>e.down)),[true,false]);
  if(await page.evaluate(()=>document.fullscreenEnabled)){
+  await page.bringToFront();
   await page.getByRole('button',{name:'Game menu'}).tap();
   await page.getByRole('button',{name:'Fullscreen',exact:true}).tap();
   await page.waitForFunction(()=>document.fullscreenElement===document.documentElement);

@@ -25,8 +25,10 @@ the handbrake, C changes camera, and Esc opens the pause menu. The top-right
 **Keyboard** for game text or prices, and **Info**. Touch devices can tap game
 menus and use proportional joystick steering and pedals or separate arrow
 buttons. **Controls** toggles the driving pad, and **Layout** changes the
-layout for this browser. In portrait the controls sit below the 4:3 picture.
-In landscape they sit on either side. Gas is above brake in both layouts.
+layout for this browser. Portrait races use a 4:5 picture below the hamburger
+menu, with a square picture on screens up to 700 CSS pixels tall. Steering
+buttons fill the control area below the game. In landscape the controls sit
+on either side. Gas is above brake in both layouts, and buttons turn red while held.
 The driving controls and the space around them suppress browser zoom gestures
 while the controls are visible. Holding a control suppresses text selection
 and the iOS touch callout. On iPhone, **Fullscreen** shows how to launch the
@@ -58,8 +60,8 @@ keep their original 4:3 aspect, centered with black bars when needed. On hardwar
 adapters, frontend/garage geometry renders at the fitted monitor resolution;
 original bitmap art, videos, UI layout and mouse hitboxes retain their logical
 640×480 coordinates. Frontend density follows browser resize. The default
-race mode follows window and fullscreen changes during play. It fits a 4:3
-frame on touch devices and the full viewport on desktop.
+race mode follows window and fullscreen changes during play. Touch races fit
+the portrait or landscape control layout, and desktop races fill the viewport.
 Explicit race resolutions retain their aspect within the available frame.
 Mouse coordinates follow the fitted canvas. The system cursor is hidden over
 the game.

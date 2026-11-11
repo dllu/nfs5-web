@@ -28,6 +28,8 @@ const touchLimit=1440*810;
 assert.deepEqual(touchViewport({width:1290,height:2796},touchLimit),{width:1244,height:933});
 assert.deepEqual(touchViewport({width:2796,height:1290},touchLimit),{width:1244,height:933});
 assert.deepEqual(touchViewport({width:320,height:568},touchLimit),{width:644,height:483});
+assert.deepEqual(touchViewport({width:1290,height:2796,aspect:.8},touchLimit),{width:964,height:1205});
+assert.deepEqual(touchViewport({width:320,height:568,aspect:1},touchLimit),{width:640,height:640});
 assert.equal(savedSkyboxes(),false,'Atmospheric skies require an opt-in');
 const hardwareAdapter={info:{isFallbackAdapter:false}},softwareAdapter={info:{isFallbackAdapter:true}},requests=[];
 assert.equal(await selectAdapter({requestAdapter:async options=>{requests.push(options);return options.powerPreference==='low-power'?hardwareAdapter:softwareAdapter;}}),hardwareAdapter);

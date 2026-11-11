@@ -41,11 +41,13 @@ export function sceneDetailMode(value,{touch=false,software=false}={}) {
   return value==='very-far'?2:value==='far'?1:value==='original'||touch||software?0:1;
 }
 
-export function touchViewport({width,height},pixelLimit) {
-  // A distinct 4:3 mode keeps the race controls active on small viewports
-  // where the minimum mode would otherwise match the 640×480 frontend.
-  const unit=Math.max(161,Math.floor(Math.min(width/4,height/3,Math.sqrt(pixelLimit/12))));
-  return {width:unit*4,height:unit*3};
+export function touchViewport({width,height,aspect=4/3},pixelLimit) {
+  const [x,y]=aspect===.8?[4,5]:aspect===1?[1,1]:[4,3];
+  const unit=Math.max(Math.ceil(640/x),Math.ceil(480/y),
+    Math.floor(Math.min(width/x,height/y,Math.sqrt(pixelLimit/(x*y)))));
+  // Keep the race mode distinct from the 640×480 frontend.
+  if(x===4&&y===3&&unit===160)return {width:644,height:483};
+  return {width:unit*x,height:unit*y};
 }
 
 export function savedSkyboxes() {
