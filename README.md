@@ -1,6 +1,6 @@
 # NFS Porsche Unleashed on the web
 
-[Play in your browser](https://daniel.lawrence.lu/nfs5/).
+[Play in your browser](https://nfspu.com/).
 The original PC executable is statically translated from x86 to C with
 pcrecomp and compiled to WebAssembly. Rendering uses WebGPU; the game and
 its workers run on Wasm threads. The deployment is entirely static.
@@ -50,6 +50,9 @@ copy. **Upload save backup** restores that file on another browser or device
 running the same game executable. Confirming a restore replaces local profiles
 and in-game settings and restarts the game. Backups also preserve profile
 deletions. View distance, skybox and touch layout choices stay in each browser.
+To move profiles from the previous site, download them from the save export
+page on [daniel.lawrence.lu](https://daniel.lawrence.lu/nfs5-saves/) or
+[lawrence.lu](https://lawrence.lu/nfs5-saves/), then upload the backup at nfspu.com.
 Clearing site data deletes local progress. A browser confirmation guards tab
 close/reload until the game exits normally, though browsers may omit it on mobile.
 Losing focus releases held controls and keeps loading/simulation running at
@@ -263,9 +266,13 @@ libarchive); attribution is in [third-party notices](THIRD_PARTY_NOTICES.md).
 User profiles and deletion records overlay these defaults on subsequent runs.
 Original binaries, saves and generated game code are not committed to Git.
 
-Deployment copies `build/public/` to `pupserver.linode:/www/misc/nfs5`.
-[The Caddy fragment](tools/nfs5.caddy) limits cross-origin isolation headers
-to `/nfs5`, serves precompressed Wasm, and caches content-addressed assets.
+Deployment copies `build/public/` to `pupserver.linode:/www/nfspu`.
+[The Caddy site](tools/nfs5.caddy) serves nfspu.com with cross-origin isolation
+headers, precompressed Wasm, and cached content-addressed assets. www.nfspu.com
+redirects to nfspu.com. Cloudflare proxies the domain to the server and uses
+Full (strict) TLS. [The legacy routes](tools/nfs5-redirect.caddy) permanently
+redirect `/nfs5` on the previous hosts and provide `/nfs5-saves/` for exporting
+browser-local profiles from those origins.
 The deploy script backs up and validates Caddy's configuration before reload.
 A different static host must supply `Cross-Origin-Opener-Policy: same-origin`
 and `Cross-Origin-Embedder-Policy: require-corp`; byte ranges are recommended.

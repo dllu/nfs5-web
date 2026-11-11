@@ -53,6 +53,7 @@ async function click(x,y) {
   await page.waitForTimeout(1000);
 }
 async function action(name) {
+  await page.bringToFront();
   await page.getByRole('button',{name:'Game menu'}).click();
   await page.getByRole('button',{name,exact:true}).click();
 }

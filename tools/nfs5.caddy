@@ -1,14 +1,16 @@
-# Import inside the lawrence.lu, daniel.lawrence.lu site block.
-@nfs5 path /nfs5 /nfs5/*
-handle @nfs5 {
-	root * /www/misc
+nfspu.com {
+	root * /www/nfspu
 	header Cross-Origin-Opener-Policy same-origin
 	header Cross-Origin-Embedder-Policy require-corp
-	@nfs5Asset path /nfs5/assets/*
+	@nfs5Asset path /assets/*
 	header @nfs5Asset Cache-Control "public, max-age=31536000, immutable"
-	@nfs5Code not path /nfs5/assets/*
+	@nfs5Code not path /assets/*
 	header @nfs5Code Cache-Control no-cache
 	file_server {
 		precompressed gzip
 	}
+}
+
+www.nfspu.com {
+	redir https://nfspu.com{uri} permanent
 }

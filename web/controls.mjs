@@ -29,6 +29,7 @@ export function attachControls(input,{skyboxes,onDiagnostics=()=>{},onDetailChan
     <p>This is an independent, fan-made project to preserve abandonware and keep Need for Speed: Porsche Unleashed playable. It is not affiliated with, sponsored by, or endorsed by Electronic Arts (EA) or Porsche.</p>
     <p>Original game content, trademarks, logos, model names, and vehicle designs belong to their respective owners. Names and marks are used for reference only.</p>
     <p><a href="https://github.com/dllu/nfs5-web" target="_blank" rel="noopener noreferrer">Source code on GitHub</a></p>
+    <p>Moving from the previous site? Download your saves from <a href="https://daniel.lawrence.lu/nfs5-saves/" target="_blank" rel="noopener noreferrer">daniel.lawrence.lu</a> or <a href="https://lawrence.lu/nfs5-saves/" target="_blank" rel="noopener noreferrer">lawrence.lu</a>, then choose Upload save backup in the Game menu here.</p>
     <p id="skybox-settings" hidden><label><input id="atmospheric-skyboxes" type="checkbox"> Atmospheric skyboxes</label><small>Applies next launch.</small></p>
     <p><label>View distance <select id="scene-detail"><option value="auto">Automatic</option><option value="original">Original</option><option value="far">Far (2×)</option><option value="very-far">Very far (4×)</option></select></label></p>
     <p>Farther scenery and higher model detail can reduce performance. Automatic uses Far on desktop GPUs and Original on touch devices and software renderers.</p>

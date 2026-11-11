@@ -1,0 +1,21 @@
+# Import inside the lawrence.lu, daniel.lawrence.lu site block.
+@nfs5SaveRoot path /nfs5-saves
+redir @nfs5SaveRoot /nfs5-saves/ permanent
+handle_path /nfs5-saves/* {
+	root * /www/nfspu
+	@nfs5SavePage path /
+	rewrite @nfs5SavePage /save-transfer.html
+	header Cache-Control no-cache
+	file_server {
+		disable_canonical_uris
+		precompressed gzip
+	}
+}
+
+@nfs5 path /nfs5 /nfs5/*
+handle @nfs5 {
+	route {
+		uri strip_prefix /nfs5
+		redir https://nfspu.com{uri} permanent
+	}
+}

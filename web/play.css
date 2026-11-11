@@ -47,7 +47,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; font-siz
 #game-keyboard input { width:min(150px,45vw); font-size:16px; }
 #game-info { width:min(520px,calc(100vw - 48px - env(safe-area-inset-left) - env(safe-area-inset-right))); max-height:70dvh; overflow:auto; padding:16px; background:#161616f5; border:1px solid #777; font-size:13px; }
 #game-info pre { user-select:text; }
-#game-info a { color:#9dccff; }
+#game-info a, #loading a { color:#9dccff; }
 #skybox-settings small { display:block; color:#aab0b6; margin-left:22px; }
 #scene-detail { font:inherit; font-size:16px; max-width:100%; }
 

@@ -210,7 +210,7 @@ def main():
     static = ['engine.js', 'engine.wasm', 'manifest.json', 'game.exe']
     for name in static:
         shutil.copyfile(source / name, destination / name)
-    web = ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'backup.mjs', 'config.mjs',
+    web = ['play.mjs', 'play.css', 'viewport.css', 'runner.mjs', 'runtime.mjs', 'storage.mjs', 'backup.mjs', 'config.mjs', 'save-transfer.html', 'save-transfer.mjs',
            'input.mjs', 'controls.mjs', 'memory.mjs', 'assets.mjs', 'streaming.mjs', 'stream-worker.mjs', 'audio.mjs', 'audio-worklet.mjs', 'graphics.mjs', 'pacing.mjs', 'renderer.mjs', 'thrash.wgsl']
     for name in web:
         shutil.copyfile(ROOT / 'web' / name, destination / name)
@@ -225,7 +225,7 @@ def main():
     revision = version.hexdigest()[:16]
     names = '|'.join(re.escape(name) for name in [*static, *web, 'assets.json'])
     references = re.compile(r'''(['"])((?:\./)?(?:''' + names + r'''))\1''')
-    for name in ['index.html', 'engine.js', *[n for n in web if n.endswith('.mjs')]]:
+    for name in ['index.html', 'engine.js', *[n for n in web if n.endswith(('.mjs', '.html'))]]:
         path = destination / name
         path.write_text(references.sub(lambda m: m[1] + ('./assets/'+wasm_name if m[2].endswith('engine.wasm') else m[2]+'?v='+revision) + m[1], path.read_text()))
     for name in ('engine.wasm', 'engine.js', 'assets.json'):
