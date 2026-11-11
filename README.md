@@ -27,7 +27,11 @@ menus and use proportional joystick steering and pedals or separate arrow
 buttons. **Controls** toggles the driving pad, and **Layout** changes the
 layout for this browser. In portrait the controls sit below the 4:3 picture.
 In landscape they sit on either side. Gas is above brake in both layouts.
-Holding driving controls suppresses text selection and the iOS touch callout.
+The driving controls and the space around them suppress browser zoom gestures
+while the controls are visible. Holding a control suppresses text selection
+and the iOS touch callout. On iPhone, **Fullscreen** shows how to launch the
+game from the Home Screen without Safari's toolbar. Use a save backup to
+transfer your profile to the Home Screen app.
 Safari uses the playback audio-session type for sound with Silent Mode enabled.
 
 Profiles, in-game settings and other file changes stay in IndexedDB in this

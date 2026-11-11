@@ -13,10 +13,10 @@ export function attachControls(input,{skyboxes,onDiagnostics=()=>{},onDetailChan
     <button id="touch-layout" type="button" hidden>Layout: Joystick</button>
     <button id="show-keyboard" type="button">Keyboard</button>
     <button id="toggle-fullscreen" type="button" hidden>Fullscreen</button>
+    <p id="fullscreen-status" role="status" hidden></p>
     <button type="button" data-backup="download">Download save backup</button>
     <button type="button" data-backup="upload">Upload save backup</button>
     <button id="show-info" type="button">Info</button>
-    <p id="fullscreen-status" role="status" hidden></p>
     <p class="backup-status" role="status" hidden></p>
     </div>
   </nav>
@@ -60,21 +60,29 @@ export function attachControls(input,{skyboxes,onDiagnostics=()=>{},onDetailChan
   const enterFullscreen=page.requestFullscreen??page.webkitRequestFullscreen;
   const leaveFullscreen=document.exitFullscreen??document.webkitExitFullscreen;
   const isFullscreen=()=>!!(document.fullscreenElement??document.webkitFullscreenElement);
-  fullscreen.hidden=!(enterFullscreen&&leaveFullscreen&&(document.fullscreenEnabled??document.webkitFullscreenEnabled));
+  const canFullscreen=enterFullscreen&&leaveFullscreen&&(document.fullscreenEnabled??document.webkitFullscreenEnabled);
+  const canAddToHomeScreen=navigator.standalone===false;
+  fullscreen.hidden=!(canFullscreen||canAddToHomeScreen);
   function fullscreenChanged(){
     fullscreen.textContent=isFullscreen()?'Exit fullscreen':'Fullscreen';
   }
+  function fullscreenHelp(){
+    fullscreenStatus.textContent=canAddToHomeScreen
+      ? 'In Safari, tap Share → Add to Home Screen, then open the game from its icon. Use a save backup to transfer your profile.'
+      : 'Fullscreen is unavailable.';
+    fullscreenStatus.hidden=false;
+    fullscreenStatus.scrollIntoView({block:'nearest'});
+  }
   fullscreen.onclick=async()=>{
+    if(!canFullscreen){fullscreenHelp();return;}
     fullscreenStatus.hidden=true;
     try{
       if(isFullscreen())await leaveFullscreen.call(document);
       else await enterFullscreen.call(page);
       setMenu(false);focusGame();
-    }catch{
-      fullscreenStatus.textContent='Fullscreen is unavailable.';
-      fullscreenStatus.hidden=false;
-    }
+    }catch{fullscreenHelp();}
   };
+  fullscreenChanged();
   for(const event of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(event,fullscreenChanged);
 
   const skyboxOption=find('atmospheric-skyboxes');

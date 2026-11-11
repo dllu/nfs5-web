@@ -1,5 +1,7 @@
 :root { color-scheme: dark; background: #000; color: #eee; font-family: system-ui, sans-serif; }
 body { margin: 0; overflow: hidden; }
+/* Touches between the driving controls land on the page background. */
+body.touch-pad-visible { min-height: 100dvh; touch-action: none; }
 #game { outline: none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 #loading { position: fixed; inset: 0; display: grid; align-content: safe center; justify-items: center; overflow: auto; padding: 24px; background: #090b0d; text-align: center; }
 #loading[hidden], [hidden] { display: none !important; }

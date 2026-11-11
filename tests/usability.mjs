@@ -5,7 +5,7 @@ import {chromium} from 'playwright-core';
 process.env.TMPDIR=resolve('.cache/tmp');process.env.XDG_CACHE_HOME=resolve('.cache/xdg');process.env.__GL_SHADER_DISK_CACHE_PATH=resolve('.cache/nvidia');
 await mkdir(process.env.TMPDIR,{recursive:true});
 const context=await chromium.launchPersistentContext(resolve('.cache/chrome-usability-test'),{
- executablePath:'/usr/bin/google-chrome',headless:false,viewport:{width:1280,height:900},hasTouch:true,
+ executablePath:'/usr/bin/google-chrome',headless:false,viewport:{width:1280,height:900},hasTouch:true,isMobile:true,
  args:['--no-sandbox','--disable-dev-shm-usage','--disable-breakpad','--crash-dumps-dir='+resolve('.cache/crashes')],
 });
 try {
@@ -86,6 +86,18 @@ try {
  await page.setViewportSize({width:430,height:932});
  const b=await boxes(),point=(box,id)=>({x:box.x+box.width/2,y:box.y+box.height/2,id});
  const leftPoint=point(b['Steer left'],11),gasPoint=point(b.Gas,12);
+ const gap=await page.evaluate(()=>({x:innerWidth/2,y:innerHeight-4}));
+ assert.deepEqual(await page.evaluate(({x,y})=>{
+  const target=document.elementFromPoint(x,y);
+  return [target.tagName,getComputedStyle(target).touchAction];
+ },gap),['BODY','none'],'A missed tap lands on a background that suppresses zoom');
+ const scale=await page.evaluate(()=>visualViewport.scale);
+ for(const {x,y} of [gap,gasPoint]){
+  await page.touchscreen.tap(x,y);
+  await page.touchscreen.tap(x,y);
+ }
+ assert.equal(await page.evaluate(()=>visualViewport.scale),scale,'Rapid taps on and around the controls keep the viewport scale');
+ assert.deepEqual(await page.evaluate(()=>window.inputs.filter(e=>e.key===200).slice(-4).map(e=>e.down)),[true,false,true,false]);
  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[leftPoint,gasPoint]});
  await page.waitForTimeout(1000);
  assert.deepEqual(await page.evaluate(()=>[203,200].map(key=>window.inputs.filter(e=>e.key===key).at(-1)?.down)),[true,true],'Steering and gas can be held with separate fingers');
@@ -136,8 +148,25 @@ try {
  assert.deepEqual(price,[3,6,11,11,11,28],'The keyboard also enters and submits a price');
  await action('Pause');await page.waitForTimeout(180);
  assert.deepEqual(await page.evaluate(()=>window.inputs.filter(e=>e.key===1).slice(-2).map(e=>e.down)),[true,false]);
+ if(await page.evaluate(()=>document.fullscreenEnabled)){
+  await page.getByRole('button',{name:'Game menu'}).tap();
+  await page.getByRole('button',{name:'Fullscreen',exact:true}).tap();
+  await page.waitForFunction(()=>document.fullscreenElement===document.documentElement);
+  await page.getByRole('button',{name:'Game menu'}).tap();
+  await page.getByRole('button',{name:'Exit fullscreen',exact:true}).tap();
+  await page.waitForFunction(()=>!document.fullscreenElement);
+ }
+ await page.evaluate(async()=>{
+  Object.defineProperty(document,'fullscreenEnabled',{value:false});
+  Object.defineProperty(navigator,'standalone',{value:false});
+  window.controls.close();
+  const {attachControls}=await import('./controls.mjs');
+  window.controls=attachControls(window.input);
+ });
+ await action('Fullscreen');
+ assert(await page.getByText(/Add to Home Screen/).isVisible(),'iPhone browser mode gets Home Screen instructions');
  await page.evaluate(()=>{window.controls.close();window.input();});
  assert.deepEqual(errors,[]);
  await writeFile('build/usability-input.json',JSON.stringify({events:events.length,touch,errors},null,2)+'\n');
- console.log('Touch input, controls outside the game, layout persistence, text and price entry, Escape, Pause and focus release passed');
+ console.log('Touch input, zoom suppression, mobile fullscreen, layout persistence, text and price entry, Escape, Pause and focus release passed');
 } finally {await context.close();}
