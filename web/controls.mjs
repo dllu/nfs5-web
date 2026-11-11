@@ -13,8 +13,11 @@ export function attachControls(input,{skyboxes,onDiagnostics=()=>{},onDetailChan
     <button id="touch-layout" type="button" hidden>Layout: Joystick</button>
     <button id="show-keyboard" type="button">Keyboard</button>
     <button id="toggle-fullscreen" type="button" hidden>Fullscreen</button>
+    <button type="button" data-backup="download">Download save backup</button>
+    <button type="button" data-backup="upload">Upload save backup</button>
     <button id="show-info" type="button">Info</button>
     <p id="fullscreen-status" role="status" hidden></p>
+    <p class="backup-status" role="status" hidden></p>
     </div>
   </nav>
   <div id="touch-pad" hidden><div id="joystick" role="group" aria-label="Steer and accelerate"><span></span></div>

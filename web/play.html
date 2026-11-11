@@ -7,7 +7,19 @@
 <link rel="stylesheet" href="./play.css">
 <link rel="stylesheet" href="./viewport.css">
 <canvas id="game" width="640" height="480" aria-label="Need for Speed: Porsche Unleashed" tabindex="0"></canvas>
-<div id="loading" role="status"><h1>Porsche Unleashed</h1><p id="status">Loading game…</p><p class="detail">Arrow keys to drive · Space for handbrake · Esc to pause<br>Choose Showroom for all cars and tracks, or create a player.<br>Profiles are saved in this browser. Exit through the game to save your career.</p><button id="retry" hidden>Launch again</button><details id="failure" hidden><summary>Details</summary><pre id="error"></pre></details></div>
-<aside id="notices" aria-live="polite"><p id="performance" hidden></p><p id="sound" hidden>Click or press a key for sound</p></aside>
+<div id="loading">
+  <h1>Porsche Unleashed</h1>
+  <p id="status" role="status">Loading game…</p>
+  <p id="instructions" class="detail">Arrow keys to drive · Space for handbrake · Esc to pause<br>Choose Showroom for all cars and tracks, or create a player.<br>Profiles are saved in this browser. Exit through the game to save your career.</p>
+  <button id="retry" type="button" hidden>Launch again</button>
+  <div id="backup-actions" hidden>
+    <button type="button" data-backup="download">Download save backup</button>
+    <button type="button" data-backup="upload">Upload save backup</button>
+  </div>
+  <p class="backup-status" role="status" hidden></p>
+  <details id="failure" hidden><summary>Details</summary><pre id="error"></pre></details>
+</div>
+<input id="backup-file" type="file" accept=".json,application/json" hidden>
+<aside id="notices" aria-live="polite"><p id="performance" hidden></p><p id="sound" hidden>Click or press a key for sound</p><p id="save-warning" hidden></p></aside>
 <script type="module" src="./play.mjs"></script>
 </html>

@@ -1,5 +1,5 @@
 import createEngine from './engine.js';
-import { openStorage } from './storage.mjs';
+import { openStorage, SaveReplacedError } from './storage.mjs';
 import { attachAudio } from './audio.mjs';
 import { attachGraphics } from './graphics.mjs';
 import {openingMovies,verokImage,softwareViewport,sceneDetail,sceneDetailMode} from './config.mjs';
@@ -10,7 +10,7 @@ import {attachStream} from './streaming.mjs';
 export const hex = value => (value >>> 0).toString(16).padStart(8, '0');
 const soundBufferFields=['address','flags','bytes','rate','channels','bits','playing','looping','playCursor','writeCursor'];
 
-export async function loadRuntime({ log = () => {}, read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, detail='auto', skyboxes=false, softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
+export async function loadRuntime({ log = () => {}, onSaveError = error => log(`Local save failed: ${error.message}`), read = fetch, persist = true, audio, display, canvas, onResize, pace, intro, detail='auto', skyboxes=false, softwarePixelLimit=0,touchPixelLimit=0 } = {}) {
   const started=performance.now();
   const [module, manifest, response, assets] = await Promise.all([
     createEngine({ print: log, printErr: log }).then(trackHeap),
@@ -122,18 +122,26 @@ export async function loadRuntime({ log = () => {}, read = fetch, persist = true
     if(sha256===verokImage)module._web_intro_config(intro?1:0);
   } catch (error) { storage?.close(); module.PThread.terminateAllThreads(); throw error; }
   const streaming=await attachStream(module,assets,ids,log);
-  let saving = Promise.resolve(), disposed = false;
+  let saving = Promise.resolve(), disposed = false, replaced;
   function checkpoint() {
     if (!storage || disposed) return Promise.resolve();
     const operation = saving.catch(() => {}).then(async () => {
       if (disposed) return;
+      if (replaced) throw replaced;
       const { revision, records } = changes();
-      await storage.save(records);
+      try { await storage.save(records); }
+      catch (error) {
+        if (error instanceof SaveReplacedError) {
+          replaced = error;
+          clearInterval(storageTimer);
+        }
+        throw error;
+      }
       module._web_fs_acknowledge(revision);
     });
     saving = operation; return operation;
   }
-  const storageTimer = storage ? setInterval(() => checkpoint().catch(error => log(`Local save failed: ${error.message}`)), 1000) : null;
+  const storageTimer = storage ? setInterval(() => checkpoint().catch(onSaveError), 1000) : null;
   const detachAudio = audio ? attachAudio(module, audio) : null;
   let graphics;
   try { graphics=canvas?await attachGraphics(module,canvas,{onResize,pace,frontendSize:display?{...display}:null}):null; }

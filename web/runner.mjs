@@ -1,6 +1,7 @@
 import { loadRuntime } from './runtime.mjs';
 
 let runtime,visible=true,focused=true;
+const log=text=>self.postMessage({type:'log',text});
 self.onmessage = async ({ data }) => {
   if(data.type==='visibility'){visible=data.visible;runtime?.graphics?.setVisible(visible);return;}
   if(data.type==='focus'){focused=data.focused;runtime?.graphics?.setFocused(focused);return;}
@@ -14,11 +15,22 @@ self.onmessage = async ({ data }) => {
     self.postMessage({type:'diagnostics',info:r?.info,logical:r&&[r.width,r.height],output:r&&[r.outputWidth,r.outputHeight],wasmBytes:m?.HEAPU8.byteLength,heap:runtime?.heapStats(),stats:r?.stats,transport:{...runtime?.graphics?.stats,producerPackets:queue?.[5],producerNotifications:queue?.[6]},submissionIntervalsMs:r?.timing(),loading:runtime?.loading,detail:runtime?.detailStats(),skyboxes:runtime?.skyboxes,files,fileActivity:runtime?.fileActivity(),pacing:runtime?.graphics?.pacing,streaming:runtime?.streamingStats(),audio:runtime?.audioStats(),capabilities:{waitAsync:typeof Atomics.waitAsync==='function',schedulerYield:typeof scheduler!=='undefined'&&!!scheduler.yield}});return;
   }
   if (data.type === 'input') { runtime?.input(data); return; }
-  if(data.type==='checkpoint'){await runtime?.checkpoint().catch(error=>self.postMessage({type:'save-error',error:String(error)}));return;}
+  if(data.type==='checkpoint'){
+    try {
+      await runtime?.checkpoint();
+      if(data.reply)self.postMessage({type:'checkpoint-result',reply:data.reply});
+    } catch(error) {
+      self.postMessage({type:data.reply?'checkpoint-result':'save-error',reply:data.reply,error:error.message});
+    }
+    return;
+  }
   if (data.type === 'stop') { runtime?.stop();return; }
   if (data.type !== 'start' || runtime) return;
   try {
-    runtime = await loadRuntime({ log: text => self.postMessage({ type: 'log', text }), audio: data.audio, display: data.display,
+    runtime = await loadRuntime({ log, onSaveError:error=>{
+      log(`Local save failed: ${error.message}`);
+      self.postMessage({type:'save-error',error:error.message});
+    }, audio: data.audio, display: data.display,
       intro:data.intro,detail:data.detail,skyboxes:data.skyboxes,softwarePixelLimit:data.softwarePixelLimit,touchPixelLimit:data.touchPixelLimit,canvas:data.canvas,onResize:(width,height)=>self.postMessage({type:'screen',width,height}) });
     runtime.graphics?.setVisible(visible);
     runtime.graphics?.setFocused(focused);

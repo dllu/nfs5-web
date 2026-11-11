@@ -30,16 +30,19 @@ In landscape they sit on either side. Gas is above brake in both layouts.
 Holding driving controls suppresses text selection and the iOS touch callout.
 Safari uses the playback audio-session type for sound with Silent Mode enabled.
 
-Profiles, graphics preferences and other file changes stay in IndexedDB in
-this browser, per site and executable. **Exit through the game's menus to
-serialize career progress.** Written files checkpoint every second and when
-the tab is hidden. Clearing site data deletes local progress; closing abruptly
-can lose unsaved changes. A browser confirmation guards tab close/reload until
-the game exits normally; browsers control its wording and may omit it on mobile.
-Deleting a supplied profile is persistent too. Losing focus releases held
-controls and keeps loading/simulation running at 30 Hz using an independent
-worker clock. Hidden tabs render offscreen without acquiring a compositor
-surface. An animation-callback watchdog handles obscured windows too. Menus
+Profiles, in-game settings and other file changes stay in IndexedDB in this
+browser, per site and executable. **Exit through the game's menus to save career
+progress.** Written files checkpoint every second and when the tab is hidden.
+Use **Download save backup** in the Game menu or on the quit screen to keep a
+copy. **Upload save backup** restores that file on another browser or device
+running the same game executable. Confirming a restore replaces local profiles
+and in-game settings and restarts the game. Backups also preserve profile
+deletions. View distance, skybox and touch layout choices stay in each browser.
+Clearing site data deletes local progress. A browser confirmation guards tab
+close/reload until the game exits normally, though browsers may omit it on mobile.
+Losing focus releases held controls and keeps loading/simulation running at
+30 Hz using an independent worker clock. Hidden tabs render offscreen without
+acquiring a compositor surface. An animation-callback watchdog handles obscured windows too. Menus
 redraw at up to 60 Hz; focused races follow the display refresh. Browser/OS
 suspension can still stop background tabs.
 
@@ -232,8 +235,9 @@ The optional skybox payloads load on demand when selected.
 
 With the public preview running, `npm run test:public` checks direct launch,
 blank-profile defaults, mobile name entry, native-density 4:3 output, adapter
-diagnostics, tab-close confirmation and persistence across a browser restart. This
-check uses Python Pillow for rendered-screen readiness. Set `NFS5_PUBLIC_URL`
+diagnostics, tab-close confirmation, persistence across a browser restart, and
+backup and restore from both screens. The check uses Python Pillow for
+rendered-screen readiness. Set `NFS5_PUBLIC_URL`
 to run it against the deployment instead.
 
 The public packager includes only referenced assets, strips installation

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {chromium} from 'playwright-core';
 import {execFileSync} from 'node:child_process';
@@ -25,19 +25,25 @@ async function colors(points) {
     "import io,json,sys; from PIL import Image; im=Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGB'); print(json.dumps([im.getpixel((round(x*im.width/640),round(y*im.height/480))) for x,y in json.loads(sys.argv[1])]))",JSON.stringify(points)],
     {input:await page.locator('#game').screenshot(),maxBuffer:1024*1024}).toString());
 }
-async function ready() {
-  await page.goto(url);
+async function waitForChooser() {
   await page.waitForFunction(()=>document.querySelector('#loading').hidden,null,{timeout:90000});
   // Observe rendered buttons: first mode change and loading artwork precede
   // the actual chooser, particularly on an uncached remote connection.
-  const deadline=Date.now()+90000;let stable=0;
+  await waitForRedButtons([[250,353],[250,377],[250,400]],'The original profile chooser did not become ready',90000);
+}
+async function waitForRedButtons(points,error,timeout=15000) {
+  const deadline=Date.now()+timeout;let stable=0;
   while(Date.now()<deadline) {
-    const samples=await colors([[250,353],[250,377],[250,400]]);
+    const samples=await colors(points);
     if(samples.every(([r,g,b])=>r>130&&b<40&&g<r)) {if(++stable===2)return;}
     else stable=0;
     await page.waitForTimeout(500);
   }
-  throw new Error('The original profile chooser did not become ready');
+  throw new Error(error);
+}
+async function ready() {
+  await page.goto(url);
+  await waitForChooser();
 }
 async function click(x,y) {
   const box=await page.locator('#game').boundingBox();
@@ -49,6 +55,30 @@ async function click(x,y) {
 async function action(name) {
   await page.getByRole('button',{name:'Game menu'}).click();
   await page.getByRole('button',{name,exact:true}).click();
+}
+async function backupButton(kind, inGame) {
+  if(inGame&&await page.locator('#game-actions').isHidden())await page.getByRole('button',{name:'Game menu'}).click();
+  await page.getByRole('button',{name:kind+' save backup',exact:true}).click();
+}
+async function downloadBackup(inGame) {
+  const event=page.waitForEvent('download');
+  await backupButton('Download',inGame);
+  const download=await event;
+  assert.match(download.suggestedFilename(),/^nfs5-saves-\d{4}-\d{2}-\d{2}\.json$/);
+  const backup=JSON.parse(await readFile(await download.path(),'utf8'));
+  await download.delete();
+  return backup;
+}
+async function uploadBackup(backup, inGame) {
+  const event=page.waitForEvent('filechooser');
+  await backupButton('Upload',inGame);
+  await (await event).setFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(backup)});
+}
+function confirmRestore(accept) {
+  return page.waitForEvent('dialog').then(async dialog=>{
+    assert.equal(dialog.type(),'confirm');
+    if(accept)await dialog.accept();else await dialog.dismiss();
+  });
 }
 async function saved() {
   return page.evaluate(async()=>{
@@ -192,9 +222,36 @@ try {
   assert.equal(await page.locator('#touch-pad').getAttribute('data-layout'),'buttons','Touch layout survives a full browser restart');
   const restored=await saved();assert.deepEqual(restored,first,'Profile bytes survive a full browser restart');
   await page.screenshot({path:'build/public-test-restored.png'});
+  const backup=await downloadBackup(true);
+  const profile=backup.files.find(record=>record.path===first.path);
+  assert(profile?.live&&Buffer.from(profile.data,'base64').length===first.size);
+  await uploadBackup('{bad JSON',true);
+  await page.waitForFunction(()=>document.querySelector('#game-actions .backup-status').textContent.startsWith('Restore failed.'));
+  assert.deepEqual(await saved(),first,'Invalid backups leave the saved profile untouched');
+  const deletion={path:'C:\\nfs5\\SaveData\\0Removed.sav',live:false,attributes:32,size:0,modifiedLow:0,modifiedHigh:0,data:null};
+  const replacement=JSON.stringify({...backup,files:[deletion]});
+  const cancel=confirmRestore(false);
+  await uploadBackup(replacement,true);await cancel;
+  assert.deepEqual(await saved(),first,'Cancelling a restore leaves the saved profile untouched');
+  const accept=confirmRestore(true);
+  const restart=page.waitForEvent('domcontentloaded');
+  await uploadBackup(replacement,true);await accept;await restart;await waitForChooser();
+  assert.equal(await saved(),null,'Restoring from the Game menu replaces the overlay and relaunches');
+  await click(320,400);
+  await waitForRedButtons([[295,55]],'Continuing from the chooser did not open the main menu');
+  await click(603,467);
+  await waitForRedButtons([[288,244],[288,266]],'Exit did not open the confirmation');
+  await click(320,244);
+  await page.getByText('Game saved. See you on the road.',{exact:true}).waitFor({timeout:30000});
+  const afterQuit=await downloadBackup(false);
+  assert(!afterQuit.files.some(record=>record.path===first.path));
+  assert.deepEqual(afterQuit.files.find(record=>record.path===deletion.path),deletion,'Backups preserve deletion records');
+  const acceptAfterQuit=confirmRestore(true), relaunch=page.waitForEvent('domcontentloaded');
+  await uploadBackup(JSON.stringify(backup),false);await acceptAfterQuit;await relaunch;await waitForChooser();
+  assert.deepEqual(await saved(),first,'Uploading from the quit screen restores the exact original profile');
   assert.deepEqual(errors,[]);
   await writeFile('build/public-test.json',JSON.stringify({url,seed,first,restored,errors},null,2)+'\n');
-  console.log('Public autostart, fullscreen, completed seed, fresh profile, skybox selection and browser-restart persistence passed');
+  console.log('Public autostart, fullscreen, completed seed, fresh profile, skyboxes, browser-restart persistence and backup/restore passed');
 } catch(error) {
   await page?.screenshot({path:'build/public-test-failure.png'}).catch(()=>{});
   throw error;
