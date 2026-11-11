@@ -15,7 +15,7 @@ export async function readAssets(read,log=()=>{},useSkyboxes=false) {
   const pack=index.preload?read(index.preload.url).then(async response=>{
     if(!response.ok)throw new Error(`HTTP ${response.status}`);
     const bytes=new Uint8Array(await response.arrayBuffer());
-    if(bytes.length!==index.preload.size||bytes.length>16*1024*1024)throw new Error('Invalid startup pack size');
+    if(bytes.length!==index.preload.size||bytes.length>32*1024*1024)throw new Error('Invalid startup pack size');
     const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
     if(digest!==index.preload.sha256)throw new Error('Invalid startup pack hash');
     return bytes;

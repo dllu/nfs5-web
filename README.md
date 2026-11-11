@@ -94,8 +94,9 @@ It also reports startup/preload timing, file requests, music read-ahead hits,
 audio context/session state, signal peak and refill activity,
 state-cache hits/misses and the last 600 submission intervals
 (median, p95, p99, maximum and counts over 33 ms), reset on size/visibility changes.
-The last 32 long frames include GPU/readback wait measurements; recent ordinary
-file reads include paths, timestamps, durations and calling guest threads.
+The last 32 long frames reset with the interval history and include GPU/readback
+wait measurements; recent ordinary file reads include paths, timestamps,
+durations and calling guest threads.
 When WebGPU reports a software adapter, the public page reduces the default
 race mode to about 720p worth of pixels, preserving aspect and the minimum
 640×480 mode, and briefly explains that hardware acceleration is preferable.
@@ -132,7 +133,7 @@ uses the latest completed GPU sample, usually one frame old, with one query in
 flight per sun. Loading-screen locks sample the logical UI pixels on the GPU
 before transfer. Full-resolution framebuffer reads remain available.
 At most four small GPU readback buffers are retained for reuse; large screenshot
-buffers are released after each read.
+buffers are released after each read. Framebuffer texture views are reused until resize.
 Sun/light sprite rotation
 uses the original 640×480 angular scale rather than increasing with resolution.
 **Sustained 4K/120 Hz remains a target, not a verified result.** Microstutters,
@@ -143,8 +144,10 @@ overhead, but occasional long frames remain. Audio refills reuse the thread
 already holding the VM lock; host refill ticks skip a busy VM instead of blocking
 the graphics worker. No Wine reference runs are needed for normal work.
 
-Public startup batches small assets and music headers/tails into an approximately
-10 MiB pack (3.6 MiB compressed), downloaded alongside Wasm compilation.
+Public startup batches small assets, track sound effects and music headers/tails
+into an approximately 20 MiB pack (11.3 MiB compressed), downloaded alongside
+Wasm compilation. Track sound effects stay resident throughout a race, avoiding
+synchronous downloads when random effects outgrow the ordinary file cache.
 Larger files use byte ranges with an eight-page, 256 KiB/page cache. Contiguous
 cold pages requested by a single read share one transfer of up to 2 MiB.
 Writable browser saves override immutable preloads. Downloads stage privately

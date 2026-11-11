@@ -12,10 +12,14 @@ const url=process.env.NFS5_PUBLIC_URL??'http://127.0.0.1:8001/';
 const options={executablePath:'/usr/bin/google-chrome',headless:false,
   viewport:{width:1440,height:1080},args:['--no-sandbox','--disable-dev-shm-usage','--disable-breakpad',
     '--crash-dumps-dir='+resolve('.cache/crashes')]};
-let browser,page;const errors=[];
+let browser,page;const errors=[],soundRequests=[];
 async function open() {
   browser=await chromium.launchPersistentContext(resolve('.cache/chrome-public-test'),options);
   page=await browser.newPage();
+  const index=await (await page.request.get(new URL('assets.json',url).href)).json();
+  const sound=index.entries.find(e=>e.path.toLowerCase()==='gamedata/sounds/track.viv');
+  const soundUrl=new URL(sound.url,url).href;
+  page.on('request',request=>{if(request.url()===soundUrl)soundRequests.push(request.url());});
   const session=await browser.newCDPSession(page);
   await session.send('Emulation.setFocusEmulationEnabled',{enabled:true});
   page.on('pageerror',error=>errors.push(String(error)));
@@ -189,9 +193,13 @@ try {
   await page.getByLabel('View distance').selectOption('very-far');
   await page.waitForFunction(()=>JSON.parse(document.querySelector('#game-info pre').textContent).detail.multiplier===4);
   assert.equal(await page.evaluate(()=>localStorage.getItem('nfs5-scene-detail')),'very-far');
-  assert.equal(diagnostics.wasmBytes,384*1024*1024);assert.equal(diagnostics.info.software,false);
+  assert(diagnostics.wasmBytes>=384*1024*1024&&diagnostics.wasmBytes%(16*1024*1024)===0,'Diagnostics report the shared Wasm capacity in its allocation increments');
+  assert.equal(diagnostics.info.software,false);
   assert(diagnostics.transport.stateHits>0&&diagnostics.transport.stateMisses>0,'Diagnostics expose state reuse');
-  assert(diagnostics.loading.preloadedFiles>900&&diagnostics.loading.preloadBytes<16*1024*1024,'Small assets are batched in a bounded startup pack');
+  assert(diagnostics.loading.preloadedFiles>900&&diagnostics.loading.preloadBytes<32*1024*1024,'Small assets and track sounds are batched in a bounded startup pack');
+  const assetIndex=await (await page.request.get(new URL('assets.json',url).href)).json();
+  const trackSounds=assetIndex.entries.find(e=>e.path.toLowerCase()==='gamedata/sounds/track.viv');
+  assert(Number.isInteger(trackSounds?.preloadOffset)&&trackSounds.preloadOffset+trackSounds.size<=diagnostics.loading.preloadBytes,'Race sound effects remain resident instead of competing with streamed music for cache pages');
   assert(diagnostics.files.preloadedReads>0,'The original game reads preloaded assets');
   const {heap}=diagnostics;
   assert(heap.liveBytes>0&&heap.liveSpan+heap.freeSpan+heap.tailBytes===heap.limit-heap.start,'Diagnostics account for the guest heap');
@@ -283,6 +291,7 @@ try {
   }
   await page.setViewportSize(windowed);
   await waitForRaceSize(windowed);
+  assert.deepEqual(soundRequests,[],'Track sound effects never require individual HTTP reads during menus, restarts or race loading');
   assert.deepEqual(errors,[]);
   await writeFile('build/public-test.json',JSON.stringify({url,seed,first,restored,errors},null,2)+'\n');
   console.log('Public autostart, fullscreen race resizing, completed seed, fresh profile, skyboxes, browser-restart persistence and backup/restore passed');

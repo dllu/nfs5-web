@@ -836,15 +836,16 @@ try {
       if(output.length!==1440*1080*4||logical.length!==640*480*4)throw new Error('Readback coordinate spaces disagree');
       const pixel=(bytes,x,y,width)=>Array.from(bytes.slice((y*width+x)*4,(y*width+x)*4+4)).join();
       if(pixel(output,226,226,1440)!=='0,255,0,255'||pixel(output,224,226,1440)!=='0,0,0,255'||pixel(logical,101,101,640)!=='0,255,0,255')throw new Error('Scaled clear/scissor or downsampling failed');
-      for(let i=0;i<8;i++){r.present();await r.frameBudget();}
+      for(let i=0;i<8;i++){if(i===4)await new Promise(resolve=>setTimeout(resolve,40));r.present();await r.frameBudget();}
       await r.validate();if(r.stats.peakPendingFrames>2)throw new Error('GPU frame budget exceeded');
       if(r.timing().samples!==7||r.timing().p99<0)throw new Error('Submission timing history is invalid');
+      if(!r.timing().recentLongFrames.length)throw new Error('Long frame history did not capture the deliberate pause');
       const canvasFrames=r.stats.canvasFrames;
       for(let i=0;i<4;i++){r.present(false);await r.frameBudget();}
       if(r.stats.canvasFrames!==canvasFrames||r.stats.frames!==12)throw new Error('Hidden frames must retain GPU progress without acquiring a compositor surface');
       const result={logical:[r.width,r.height],output:[canvas.width,canvas.height],peakPendingFrames:r.stats.peakPendingFrames,errors:r.errors.slice()};
       r.resize(1920,1080);if(canvas.width!==1920||canvas.height!==1080)throw new Error('Race geometry was resized as frontend');
-      if(r.timing().samples!==0)throw new Error('Race timing retained menu/loading intervals');
+      if(r.timing().samples!==0||r.timing().recentLongFrames.length)throw new Error('Race timing retained menu/loading intervals');
       return result;
     } finally{r.close();canvas.remove();}
   });
@@ -853,8 +854,8 @@ try {
     const {loadRuntime}=await import('./runtime.mjs'),canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;document.body.append(canvas);
     const r=await loadRuntime({canvas,persist:false,display:{width:2796,height:1290},touchPixelLimit:1440*810});
     try{
-      if(r.display.width!==1590||r.display.height!==733||!r.reducedResolution)throw new Error('Touch race pixel budget was not applied');
-      if(r.graphics.renderer.outputHeight!==1290)throw new Error('Touch race budget reduced frontend density');
+      if(r.display.width!==1244||r.display.height!==933||!r.reducedResolution)throw new Error('Touch race pixel budget was not applied');
+      if(r.graphics.renderer.outputWidth!==1244||r.graphics.renderer.outputHeight!==933)throw new Error('Frontend did not follow the fitted touch viewport');
       return {display:r.display,frontend:[r.graphics.renderer.outputWidth,r.graphics.renderer.outputHeight]};
     }finally{r.dispose();canvas.remove();}
   });

@@ -175,11 +175,13 @@ def main():
     for path in (destination / 'assets').iterdir():
         if path.name not in referenced:
             path.unlink()
-    # Small files otherwise cost hundreds of serial HTTP round trips. Keep a
-    # bounded immutable pack separate from the writable/profile overlay.
+    # Small files otherwise cost hundreds of serial HTTP round trips. Track
+    # effects are random reads throughout a race and outgrow the ordinary page
+    # cache, so keep that bounded archive resident too.
     pack=bytearray();packed={}
     for entry in index['entries']:
-        if entry.get('url') and entry['size']<=65536:
+        if entry.get('url') and (entry['size']<=65536 or
+                (entry['path'].lower()=='gamedata/sounds/track.viv' and entry['size']<=12*1024*1024)):
             if entry['url'] not in packed:
                 packed[entry['url']]=len(pack)
                 pack.extend((destination/entry['url']).read_bytes())
@@ -202,6 +204,8 @@ def main():
         if size>65536:pin(offset+size-4096,4096)
     pin(0,cursor)
     index['music']={'path':music['path'],'tracks':tracks}
+    if len(pack)>32*1024*1024:
+        raise ValueError('Startup pack exceeds its 32 MiB runtime limit')
     digest=hashlib.sha256(pack).hexdigest()
     (destination/'assets'/digest).write_bytes(pack)
     (destination/'assets'/(digest+'.gz')).write_bytes(gzip.compress(pack,compresslevel=9,mtime=0))

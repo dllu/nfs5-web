@@ -104,13 +104,13 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
   const readBuffers=[],longFrames=[];let previousGpuWait=0,previousReadbackWait=0;
   const frames=[];
   const intervals=new Float64Array(600);let intervalCount=0,lastPresent=0;
-  function resetTiming(){intervalCount=0;lastPresent=0;}
+  function resetTiming(){intervalCount=0;lastPresent=0;longFrames.length=0;previousGpuWait=stats.gpuWaitMs;previousReadbackWait=stats.readbackWaitMs;}
   function timing(){
     const values=Array.from(intervals.subarray(0,Math.min(intervalCount,intervals.length))).sort((a,b)=>a-b);
     const percentile=f=>values[Math.min(values.length-1,Math.floor(values.length*f))]??0;
     return {samples:values.length,p50:percentile(.5),p95:percentile(.95),p99:percentile(.99),max:values.at(-1)??0,over33ms:values.filter(v=>v>1000/30).length,recentLongFrames:longFrames.slice()};
   }
-  let width = 0, height = 0, outputWidth=0, outputHeight=0, color, depth, presentGroup, readSurface,readGroup,readWidth=0,readHeight=0;
+  let width = 0, height = 0, outputWidth=0, outputHeight=0, color, depth, colorView, depthView, presentGroup, readSurface,readGroup,readWidth=0,readHeight=0;
   let vertices = new Uint8Array(512 * 1024), indices = new Uint32Array(32768), uniforms = new Float32Array(64 * 1024);
   let vertexBytes = 0, indexCount = 0, uniformBytes = 0, operations = [], imageStrip;
   const uniformOffsets=new Map();
@@ -197,8 +197,8 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
       device.queue.writeBuffer(uniformBuffer, 0, uniforms, 0, uniformBytes / 4);
     }
     const encoder = target ?? device.createCommandEncoder(); let pass,bound,pipelineBound,uniformBound,textureBound,stencilBound,scissorBound;
-    const begin = clear => encoder.beginRenderPass({ colorAttachments: [{ view: color.createView(), loadOp: clear?.mask&1 ? 'clear' : 'load', storeOp: 'store', clearValue: clear ? rgba(clear.color) : [0,0,0,1] }],
-      depthStencilAttachment: { view:depth.createView(),depthLoadOp:clear?.mask&2?'clear':'load',depthStoreOp:'store',depthClearValue:clear?Math.max(0,Math.min(1,clear.depth)):1,
+    const begin = clear => encoder.beginRenderPass({ colorAttachments: [{ view: colorView, loadOp: clear?.mask&1 ? 'clear' : 'load', storeOp: 'store', clearValue: clear ? rgba(clear.color) : [0,0,0,1] }],
+      depthStencilAttachment: { view:depthView,depthLoadOp:clear?.mask&2?'clear':'load',depthStoreOp:'store',depthClearValue:clear?Math.max(0,Math.min(1,clear.depth)):1,
         stencilLoadOp:clear?.mask&4?'clear':'load',stencilStoreOp:'store',stencilClearValue:clear?.stencil??0 } });
     for (const operation of operations) {
       if (operation.type === 'clear') { pass?.end(); pass = begin(operation);bound=false;pipelineBound=uniformBound=textureBound=stencilBound=scissorBound=undefined;continue; }
@@ -237,7 +237,8 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
     width = w; height = h;outputWidth=ow;outputHeight=oh;canvas.width=ow;canvas.height=oh;resetTiming();
     color = device.createTexture({ size: [ow,oh], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
     depth = device.createTexture({ size: [ow,oh], format:depthFormat,usage:GPUTextureUsage.RENDER_ATTACHMENT });
-    presentGroup = device.createBindGroup({ layout: presentPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: color.createView() }, { binding: 1, resource: presentSampler }] });
+    colorView=color.createView();depthView=depth.createView();
+    presentGroup = device.createBindGroup({ layout: presentPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: colorView }, { binding: 1, resource: presentSampler }] });
     operations.push({ type: 'clear', color: 0xff000000, depth: 1,stencil:0,mask:7 }); onResize(w,h);
   }
   function clear(color, depth = 1, {mask=7,stencil=0,rect}={}) {
@@ -391,7 +392,7 @@ export async function createRenderer(canvas, { onResize = () => {}, onError = ()
         readSurface?.destroy();readWidth=sw;readHeight=sh;
         readSurface=device.createTexture({size:[sw,sh],format:'rgba8unorm',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
         device.queue.writeBuffer(readExtent,0,Uint32Array.of(sw,sh));
-        readGroup=device.createBindGroup({layout:readPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:color.createView()},{binding:1,resource:{buffer:readExtent}}]});
+        readGroup=device.createBindGroup({layout:readPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:colorView},{binding:1,resource:{buffer:readExtent}}]});
       }
       const pass=encoder.beginRenderPass({colorAttachments:[{view:readSurface.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,1]}]});
       pass.setPipeline(readPipeline);pass.setBindGroup(0,readGroup);pass.draw(3);pass.end();sourceTexture=readSurface;
